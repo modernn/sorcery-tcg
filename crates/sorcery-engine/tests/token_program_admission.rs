@@ -215,3 +215,39 @@ fn artifact_absent_cost_is_not_zero_or_missing_cost() {
     non_token.as_object_mut().unwrap().remove("token");
     assert!(parse_card_definition("not-token", &non_token).is_err());
 }
+
+#[test]
+fn carried_conjure_requires_unit_destination_and_carriable_artifact() {
+    let mut carried = conjure("token");
+    carried["placement"] = json!("carried");
+    let valid = selfplay_manifest_with(7114, |m| {
+        m["cards"]["north-spell-1"] = magic(&[carried.clone()]);
+        m["cards"]["token"] = artifact_token();
+    });
+    Game::from_manifest_json(&valid).expect("carried source admitted");
+    for destination in ["location", "chosen-location"] {
+        let invalid = selfplay_manifest_with(7114, |m| {
+            let mut effect = carried.clone();
+            effect["destination"] = json!(destination);
+            m["cards"]["north-spell-1"] = magic(&[effect]);
+            m["cards"]["token"] = artifact_token();
+        });
+        rejected(&invalid, "carried placement requires a unit destination");
+    }
+    let immovable = selfplay_manifest_with(7114, |m| {
+        m["cards"]["north-spell-1"] = magic(&[conjure("token"), carried.clone()]);
+        m["cards"]["token"] = artifact_token();
+        m["cards"]["token"]["cannotBeCarried"] = json!(true);
+    });
+    rejected(
+        &immovable,
+        "carried token must reference a carriable artifact",
+    );
+    let minion = selfplay_manifest_with(7114, |m| {
+        let mut effect = summon("token");
+        effect["placement"] = json!("carried");
+        m["cards"]["north-spell-1"] = magic(&[effect]);
+        m["cards"]["token"] = token_minion(None);
+    });
+    rejected(&minion, "unknown field");
+}

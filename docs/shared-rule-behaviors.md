@@ -111,13 +111,17 @@ places an entire simultaneous token group; pending choices share the same engine
 action, checkpoint, and replay lifecycle as ordinary unit choices.
 
 `ConjureToken` uses the same destination bindings, ordinary location choices,
-identity generation, and dependency validation to create loose artifact tokens.
+identity generation, and dependency validation to create artifact tokens. Placement
+defaults to loose; `placement: "carried"` creates them already held by the source,
+chosen, or targeted unit without taking a pickup action. An oversized bearer uses
+the ordinary location choice to select one occupied cell. The creator owns the token;
+its controller follows the bearer. Stale bearer references cannot attach new tokens.
 The operation requires an artifact token; `SummonToken` and legacy summoning facts
 still require minion tokens. Artifact tokens use ordinary artifact positions,
 pickup/drop, bearer relationships, and zone exits. Lower-region or void occupancy
 follows artifact rules rather than minion survival rules. Destruction, sacrifice,
 and return-to-hand banish tokens instead of inserting them into another zone.
-Direct acquisition by a bearer and composable bearer strike modifiers are still
+Unsuppressible entry-time equipment and composable bearer strike modifiers are still
 needed before the old Lance counter can be removed or new Lance cards admitted.
 
 Token definitions preserve an absent printed mana cost as explicit `null`, distinct

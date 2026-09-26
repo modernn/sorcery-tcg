@@ -65,7 +65,24 @@ impl AbilityProgram {
                     token,
                     count,
                     destination,
+                    ..
                 } => {
+                    if matches!(
+                        effect,
+                        Effect::ConjureToken {
+                            placement: ArtifactTokenPlacement::Carried,
+                            ..
+                        }
+                    ) && !matches!(
+                        destination,
+                        TokenDestination::Source
+                            | TokenDestination::Chosen
+                            | TokenDestination::Target
+                    ) {
+                        return Err(format!(
+                            "{path}.carried placement requires a unit destination"
+                        ));
+                    }
                     if token.is_empty() || token.len() > 256 {
                         return Err(format!("{path}.token must be a card reference"));
                     }
@@ -178,14 +195,17 @@ impl AbilityProgram {
     }
 
     /// Card definitions required by this program, including multiple token kinds.
-    pub fn token_references(&self) -> impl Iterator<Item = (&str, crate::deck::CardType)> {
+    pub fn token_references(&self) -> impl Iterator<Item = (&str, TokenRequirement)> {
         self.effects.iter().filter_map(|effect| match effect {
-            Effect::SummonToken { token, .. } => {
-                Some((token.as_str(), crate::deck::CardType::Minion))
-            }
-            Effect::ConjureToken { token, .. } => {
-                Some((token.as_str(), crate::deck::CardType::Artifact))
-            }
+            Effect::SummonToken { token, .. } => Some((token.as_str(), TokenRequirement::Minion)),
+            Effect::ConjureToken {
+                token, placement, ..
+            } => Some((
+                token.as_str(),
+                TokenRequirement::Artifact {
+                    carried: *placement == ArtifactTokenPlacement::Carried,
+                },
+            )),
             _ => None,
         })
     }
@@ -457,11 +477,38 @@ pub enum TokenDestination {
     ChosenLocation,
 }
 
+/// The kind and placement capability required of a referenced token definition.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TokenRequirement {
+    /// A summonable token minion.
+    Minion,
+    /// A conjurable artifact, optionally required to be carriable.
+    Artifact { carried: bool },
+}
+
+/// Initial holding relationship for a conjured artifact token.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ArtifactTokenPlacement {
+    /// Enter loose at the bound location.
+    #[default]
+    Loose,
+    /// Enter carried by the bound unit at the chosen occupied location.
+    Carried,
+}
+
+impl ArtifactTokenPlacement {
+    #[allow(clippy::trivially_copy_pass_by_ref)] // Serde skip predicate takes a reference.
+    fn is_loose(&self) -> bool {
+        *self == Self::Loose
+    }
+}
+
 /// One executable operation in an ordered ability program.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "op", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Effect {
-    /// Conjures a simultaneous group of loose artifact tokens at a bound location.
+    /// Conjures a simultaneous group of artifact tokens at a bound location.
     ConjureToken {
         /// Referenced token artifact definition.
         token: String,
@@ -469,6 +516,9 @@ pub enum Effect {
         count: u8,
         /// Location binding used for entry.
         destination: TokenDestination,
+        /// Create the artifact loose or already carried, without taking a pickup action.
+        #[serde(default, skip_serializing_if = "ArtifactTokenPlacement::is_loose")]
+        placement: ArtifactTokenPlacement,
     },
     /// Creates a simultaneous group of tokens at a bound location.
     SummonToken {

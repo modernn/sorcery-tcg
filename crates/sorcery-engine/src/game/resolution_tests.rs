@@ -660,9 +660,8 @@ fn token_destinations_respect_declared_protection_and_entry_barriers_then_draw()
     }
 }
 
-#[test]
-fn token_location_choice_uses_the_live_host_footprint_and_rejects_a_new_incarnation() {
-    let encoded = selfplay_manifest_with(8413, |manifest| {
+fn token_location_manifest(carried: bool) -> String {
+    selfplay_manifest_with(8413, |manifest| {
         manifest["cards"]["north-spell-1"] = json!({
             "cardType":"magic", "manaCost":0,
             "thresholds":{"air":0,"earth":0,"fire":0,"water":0},
@@ -676,64 +675,96 @@ fn token_location_choice_uses_the_live_host_footprint_and_rejects_a_new_incarnat
             "cardType":"minion","attack":0,"defense":1,"manaCost":null,"token":true,
             "thresholds":{"air":0,"earth":0,"fire":0,"water":0}
         });
-        manifest["cards"]["south-spell-1"]["occupiesSquareArea"] = json!(2);
-    });
-    let (mut game, magic_id) = setup_fixture(Game::from_manifest_json(&encoded).unwrap(), false);
-    game.position.units.truncate(1);
-    let cells = ["B3", "C3", "B4", "C4"].map(|cell| Cell::parse(cell).unwrap());
-    game.position.units[0].location = cells[0];
-    game.position.units[0].occupied_cells = Some(cells);
-    let hand_before = game.position.players[0].hand_spellbook.len();
-    let cast = cast_action(&game, &magic_id);
-    game.apply_action_recorded(&cast).unwrap();
-    let host = game
-        .legal_actions()
-        .unwrap()
-        .into_iter()
-        .find(|a| matches!(a.descriptor, ActionDescriptor::ChooseAbility { .. }))
-        .unwrap();
-    game.apply_action_recorded(&host).unwrap();
-    assert_eq!(token_count(&game), 0);
-    let choices = game.legal_actions().unwrap();
-    assert_eq!(choices.len(), 4);
-    for choice in &choices {
-        let ActionDescriptor::ChooseAbilityLocation { location, .. } = choice.descriptor else {
-            panic!("ordinary location action")
-        };
-        assert!(cells.contains(&location.cell));
-        assert_eq!(location.region, Region::Surface);
-        let mut branch = game.clone();
-        let (events, _) = branch.apply_action_recorded(choice).unwrap();
-        assert_eq!(token_count(&branch), 2);
-        assert_eq!(branch.position.players[0].hand_spellbook.len(), hand_before);
-        assert_eq!(branch.position.phase, Phase::Main);
-        let tokens = branch
-            .position
-            .units
-            .iter()
-            .filter(|u| u.card.source == CardSource::Token)
-            .collect::<Vec<_>>();
-        assert!(tokens.iter().all(|u| u.location == location.cell));
-        let mut replay = game.clone();
-        assert_eq!(replay.apply_action_recorded(choice).unwrap().0, events);
-        assert_eq!(replay.position, branch.position);
-    }
-    let stale = choices[0].clone();
-    for reenter in [false, true] {
-        let mut branch = game.clone();
-        if reenter {
-            branch.position.units[0].card.enter_realm().unwrap();
-        } else {
-            branch.position.units.clear();
+        if carried {
+            manifest["cards"]["north-spell-1"]["effectProgram"]["effects"][1]["op"] =
+                json!("conjure-token");
+            manifest["cards"]["north-spell-1"]["effectProgram"]["effects"][1]["placement"] =
+                json!("carried");
+            manifest["cards"]["footprint-token"] = json!({
+                "cardType":"artifact","grantsBearerPower":2,"manaCost":null,"token":true,
+                "thresholds":{"air":0,"earth":0,"fire":0,"water":0}
+            });
         }
-        assert!(branch.apply_action_recorded(&stale).is_err());
-        let mut events = Vec::new();
-        branch
-            .resume_empty_ability_choice(&mut super::OutcomeLog::Record(&mut events))
+        manifest["cards"]["south-spell-1"]["occupiesSquareArea"] = json!(2);
+    })
+}
+
+#[test]
+fn token_location_choice_uses_the_live_host_footprint_and_rejects_a_new_incarnation() {
+    for carried in [false, true] {
+        let encoded = token_location_manifest(carried);
+        let (mut game, magic_id) =
+            setup_fixture(Game::from_manifest_json(&encoded).unwrap(), false);
+        game.position.units.truncate(1);
+        let cells = ["B3", "C3", "B4", "C4"].map(|cell| Cell::parse(cell).unwrap());
+        game.position.units[0].location = cells[0];
+        game.position.units[0].occupied_cells = Some(cells);
+        let hand_before = game.position.players[0].hand_spellbook.len();
+        let cast = cast_action(&game, &magic_id);
+        game.apply_action_recorded(&cast).unwrap();
+        let host = game
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|a| matches!(a.descriptor, ActionDescriptor::ChooseAbility { .. }))
             .unwrap();
-        assert_eq!(token_count(&branch), 0);
-        assert_eq!(branch.position.players[0].hand_spellbook.len(), hand_before);
-        assert_eq!(branch.position.phase, Phase::Main);
-        assert!(events.iter().any(|(kind, _)| kind == "spell-drawn"));
+        game.apply_action_recorded(&host).unwrap();
+        let entry_count = |game: &Game| {
+            if carried {
+                game.position.artifacts.len()
+            } else {
+                token_count(game)
+            }
+        };
+        assert_eq!(entry_count(&game), 0);
+        let choices = game.legal_actions().unwrap();
+        assert_eq!(choices.len(), 4);
+        for choice in &choices {
+            let ActionDescriptor::ChooseAbilityLocation { location, .. } = choice.descriptor else {
+                panic!("ordinary location action")
+            };
+            assert!(cells.contains(&location.cell));
+            assert_eq!(location.region, Region::Surface);
+            let mut branch = game.clone();
+            let (events, _) = branch.apply_action_recorded(choice).unwrap();
+            assert_eq!(entry_count(&branch), 2);
+            assert_eq!(branch.position.players[0].hand_spellbook.len(), hand_before);
+            assert_eq!(branch.position.phase, Phase::Main);
+            let tokens = branch
+                .position
+                .units
+                .iter()
+                .filter(|u| u.card.source == CardSource::Token)
+                .collect::<Vec<_>>();
+            assert!(tokens.iter().all(|u| u.location == location.cell));
+            if carried {
+                assert!(branch.position.artifacts.iter().all(|artifact| {
+                    artifact.card.source == CardSource::Token
+                        && artifact.bearer().is_some()
+                        && branch.artifact_location(artifact).unwrap() == location
+                }));
+            }
+            let mut replay = game.clone();
+            assert_eq!(replay.apply_action_recorded(choice).unwrap().0, events);
+            assert_eq!(replay.position, branch.position);
+        }
+        let stale = choices[0].clone();
+        for reenter in [false, true] {
+            let mut branch = game.clone();
+            if reenter {
+                branch.position.units[0].card.enter_realm().unwrap();
+            } else {
+                branch.position.units.clear();
+            }
+            assert!(branch.apply_action_recorded(&stale).is_err());
+            let mut events = Vec::new();
+            branch
+                .resume_empty_ability_choice(&mut super::OutcomeLog::Record(&mut events))
+                .unwrap();
+            assert_eq!(entry_count(&branch), 0);
+            assert_eq!(branch.position.players[0].hand_spellbook.len(), hand_before);
+            assert_eq!(branch.position.phase, Phase::Main);
+            assert!(events.iter().any(|(kind, _)| kind == "spell-drawn"));
+        }
     }
 }

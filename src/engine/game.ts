@@ -55,6 +55,19 @@ type EffectProgramUnitCohort = Readonly<{
 }>;
 type EffectProgramRecipients = 'target' | 'chosen' | Readonly<{ query: EffectProgramUnitCohort }>;
 type EffectDuration = 'this-turn' | 'until-your-next-turn';
+type SummonTokenEffect = Readonly<{
+  count: number;
+  destination: 'source' | 'chosen' | 'target' | 'location' | 'chosen-location';
+  op: 'summon-token';
+  token: string;
+}>;
+type ConjureTokenEffect = Readonly<{
+  count: number;
+  destination: 'source' | 'chosen' | 'target' | 'location' | 'chosen-location';
+  op: 'conjure-token';
+  placement?: 'loose' | 'carried';
+  token: string;
+}>;
 type EffectProgramModifier =
   | 'airborne' | 'charge' | 'first-strike' | 'lethal' | 'next-strike-double'
   | 'movement' | 'power' | 'ranged' | 'silence';
@@ -62,12 +75,8 @@ type EffectProgramEffect =
   | Readonly<{ amount: number; op: 'damage'; recipients: EffectProgramRecipients }>
   | Readonly<{ op: 'untap'; recipients: EffectProgramRecipients }>
   | Readonly<{ count: number; op: 'draw'; zone: DeckZone }>
-  | Readonly<{
-    count: number;
-    destination: 'source' | 'chosen' | 'target' | 'location' | 'chosen-location';
-    op: 'summon-token' | 'conjure-token';
-    token: string;
-  }>
+  | SummonTokenEffect
+  | ConjureTokenEffect
   | Readonly<{ op: 'choose-location'; relation: EffectProgramRelation }>
   | Readonly<{
     alliedOnly?: boolean;
@@ -93,14 +102,18 @@ type EffectProgram = Readonly<{
 }>;
 
 /** Returns direct token references; callers follow the returned IDs transitively. */
-type TokenRequirement = Readonly<{ cardId: string; kind: 'artifact' | 'minion' }>;
+type TokenRequirement = Readonly<{ cardId: string; kind: 'artifact' | 'minion'; placement?: 'carried' }>;
 
 function tokenRequirements(card: GameCardDefinition): readonly TokenRequirement[] {
   const requirements: TokenRequirement[] = [];
   const addProgramRequirements = (effects: readonly EffectProgramEffect[]): void => {
     for (const effect of effects) {
       if (effect.op === 'summon-token') requirements.push({ cardId: effect.token, kind: 'minion' });
-      if (effect.op === 'conjure-token') requirements.push({ cardId: effect.token, kind: 'artifact' });
+      if (effect.op === 'conjure-token') requirements.push({
+        cardId: effect.token,
+        kind: 'artifact',
+        ...(effect.placement === 'carried' ? { placement: 'carried' as const } : {}),
+      });
     }
   };
   if (card.cardType === 'magic') {
@@ -1595,6 +1608,18 @@ function validateEffectProgram(program: unknown, path: string): asserts program 
       if (unknown) throw new RangeError(`${effectPath}.${unknown} is unsupported`);
       hasLocationChoice = true;
     }
+    if (value.op === 'summon-token' && 'placement' in value) {
+      throw new RangeError(`${effectPath}.placement is unsupported for summon-token`);
+    }
+    if (value.op === 'conjure-token') {
+      if (value.placement !== undefined && value.placement !== 'loose' && value.placement !== 'carried') {
+        throw new RangeError(`${effectPath}.placement is unsupported`);
+      }
+      if (value.placement === 'carried'
+        && value.destination !== 'source' && value.destination !== 'chosen' && value.destination !== 'target') {
+        throw new RangeError(`${effectPath}.destination is unsupported for conjure-token`);
+      }
+    }
     if ((value.op === 'summon-token' || value.op === 'conjure-token')
       && value.destination === 'chosen-location' && !hasLocationChoice) {
       throw new RangeError(`${effectPath}.destination chosen-location requires a preceding choose-location`);
@@ -3050,7 +3075,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
     if (definition === undefined) continue;
     for (const requirement of tokenRequirements(definition)) {
       const token = input.cards[requirement.cardId];
-      if (token?.cardType !== requirement.kind || token.token !== true) {
+      if (token?.cardType !== requirement.kind || token.token !== true
+        || (requirement.placement === 'carried'
+          && token.cardType === 'artifact' && token.cannotBeCarried === true)) {
         throw new RangeError(`cards.${cardId} token effect must reference a token ${requirement.kind}`);
       }
       referencedCardIds.add(requirement.cardId);

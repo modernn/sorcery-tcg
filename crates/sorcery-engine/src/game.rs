@@ -1363,18 +1363,18 @@ const fn card_kind(facts: &CardFacts) -> CardKind {
     }
 }
 
-fn token_references(facts: &CardFacts) -> Vec<(&str, crate::deck::CardType)> {
+fn token_references(facts: &CardFacts) -> Vec<(&str, crate::ability::TokenRequirement)> {
     match facts {
         CardFacts::Site(site) => site
             .genesis_pay_one_mana_to_summon_token
             .as_deref()
             .into_iter()
-            .map(|id| (id, crate::deck::CardType::Minion))
+            .map(|id| (id, crate::ability::TokenRequirement::Minion))
             .collect(),
         CardFacts::Magic(magic) => match &magic.effect {
             MagicEffect::SummonTokenToAlliedMinionThenDrawSpell(id)
             | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(id) => {
-                vec![(id, crate::deck::CardType::Minion)]
+                vec![(id, crate::ability::TokenRequirement::Minion)]
             }
             MagicEffect::Program(program) => program.token_references().collect(),
             _ => Vec::new(),
@@ -5586,7 +5586,14 @@ impl Game {
     /// Where an Artifact currently sits: its exact carried cell, the bearer's cell, or the cell it
     /// lies on.
     fn artifact_location(&self, artifact: &ArtifactPosition) -> Result<Location, GameError> {
-        match &artifact.placement {
+        self.artifact_placement_location(&artifact.placement)
+    }
+
+    fn artifact_placement_location(
+        &self,
+        placement: &ArtifactPlacement,
+    ) -> Result<Location, GameError> {
+        match placement {
             ArtifactPlacement::Carried { bearer, cell } => {
                 let location = self.unit_target_location(bearer)?;
                 Ok(Location {
@@ -24887,16 +24894,30 @@ fn referenced_manifest_cards<'a>(
             pending.push((card_id, true));
             for (token_id, kind) in token_references(&facts[card_id]) {
                 let valid = match (kind, facts.get(token_id)) {
-                    (crate::deck::CardType::Minion, Some(CardFacts::Minion(f))) => f.token,
-                    (crate::deck::CardType::Artifact, Some(CardFacts::Artifact(f))) => f.token,
+                    (crate::ability::TokenRequirement::Minion, Some(CardFacts::Minion(f))) => {
+                        f.token
+                    }
+                    (
+                        crate::ability::TokenRequirement::Artifact { carried },
+                        Some(CardFacts::Artifact(f)),
+                    ) => {
+                        if carried && f.cannot_be_carried {
+                            return Err(invalid(
+                                "carried token must reference a carriable artifact",
+                            ));
+                        }
+                        f.token
+                    }
                     _ => false,
                 };
                 if !valid {
                     return Err(invalid(match kind {
-                        crate::deck::CardType::Artifact => {
+                        crate::ability::TokenRequirement::Artifact { .. } => {
                             "conjure-token must reference a token artifact"
                         }
-                        _ => "token effect must reference a token minion",
+                        crate::ability::TokenRequirement::Minion => {
+                            "token effect must reference a token minion"
+                        }
                     }));
                 }
                 pending.push((token_id, false));

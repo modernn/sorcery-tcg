@@ -48,6 +48,52 @@ test('conjure-token admits and canonicalizes token artifacts with null mana cost
   });
 });
 
+test('carried conjure-token preserves explicit placement', () => {
+  const manifest = createGameManifest(input(
+    { count: 1, destination: 'target', op: 'conjure-token', placement: 'carried', token: 'token' },
+    { bearerControllerChoosesExtraRandomOutcome: true, cardType: 'artifact', manaCost: null,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 }, token: true },
+  ));
+  assert.deepEqual((manifest.cards['north-spell'] as Extract<GameCardDefinition, { cardType: 'magic' }>).effectProgram, {
+    effects: [{ count: 1, destination: 'target', op: 'conjure-token', placement: 'carried', token: 'token' }],
+  });
+});
+
+test('loose and default conjure-token retain location destinations', () => {
+  for (const placement of [undefined, 'loose'] as const) {
+    const manifest = createGameManifest(input(
+      { count: 1, destination: 'location', op: 'conjure-token', ...(placement ? { placement } : {}), token: 'token' },
+      { bearerControllerChoosesExtraRandomOutcome: true, cardType: 'artifact', manaCost: null,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 }, token: true },
+    ));
+    assert.equal((manifest.cards['north-spell'] as Extract<GameCardDefinition, { cardType: 'magic' }>).effectProgram
+      ?.effects[0]?.op, 'conjure-token');
+  }
+});
+
+test('carried conjure-token rejects location destinations and non-carriable artifacts', () => {
+  const token = { bearerControllerChoosesExtraRandomOutcome: true, cardType: 'artifact' as const,
+    manaCost: null, thresholds: { air: 0, earth: 0, fire: 0, water: 0 }, token: true as const } as const;
+  assert.throws(() => createGameManifest(input(
+    { count: 1, destination: 'location', op: 'conjure-token', placement: 'carried', token: 'token' } as never, token,
+  )), /destination is unsupported/);
+  assert.throws(() => createGameManifest(input(
+    { count: 1, destination: 'chosen-location', op: 'conjure-token', placement: 'carried', token: 'token' } as never, token,
+  )), /destination is unsupported/);
+  assert.throws(() => createGameManifest(input(
+    { count: 1, destination: 'target', op: 'conjure-token', placement: 'carried', token: 'token' },
+    { ...token, bearerControllerChoosesExtraRandomOutcome: true as const, cannotBeCarried: true },
+  )), /token artifact/);
+});
+
+test('summon-token rejects placement', () => {
+  assert.throws(() => createGameManifest(input(
+    { count: 1, destination: 'source', op: 'summon-token', placement: 'carried', token: 'token' } as never,
+    { attack: 1, cardType: 'minion', defense: 1, manaCost: null, token: true,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 } },
+  )), /placement is unsupported/);
+});
+
 test('legacy summon-token remains minion-only', () => {
   assert.throws(() => createGameManifest(input(
     { count: 1, destination: 'source', op: 'summon-token', token: 'token' },

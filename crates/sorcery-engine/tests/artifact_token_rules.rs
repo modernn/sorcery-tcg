@@ -66,7 +66,11 @@ fn state(session: &Session) -> Value {
 }
 
 fn ready(seat: &str) -> Session {
-    let mut session = Session::new(&manifest()).expect("manifest");
+    ready_manifest(seat, &manifest())
+}
+
+fn ready_manifest(seat: &str, manifest: &str) -> Session {
+    let mut session = Session::new(manifest).expect("manifest");
     keep(&mut session);
     keep(&mut session);
     accept_where(&mut session, |d| {
@@ -323,4 +327,64 @@ fn token_artifacts_use_ordinary_pickup_drop_and_targeted_exits_banish_without_zo
     assert!(!artifact_ids(&after_return).contains(&return_id));
     assert!(!after_return["players"].to_string().contains(&return_id));
     assert_replay(&returned);
+}
+
+#[test]
+fn artifacts_conjured_carried_attach_without_pickup_and_replay_for_both_seats() {
+    let mut input: Value = serde_json::from_str(&manifest()).unwrap();
+    input["cards"]["conjure"]["effectProgram"]["effects"] = json!([
+        {"op":"conjure-token","token":"token","count":2,"destination":"source","placement":"carried"}
+    ]);
+    input.as_object_mut().unwrap().remove("manifestId");
+    let input = selfplay_manifest_with(9107, |m| *m = input);
+    for seat in ["north", "south"] {
+        let mut session = ready_manifest(seat, &input);
+        let (_, receipt) = accept_where(&mut session, |d| {
+            d["kind"] == "cast-magic" && d["cardId"] == "conjure"
+        });
+        let current = state(&session);
+        let artifacts = current["realm"]["artifacts"].as_array().unwrap();
+        assert_eq!(artifacts.len(), 2);
+        for artifact in artifacts {
+            assert_eq!(artifact["owner"], seat);
+            assert_eq!(artifact["bearer"]["seat"], seat);
+            assert_eq!(artifact["bearer"]["kind"], "avatar");
+        }
+        assert_eq!(
+            receipt
+                .events
+                .iter()
+                .filter(|e| e.event_type == "artifact-conjured")
+                .count(),
+            2
+        );
+        assert!(
+            !receipt
+                .events
+                .iter()
+                .any(|e| e.event_type == "artifacts-picked-up")
+        );
+        assert_replay(&session);
+        // Casting spent the avatar's ordinary interaction; rotate before dropping.
+        for _ in 0..2 {
+            accept_where(&mut session, |d| d["kind"] == "end-turn");
+            accept_where(&mut session, |d| {
+                d["kind"] == "draw" && d["zone"] == "atlas"
+            });
+        }
+        accept_where(&mut session, |d| {
+            d["kind"] == "drop-artifacts"
+                && d["artifactInstanceIds"]
+                    .as_array()
+                    .is_some_and(|ids| ids.len() == 2)
+        });
+        assert!(
+            state(&session)["realm"]["artifacts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|a| a.get("bearer").is_none())
+        );
+        assert_replay(&session);
+    }
 }

@@ -11,6 +11,7 @@ use super::super::{
     Region, Seat, SummonPlacement, UnitDamageSource, UnitPosition, UnitTarget, seat_index,
 };
 use super::{AbilityEntry, EffectSource, RealmReference};
+use crate::ability::{ArtifactTokenPlacement, TokenDestination};
 use crate::action::DeckZone;
 use crate::board::Location;
 use crate::canonical::identity_hash;
@@ -39,6 +40,15 @@ fn fixture_game() -> Game {
             "manaCost": 0,
             "thresholds": {"air": 0, "earth": 0, "fire": 0, "water": 0},
         });
+        manifest["cards"]["north-spell-49"] = json!({
+            "cardType": "magic",
+            "manaCost": 0,
+            "effectProgram": {"effects": [{
+                "op": "conjure-token", "token": "north-spell-50", "count": 1,
+                "destination": "source"
+            }]},
+            "thresholds": {"air": 0, "earth": 0, "fire": 0, "water": 0},
+        });
         for ordinal in 1..=2 {
             manifest["cards"][format!("south-spell-{ordinal}")] = json!({
                 "attack": 1,
@@ -50,6 +60,17 @@ fn fixture_game() -> Game {
                 "thresholds": {"air": 0, "earth": 0, "fire": 0, "water": 0},
             });
         }
+        manifest["cards"]["north-spell-50"] = json!({
+            "cardType": "artifact",
+            "grantsBearerPower": 2,
+            "manaCost": null,
+            "token": true,
+            "thresholds": {"air": 0, "earth": 0, "fire": 0, "water": 0},
+        });
+        manifest["decks"]["north"]["spellbook"]
+            .as_array_mut()
+            .expect("north spellbook")
+            .retain(|card| card != "north-spell-50");
     });
     let mut game = Game::from_manifest_json(&manifest).expect("effect fixture");
     game.position.phase = Phase::Main;
@@ -131,7 +152,7 @@ fn source_for_unit(
 }
 
 fn install(game: &mut Game, effects: Vec<Effect>) -> CardId {
-    let id = card_id(game, "north-spell-1");
+    let id = card_id(game, "north-spell-49");
     let selection = effects.iter().find_map(|effect| match effect {
         Effect::Damage { recipients, .. }
         | Effect::Untap { recipients }
@@ -166,6 +187,24 @@ fn install(game: &mut Game, effects: Vec<Effect>) -> CardId {
         effects: effects.into_boxed_slice(),
     }));
     id
+}
+
+fn install_carried_conjure_tail(game: &mut Game, destination: TokenDestination) -> CardId {
+    install(
+        game,
+        vec![
+            Effect::ConjureToken {
+                token: "north-spell-50".to_owned(),
+                count: 1,
+                destination,
+                placement: ArtifactTokenPlacement::Carried,
+            },
+            Effect::Draw {
+                zone: DeckZone::Spellbook,
+                count: 1,
+            },
+        ],
+    )
 }
 
 fn run_target_program(
@@ -1612,6 +1651,138 @@ fn ordinary_anywhere_choice_crosses_regions_but_targets_and_nearby_do_not() {
         )
         .is_empty()
     );
+}
+
+#[test]
+fn carried_conjure_uses_creator_as_owner_and_bearer_controller_as_controller() {
+    let mut game = fixture_game();
+    let bearer = minion(&game, "south-spell-1", Seat::South, "enemy-bearer", false);
+    let bearer_ref = RealmReference::from_card(&bearer.card);
+    game.position.units.push(bearer);
+    let magic = install_carried_conjure_tail(&mut game, TokenDestination::Chosen);
+    let mut frame = game
+        .effect_frame(
+            magic,
+            AbilityEntry::Magic,
+            source("creator", Seat::North, 0, None),
+            None,
+            None,
+            None,
+        )
+        .expect("carried conjure frame");
+    frame.chosen = Some(bearer_ref);
+    game.run_effect_frame(frame, &mut OutcomeLog::Ignore)
+        .expect("carried token enters");
+
+    assert_eq!(game.position.artifacts.len(), 1);
+    let artifact = &game.position.artifacts[0];
+    assert_eq!(artifact.card.owner, Seat::North);
+    assert!(artifact.carried_by(
+        super::super::UnitKind::Minion,
+        Seat::South,
+        &game.position.units[0].card.instance_id
+    ));
+    assert_eq!(
+        artifact.bearer().expect("carried bearer").seat(),
+        Seat::South
+    );
+    assert_eq!(
+        game.position.units[0].last_picked_up_artifacts_turn, None,
+        "entry does not consume the ordinary Pick Up allowance"
+    );
+    assert_eq!(
+        game.position.players[seat_index(Seat::North)]
+            .hand_spellbook
+            .len(),
+        4,
+        "the independent tail still resolves"
+    );
+}
+
+#[test]
+fn carried_conjure_preserves_selected_cell_for_an_oversized_bearer() {
+    let mut game = fixture_game();
+    let mut bearer = minion(&game, "south-spell-1", Seat::North, "large-bearer", false);
+    bearer.occupied_cells =
+        Some(["C3", "C4", "D3", "D4"].map(|cell| Cell::parse(cell).expect("occupied cell")));
+    let bearer_ref = RealmReference::from_card(&bearer.card);
+    game.position.units.push(bearer);
+    let magic = install_carried_conjure_tail(&mut game, TokenDestination::Chosen);
+    let mut frame = game
+        .effect_frame(
+            magic,
+            AbilityEntry::Magic,
+            source("large-creator", Seat::North, 0, None),
+            None,
+            None,
+            None,
+        )
+        .expect("oversized carried frame");
+    frame.chosen = Some(bearer_ref);
+    frame.token_location = Some(super::ResolvedTokenLocation {
+        location: Some(Location {
+            cell: Cell::parse("D4").expect("selected cell"),
+            region: Region::Surface,
+        }),
+    });
+    game.run_effect_frame(frame, &mut OutcomeLog::Ignore)
+        .expect("oversized token enters");
+
+    let artifact = &game.position.artifacts[0];
+    let super::super::ArtifactPlacement::Carried { cell, .. } = &artifact.placement else {
+        panic!("token should enter carried");
+    };
+    assert_eq!(*cell, Some(Cell::parse("D4").expect("selected cell")));
+    assert_eq!(
+        game.artifact_location(artifact)
+            .expect("artifact location")
+            .cell,
+        Cell::parse("D4").expect("selected cell")
+    );
+}
+
+#[test]
+fn stale_chosen_bearer_skips_carried_creation_and_continues_tail() {
+    for destination in [TokenDestination::Chosen, TokenDestination::Source] {
+        let mut game = fixture_game();
+        let bearer = minion(&game, "south-spell-1", Seat::South, "stale-bearer", false);
+        let stale_ref = RealmReference::from_card(&bearer.card);
+        let mut reentered = bearer;
+        reentered.card.enter_realm().expect("new incarnation");
+        game.position.units.push(reentered);
+        let magic = install_carried_conjure_tail(&mut game, destination);
+        let mut frame = game
+            .effect_frame(
+                magic,
+                AbilityEntry::Magic,
+                source("stale-target", Seat::North, 0, None),
+                None,
+                None,
+                None,
+            )
+            .expect("stale carried frame");
+        if destination == TokenDestination::Source {
+            // The source departed after the program started, retaining last-known geometry.
+            frame.started = true;
+            frame.source.realm = Some(stale_ref);
+            frame.source.cells = ["C3", "C4", "D3", "D4"]
+                .map(|c| Cell::parse(c).unwrap())
+                .to_vec();
+        } else {
+            frame.chosen = Some(stale_ref);
+        }
+        game.run_effect_frame(frame, &mut OutcomeLog::Ignore)
+            .expect("stale carried entry is a skipped operation");
+
+        assert!(game.position.artifacts.is_empty());
+        assert_eq!(
+            game.position.players[seat_index(Seat::North)]
+                .hand_spellbook
+                .len(),
+            4,
+            "the independent tail still resolves after stale selection"
+        );
+    }
 }
 
 #[test]

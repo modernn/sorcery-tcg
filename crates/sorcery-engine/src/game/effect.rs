@@ -6,7 +6,7 @@ use super::{
     Location, OutcomeLog, Region, ResolutionContinuation, Seat, UnitDamageSource, UnitKind,
     UnitQuery, UnitTarget, Value, json, seat_index,
 };
-use crate::ability::TokenDestination;
+use crate::ability::{ArtifactTokenPlacement, TokenDestination};
 
 #[cfg(test)]
 mod tests;
@@ -581,7 +581,23 @@ impl Game {
                     ref token,
                     count,
                     destination,
+                    ..
                 } => {
+                    // Carried entry requires the same live bearer incarnation, even when
+                    // a departed source retains last-known multi-cell geometry.
+                    if matches!(
+                        effect,
+                        Effect::ConjureToken {
+                            placement: ArtifactTokenPlacement::Carried,
+                            ..
+                        }
+                    ) && Self::token_destination_reference(&frame, destination)
+                        .and_then(|reference| self.referenced_unit(reference))
+                        .is_none()
+                    {
+                        frame.token_location = None;
+                        continue;
+                    }
                     if destination == TokenDestination::Source && frame.token_location.is_none() {
                         self.effect_anchor(&frame.source)?;
                     }
@@ -604,8 +620,17 @@ impl Game {
                         None => self.token_effect_location(&frame, destination)?,
                     };
                     if let Some(location) = location {
-                        if matches!(effect, Effect::ConjureToken { .. }) {
-                            self.conjure_token_artifacts(&frame, token, count, location, outcomes)?;
+                        if let Effect::ConjureToken { placement, .. } = effect {
+                            if let Some(placement) = self.token_artifact_placement(
+                                &frame,
+                                destination,
+                                *placement,
+                                location,
+                            )? {
+                                self.conjure_token_artifacts(
+                                    &frame, token, count, &placement, outcomes,
+                                )?;
+                            }
                         } else if self.token_may_enter_location(
                             frame.source.controller,
                             token,
@@ -761,14 +786,49 @@ impl Game {
         Ok(())
     }
 
+    fn token_artifact_placement(
+        &self,
+        frame: &EffectFrame,
+        destination: TokenDestination,
+        placement: ArtifactTokenPlacement,
+        location: Location,
+    ) -> Result<Option<super::ArtifactPlacement>, GameError> {
+        if placement == ArtifactTokenPlacement::Loose {
+            return Ok(Some(super::ArtifactPlacement::Loose {
+                location: location.cell,
+                region: location.region,
+            }));
+        }
+        let Some(reference) = Self::token_destination_reference(frame, destination) else {
+            return Ok(None);
+        };
+        let Some((kind, seat)) = self.referenced_unit(reference) else {
+            return Ok(None);
+        };
+        let instance_id = reference.instance_id.clone();
+        let bearer = match kind {
+            UnitKind::Avatar => UnitTarget::Avatar { instance_id, seat },
+            UnitKind::Minion => UnitTarget::Minion { instance_id, seat },
+        };
+        let cells = self.unit_target_occupied_cells(&bearer)?;
+        if self.unit_target_location(&bearer)?.region != location.region
+            || !cells.contains(&location.cell)
+        {
+            return Ok(None);
+        }
+        let cell = (cells.len() > 1).then_some(location.cell);
+        Ok(Some(super::ArtifactPlacement::Carried { bearer, cell }))
+    }
+
     fn conjure_token_artifacts(
         &mut self,
         frame: &EffectFrame,
         token: &str,
         count: u8,
-        location: Location,
+        placement: &super::ArtifactPlacement,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        let location = self.artifact_placement_location(placement)?;
         if self
             .position
             .artifacts
@@ -802,18 +862,19 @@ impl Game {
             .collect::<Result<Vec<_>, GameError>>()?;
         for card in entries {
             outcomes.push("artifact-conjured", || {
-                json!({
+                let mut event = json!({
                     "cardId": token, "instanceId": card.instance_id, "owner": card.owner,
                     "seat": frame.source.controller, "sourceInstanceId": frame.source.instance_id,
                     "cell": location.cell, "region": location.region, "manaPaid": 0, "token": true,
-                })
+                });
+                if let super::ArtifactPlacement::Carried { bearer, .. } = placement {
+                    event["bearer"] = json!(bearer);
+                }
+                event
             });
             self.position.artifacts.push(super::ArtifactPosition {
                 card,
-                placement: super::ArtifactPlacement::Loose {
-                    location: location.cell,
-                    region: location.region,
-                },
+                placement: placement.clone(),
             });
         }
         Ok(())
