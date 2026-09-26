@@ -544,7 +544,8 @@ impl Game {
         mut frame: EffectFrame,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
-        if self.position.pending_deathrites.is_some()
+        if self.position.pending_damage_order.is_some()
+            || self.position.pending_deathrites.is_some()
             || self.position.pending_trigger_order.is_some()
             || self.position.pending_ability_choice.is_some()
         {
@@ -658,6 +659,7 @@ impl Game {
                             self.finish_token_entries(entries, outcomes)?;
                             if self.position.terminal.is_some()
                                 || self.position.pending_deathrites.is_some()
+                                || self.position.pending_damage_order.is_some()
                                 || self.position.pending_trigger_order.is_some()
                                 || self.position.pending_ability_choice.is_some()
                             {

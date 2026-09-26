@@ -622,18 +622,18 @@ fn rule_catalog_1009_leap_attack_kill_resolves_deathrites_without_repeating_the_
     let paused = state(&setup.session);
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
-    assert!(paused["pendingDeathrites"]["continuation"].is_null());
+    // Only completion remains; the shared effect-strike group must never run again.
     assert_eq!(
-        paused["pendingDeathrites"]["deferredOutcomes"],
-        json!([{
-            "payload": {
-                "cardId": "north-leap",
-                "instanceId": setup.leap_id,
-                "owner": "north",
-            },
-            "type": "magic-resolved",
-        }])
+        paused["pendingDeathrites"]["continuation"],
+        json!({
+            "kind": "magic-resolved",
+            "cardId": "north-leap",
+            "instanceId": setup.leap_id,
+            "owner": "north",
+            "heldCard": null,
+        })
     );
+    assert!(paused["pendingDeathrites"]["deferredOutcomes"].is_null());
     let survivor = realm_unit(&paused, &setup.survivor_id).expect("warded enemy survives");
     assert_eq!(survivor["damage"], 0);
     assert_eq!(survivor["warded"], false);

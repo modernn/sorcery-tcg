@@ -1,9 +1,9 @@
 //! Controller-ordered damage replacements, before prevention and source consumption.
 
 use super::{
-    ActionDescriptor, Game, GameError, IdentityHash, IssuedAction, OutcomeLog, PendingCombat,
-    Phase, RealmReference, ResolutionContinuation, Seat, StrikeStats, UnitKind, UnitTarget, Value,
-    json, other_seat,
+    ActionDescriptor, EffectStrikes, Game, GameError, IdentityHash, IssuedAction, OutcomeLog,
+    PendingCombat, Phase, RealmReference, ResolutionContinuation, Seat, StrikeStats, UnitKind,
+    UnitTarget, Value, json, other_seat,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -67,6 +67,7 @@ pub(super) struct FightDamage {
 enum DamageContinuation {
     Ranged(RangedDamage),
     Fight(Box<FightDamage>),
+    Effect(Box<EffectStrikes>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -75,6 +76,7 @@ pub(super) struct PendingDamageOrder {
     active_seat: Seat,
     remaining: Vec<DamageReplacement>,
     continuation: DamageContinuation,
+    pub(super) after: Option<ResolutionContinuation>,
 }
 
 impl PendingDamageOrder {
@@ -144,6 +146,7 @@ impl PendingDamageOrder {
             .and_then(|seat| self.current_damage_index(seat))
             .unwrap_or(0);
         let continuation = match &self.continuation {
+            DamageContinuation::Effect(group) => group.value(),
             DamageContinuation::Ranged(continuation) => {
                 let strike = &continuation.strike;
                 json!({
@@ -169,6 +172,7 @@ impl PendingDamageOrder {
             "damage": self.damage.iter().map(|packet| json!({"amount": packet.amount, "striker": packet.striker, "target": packet.target})).collect::<Vec<_>>(),
             "remaining": self.remaining.iter().map(DamageReplacement::value).collect::<Vec<_>>(),
             "continuation": continuation,
+            "after": self.after.as_ref().map(|next| game.resolution_continuation_value(next)),
         })
     }
 }
@@ -188,6 +192,7 @@ impl Game {
             active_seat: self.position.active_seat,
             remaining: Vec::new(),
             continuation: DamageContinuation::Ranged(continuation.clone()),
+            after: None,
         };
         self.push_ordered_damage(
             &mut pending,
@@ -289,6 +294,7 @@ impl Game {
             active_seat: self.position.active_seat,
             remaining: Vec::new(),
             continuation: DamageContinuation::Fight(Box::new(fight)),
+            after: None,
         };
         for (_, striker, strike) in return_sources {
             self.push_ordered_damage(
@@ -345,6 +351,30 @@ impl Game {
         self.advance_damage_order(false, outcomes)
     }
 
+    pub(super) fn begin_effect_damage_order(
+        &mut self,
+        group: &EffectStrikes,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let mut pending = PendingDamageOrder {
+            damage: Vec::new(),
+            active_seat: self.position.active_seat,
+            remaining: Vec::new(),
+            continuation: DamageContinuation::Effect(Box::new(group.clone())),
+            after: None,
+        };
+        for target in &group.targets {
+            self.push_ordered_damage(
+                &mut pending,
+                group.source.clone(),
+                target.clone(),
+                &group.strike,
+            )?;
+        }
+        self.position.pending_damage_order = Some(Box::new(pending));
+        self.advance_damage_order(false, outcomes)
+    }
+
     fn advance_damage_order(
         &mut self,
         resumed: bool,
@@ -371,6 +401,14 @@ impl Game {
             pending.apply(index, outcomes)?;
         }
         match pending.continuation {
+            DamageContinuation::Effect(group) => {
+                let amounts = pending
+                    .damage
+                    .iter()
+                    .map(|packet| packet.amount)
+                    .collect::<Vec<_>>();
+                self.finish_effect_strikes(&group, Some(&amounts), outcomes)?;
+            }
             DamageContinuation::Ranged(continuation) => {
                 self.position.phase = continuation.return_phase;
                 self.position.decision_seat = continuation.seat;
@@ -404,6 +442,9 @@ impl Game {
                     self.continue_resolution(next, outcomes)?;
                 }
             }
+        }
+        if let Some(next) = pending.after {
+            self.continue_resolution(next, outcomes)?;
         }
         Ok(())
     }

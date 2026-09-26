@@ -34,6 +34,7 @@ mod damage_order;
 #[cfg(test)]
 mod damage_order_tests;
 mod effect;
+mod effect_strikes;
 #[cfg(test)]
 mod entry_equipment_tests;
 mod modifiers;
@@ -49,6 +50,7 @@ use ability::{CompiledAbilities, SelectionSpec, SpatialRelation};
 use choices::PendingAbilityChoice;
 use damage_order::{FightDamage, PendingDamageOrder, RangedDamage};
 use effect::{AbilityEntry, EffectFrame, RealmReference};
+use effect_strikes::EffectStrikes;
 use modifiers::{TemporaryModifierKind, TemporaryModifiers};
 use resolution::{SiteGenesisTail, TokenEntryContinuation};
 use trigger_order::{TriggerBatch, TriggerOrderStage, TriggerSource};
@@ -860,6 +862,11 @@ enum ResolutionContinuation {
     Sequence(Vec<Self>),
     TriggerBatch(Box<PendingTriggerOrder>),
     Genesis(GenesisTrigger),
+    LegacyGenesisTail {
+        source: RealmReference,
+        card_id: CardId,
+        seat: Seat,
+    },
     SiteGenesis(SiteGenesisContinuation),
     SiteGenesisTail(SiteGenesisTail),
     TokenEntries(Vec<TokenEntryContinuation>),
@@ -13995,6 +14002,14 @@ impl Game {
                 restore();
                 self.finish_site_genesis_tail(continuation, outcomes)
             }
+            ResolutionContinuation::LegacyGenesisTail {
+                source,
+                card_id,
+                seat,
+            } => {
+                restore();
+                self.finish_legacy_genesis_tail(&source, card_id, seat, outcomes)
+            }
             ResolutionContinuation::MagicResolved {
                 resolution,
                 held_card,
@@ -22151,64 +22166,36 @@ impl Game {
             continuation.ally.seat(),
             continuation.ally.instance_id(),
         )?;
-        let amount = strike.amount;
-        let allocations: Vec<_> = enemies
+        self.resolve_effect_strikes(
+            &EffectStrikes {
+                source: continuation.ally.clone(),
+                targets: enemies,
+                strike,
+                reveal_source: true,
+                return_phase: Phase::Main,
+                return_seat: self.position.active_seat,
+            },
+            outcomes,
+        )?;
+        let card_index = self
+            .rules
+            .cards
             .iter()
-            .map(|enemy| StrikeAllocation {
-                amount,
-                target_instance_id: enemy.instance_id().clone(),
-            })
-            .collect();
-        for enemy in &enemies {
-            let enemy_kind = match enemy {
-                UnitTarget::Avatar { .. } => UnitKind::Avatar,
-                UnitTarget::Minion { .. } => UnitKind::Minion,
-            };
-            let allocated = self.nearby_unit_strike_amount(
-                amount,
-                strike.additive_bonus,
-                enemy_kind,
-                enemy.seat(),
-                enemy.instance_id(),
-            )?;
-            outcomes.push("strike-damage-allocated", || {
-                json!({
-                    "amount": allocated,
-                    "strikerInstanceId": continuation.ally.instance_id(),
-                    "targetInstanceId": enemy.instance_id(),
-                })
-            });
-        }
-        let pending = PendingCombat {
-            allocations,
-            attacker_instance_id: continuation.ally.instance_id().clone(),
-            attacker_kind: striker_kind,
-            attacking_seat: continuation.ally.seat(),
-            cell: continuation.strike_location.cell,
-            combatants: enemies,
-            defenders: Vec::new(),
-            original_target: None,
-            region: striker_location.region,
-            target_removed: false,
-        };
-        // The strike is complete. Deaths may delay Magic resolution, but must
-        // never resume the strike against enemies that survived it.
-        self.resolve_fight_window(&pending, true, &[], None, outcomes)?;
-        if let Some(pending) = &mut self.position.pending_deathrites {
-            let card_index = self
-                .rules
-                .cards
-                .iter()
-                .position(|definition| definition.id == continuation.card_id)
-                .ok_or(GameError::IllegalAction)?;
-            pending.deferred_magic_resolved = Some(DeferredMagicResolved {
-                card_id: CardId(u16::try_from(card_index).map_err(|_| GameError::IllegalAction)?),
-                instance_id: continuation.instance_id.clone(),
-                owner: continuation.owner,
-            });
-        } else {
-            Self::emit_leap_magic_resolved(continuation, outcomes);
-        }
+            .position(|definition| definition.id == continuation.card_id)
+            .ok_or(GameError::IllegalAction)?;
+        self.continue_resolution(
+            ResolutionContinuation::MagicResolved {
+                resolution: DeferredMagicResolved {
+                    card_id: CardId(
+                        u16::try_from(card_index).map_err(|_| GameError::IllegalAction)?,
+                    ),
+                    instance_id: continuation.instance_id.clone(),
+                    owner: continuation.owner,
+                },
+                held_card: None,
+            },
+            outcomes,
+        )?;
         Ok(())
     }
 
@@ -22879,6 +22866,17 @@ impl Game {
         let genesis_gain_control_of_tapped_minions_here_until_this_leaves =
             facts.genesis_gain_control_of_tapped_minions_here_until_this_leaves;
 
+        let tail_source = if genesis_gain_control_of_tapped_minions_here_until_this_leaves
+            || genesis_each_player_controlled_by_previous_player_next_turn
+        {
+            Some(self.unit_reference(&UnitTarget::Minion {
+                instance_id: source_instance_id.clone(),
+                seat,
+            })?)
+        } else {
+            None
+        };
+
         if genesis_disable_self_until_damaged {
             let unit = self
                 .position
@@ -22922,11 +22920,36 @@ impl Game {
         if genesis_strike_each_enemy_here {
             self.apply_genesis_here_damage(source_instance_id, true, outcomes)?;
         }
-        if genesis_gain_control_of_tapped_minions_here_until_this_leaves {
-            self.apply_genesis_tapped_minion_control(source_instance_id, seat, outcomes)?;
+        if let Some(source) = tail_source {
+            self.continue_resolution(
+                ResolutionContinuation::LegacyGenesisTail {
+                    source,
+                    card_id,
+                    seat,
+                },
+                outcomes,
+            )?;
         }
-        if genesis_each_player_controlled_by_previous_player_next_turn {
-            self.apply_genesis_previous_player_control(source_instance_id);
+        Ok(())
+    }
+
+    fn finish_legacy_genesis_tail(
+        &mut self,
+        source: &RealmReference,
+        card_id: CardId,
+        seat: Seat,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(card_id.0)].facts else {
+            return Err(GameError::IllegalAction);
+        };
+        let control = facts.genesis_gain_control_of_tapped_minions_here_until_this_leaves;
+        let players = facts.genesis_each_player_controlled_by_previous_player_next_turn;
+        if control && self.realm_reference_exists(source) {
+            self.apply_genesis_tapped_minion_control(source.instance_id(), seat, outcomes)?;
+        }
+        if players {
+            self.apply_genesis_previous_player_control(source.instance_id());
         }
         Ok(())
     }
@@ -23045,81 +23068,27 @@ impl Game {
         }
         let strike =
             self.combatant_strike_stats(UnitKind::Minion, source.controller, source_instance_id)?;
-        let damage_source = UnitDamageSource {
-            current_power: strike.current_power,
-            lethal: strike.lethal,
-        };
         let targets = target_units
             .into_iter()
-            .map(|(instance_id, kind, seat)| {
-                let status = if kind == UnitKind::Minion {
-                    Some(self.minion_damage_status(&instance_id)?)
-                } else {
-                    None
-                };
-                let allocated = self.nearby_unit_strike_amount(
-                    strike.amount,
-                    strike.additive_bonus,
-                    kind,
-                    seat,
-                    &instance_id,
-                )?;
-                Ok((instance_id, kind, seat, status, allocated))
+            .map(|(instance_id, kind, seat)| match kind {
+                UnitKind::Avatar => UnitTarget::Avatar { instance_id, seat },
+                UnitKind::Minion => UnitTarget::Minion { instance_id, seat },
             })
-            .collect::<Result<Vec<_>, GameError>>()?;
-        for (target_instance_id, _, _, _, allocated) in &targets {
-            outcomes.push("strike-damage-allocated", || {
-                json!({
-                    "amount": allocated,
-                    "strikerInstanceId": source_instance_id,
-                    "targetInstanceId": target_instance_id,
-                })
-            });
-        }
-        let mut dead_minions = Vec::new();
-        let mut defeated_avatars = Vec::new();
-        for (target_instance_id, kind, seat, status, allocated) in targets {
-            let result = self.apply_simple_damage_with_status(
-                kind,
-                seat,
-                &target_instance_id,
-                allocated,
-                damage_source,
-                status,
-                outcomes,
-            )?;
-            if result.minion_died {
-                dead_minions.push(target_instance_id);
-            }
-            if result.avatar_defeated && !defeated_avatars.contains(&seat) {
-                defeated_avatars.push(seat);
-            }
-        }
-        {
-            self.consume_strike_artifacts(&strike, source_instance_id, outcomes)?;
-            if strike.lance_count > 0 {
-                self.break_lance(source.controller, source_instance_id, outcomes)?;
-            }
-            self.consume_next_strike_double(
-                UnitKind::Minion,
-                source.controller,
-                source_instance_id,
-                outcomes,
-            )?;
-            if !strike.consumed_artifacts.is_empty() {
-                dead_minions.extend(self.static_power_death_ids()?);
-            }
-        }
-        if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
-            self.begin_minion_deaths(
-                &dead_minions,
-                &defeated_avatars,
-                self.position.phase,
-                self.position.active_seat,
-                outcomes,
-            )?;
-        }
-        Ok(())
+            .collect();
+        self.resolve_effect_strikes(
+            &EffectStrikes {
+                source: UnitTarget::Minion {
+                    instance_id: source_instance_id.clone(),
+                    seat: source.controller,
+                },
+                targets,
+                strike,
+                reveal_source: false,
+                return_phase: self.position.phase,
+                return_seat: self.position.active_seat,
+            },
+            outcomes,
+        )
     }
 
     fn apply_here_area_damage(
@@ -24567,6 +24536,10 @@ impl Game {
         value
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one exhaustive continuation serialization dispatch"
+    )]
     fn resolution_continuation_value(&self, continuation: &ResolutionContinuation) -> Value {
         match continuation {
             ResolutionContinuation::TriggerBatch(pending) => self.trigger_order_value(pending),
@@ -24606,6 +24579,13 @@ impl Game {
                 "originStateVersion": continuation.origin_state_version,
                 "seat": continuation.seat,
                 "abilitiesLost": continuation.abilities_lost,
+            }),
+            ResolutionContinuation::LegacyGenesisTail {
+                source,
+                card_id,
+                seat,
+            } => json!({
+                "kind": "legacy-genesis-tail", "source": source.value(), "cardId": self.rules.cards[usize::from(card_id.0)].id, "seat": seat,
             }),
             ResolutionContinuation::MagicResolved {
                 resolution,

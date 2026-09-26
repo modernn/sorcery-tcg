@@ -136,18 +136,26 @@ Independent next-strike doubling grants multiply separately: two grants produce
 four times the strike damage, including repeated grants from the same source.
 They leave current power unchanged and are all consumed by the qualifying strike.
 
-Ranged strikes combine carried additive bonuses and nearby doubling through a shared
-replacement queue. The active player applies their effects first, then the other
+Ranged strikes, simultaneous fights, and effect-driven strikes combine carried
+additive bonuses and nearby doubling through one replacement queue. The active player applies their effects first, then the other
 player. A carried artifact follows bearer control; an uncontrolled artifact follows
 its owner for ordering. Mixed arithmetic offers `choose-damage-modifier` actions;
 commuting effects resolve automatically. Pending choices retain source incarnations,
 are visible to clients, and resume through checkpoints before prevention, source
 consumption, deaths, and the optional post-strike step.
 
-Other strike paths and combinations involving temporary doubling still reject mixed
-additive/doubling interactions explicitly. Extending the shared queue to simultaneous
-fights and effect-driven strikes, and retaining lasting-effect control provenance,
-remains necessary before removing the old Lance counter or admitting new Lance cards.
+Simultaneous fights hold all damage until replacement choices finish, then apply
+prevention and settle source consumption and deaths together. First-strike survivors
+resume the later fight window. Leap and Genesis effects share one full-power strike
+group resolver: each target receives a full strike, without retaliation, and a
+consumable source is removed once for the group. Later Genesis effects and Magic
+completion wait through damage choices and any resulting Deathrites.
+
+Mixed additive/doubling damage split across several defenders remains explicitly
+unsupported pending authoritative allocation timing. Combinations involving temporary
+doubling also remain guarded until lasting-effect controller provenance is retained.
+These gaps must be resolved before removing the old Lance counter or admitting new
+Lance cards; synthetic scenario coverage alone does not admit an official card.
 
 Minion `entersCarrying` lists 1–32 carriable artifact-token references, with repeated
 references creating separate artifacts. It lowers to restricted carried-token effects,

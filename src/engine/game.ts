@@ -884,6 +884,14 @@ type PendingDamageContinuation = Readonly<{
   strike: StrikeStats;
   target: GameUnitRef;
 }> | Readonly<{
+  kind: 'effect-strikes';
+  source: GameUnitRef;
+  targets: readonly GameUnitRef[];
+  strike: StrikeStats;
+  revealSource: boolean;
+  returnPhase: GamePhase;
+  returnSeat: GameSeat;
+}> | Readonly<{
   kind: 'fight-window';
   pending: PendingCombat;
   attackerStrikes: boolean;
@@ -892,6 +900,7 @@ type PendingDamageContinuation = Readonly<{
 }>;
 
 export type PendingDamageOrder = Readonly<{
+  after: JsonValue | null;
   activeSeat: GameSeat;
   amount: number;
   currentDamageIndex: number;

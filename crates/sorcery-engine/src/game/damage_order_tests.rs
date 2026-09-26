@@ -24,6 +24,10 @@ fn fixture() -> Game {
             "attack": 1, "cardType": "minion", "defense": 10, "manaCost": 0,
             "thresholds": thresholds,
         });
+        manifest["cards"]["north-spell-48"] = json!({
+            "cardType": "magic", "manaCost": 0, "thresholds": thresholds,
+            "allyStrikesEachEnemyAtItsLocation": true,
+        });
         manifest["cards"]["north-spell-49"] = json!({
             "bearerUnitStrike": {"damageBonus": 1, "destroyAfterStrike": true}, "cardType": "artifact", "manaCost": 0,
             "thresholds": thresholds,
@@ -578,4 +582,164 @@ fn mixed_attacker_bonus_split_stays_explicitly_unsupported_without_mutation() {
         Err(super::GameError::UnsupportedMechanic(_))
     ));
     assert_eq!(game.position, before);
+}
+
+#[test]
+fn effect_strikes_apply_full_bonus_to_each_target_before_consuming_source_once() {
+    let (mut game, source, _) = setup();
+    game.position.units[0].location = Cell::parse("C4").unwrap();
+    let mut second = game.position.units[1].clone();
+    second.card.instance_id = id("second-effect-target");
+    game.position.units.push(second);
+    game.apply_genesis_here_damage(&source, true, &mut super::OutcomeLog::Ignore)
+        .unwrap();
+    assert_eq!(game.position.phase, Phase::DamageOrder);
+    let first_target = game
+        .position
+        .pending_damage_order
+        .as_ref()
+        .unwrap()
+        .value(&game)["damage"][0]["target"]["instanceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    choose_operation(&mut game, "add");
+    assert_eq!(game.position.phase, Phase::DamageOrder);
+    assert!(game.position.units.iter().all(|unit| unit.damage == 0));
+    assert_eq!(game.position.artifacts.len(), 2);
+    let events = choose_operation(&mut game, "double");
+    assert_eq!(
+        game.position.units[0].damage, 0,
+        "effect strikes do not retaliate"
+    );
+    for unit in &game.position.units[1..] {
+        assert_eq!(
+            unit.damage,
+            if unit.card.instance_id.as_str() == first_target {
+                6
+            } else {
+                5
+            }
+        );
+    }
+    assert_eq!(
+        events
+            .iter()
+            .filter(|(kind, _)| kind == "artifact-consumed-after-strike")
+            .count(),
+        1
+    );
+    assert_eq!(game.position.artifacts.len(), 1);
+    assert!(game.position.pending_damage_order.is_none());
+}
+
+#[test]
+fn later_legacy_genesis_control_waits_until_damage_choices_finish() {
+    let (mut game, source, target) = setup();
+    game.position.units[0].location = Cell::parse("C4").unwrap();
+    game.position.units[1].tapped = true;
+    let card_id = game.position.units[0].card.card_id;
+    let super::CardFacts::Minion(facts) =
+        &mut std::sync::Arc::get_mut(&mut game.rules).unwrap().cards[usize::from(card_id.0)].facts
+    else {
+        panic!("minion")
+    };
+    facts.genesis_strike_each_enemy_here = true;
+    facts.genesis_gain_control_of_tapped_minions_here_until_this_leaves = true;
+    game.apply_minion_genesis(
+        Seat::North,
+        &source,
+        card_id,
+        &mut super::OutcomeLog::Ignore,
+    )
+    .unwrap();
+    assert_eq!(game.position.phase, Phase::DamageOrder);
+    assert_eq!(game.position.units[1].controller, Seat::South);
+    assert_eq!(game.position.units[1].damage, 0);
+    assert!(
+        game.position
+            .pending_damage_order
+            .as_ref()
+            .unwrap()
+            .after
+            .is_some()
+    );
+    let events = choose_operation(&mut game, "add");
+    let target = game
+        .position
+        .units
+        .iter()
+        .find(|unit| unit.card.instance_id == target)
+        .unwrap();
+    assert_eq!(target.damage, 6);
+    assert_eq!(target.controller, Seat::North);
+    assert!(
+        events
+            .iter()
+            .any(|(kind, _)| kind == "artifact-consumed-after-strike")
+    );
+    assert!(game.position.pending_damage_order.is_none());
+}
+
+#[test]
+fn effect_magic_completes_once_after_ordered_damage_and_ordered_deathrites() {
+    let (mut game, source, _) = setup();
+    game.position.units[0].location = Cell::parse("C4").unwrap();
+    game.position.units[1].damage = 5;
+    let mut second = game.position.units[1].clone();
+    second.card.instance_id = id("second-deathrite-target");
+    game.position.units.push(second);
+    let card = game.position.units[1].card.card_id;
+    let super::CardFacts::Minion(facts) =
+        &mut std::sync::Arc::get_mut(&mut game.rules).unwrap().cards[usize::from(card.0)].facts
+    else {
+        panic!("minion")
+    };
+    facts.deathrite_heal = Some(2);
+    game.position.players[1].avatar.life = 10;
+    let magic = id("effect-magic");
+    let mut initial = Vec::new();
+    game.finish_leap_attack(
+        &super::LeapAttackContinuation {
+            ally: UnitTarget::Minion {
+                instance_id: source,
+                seat: Seat::North,
+            },
+            card_id: "north-spell-48".to_owned(),
+            instance_id: magic.clone(),
+            owner: Seat::North,
+            strike_location: super::Location {
+                cell: Cell::parse("C4").unwrap(),
+                region: Region::Surface,
+            },
+        },
+        &mut super::OutcomeLog::Record(&mut initial),
+    )
+    .unwrap();
+    assert!(!initial.iter().any(|(kind, _)| kind == "magic-resolved"));
+    choose_operation(&mut game, "add");
+    let mut events = choose_operation(&mut game, "add");
+    assert!(game.position.pending_damage_order.is_none());
+    assert!(game.position.pending_deathrites.is_some());
+    assert!(!events.iter().any(|(kind, _)| kind == "magic-resolved"));
+    assert_eq!(game.position.players[1].avatar.life, 10);
+    while game.position.pending_deathrites.is_some() {
+        let action = game
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("deathrite order");
+        events.extend(game.apply_action_recorded(&action).unwrap().0);
+    }
+    assert_eq!(game.position.players[1].avatar.life, 14);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|(kind, data)| kind == "magic-resolved" && data["instanceId"] == magic.as_str())
+            .count(),
+        1
+    );
+    assert_eq!(game.position.units.len(), 1);
+    assert_eq!(game.position.units[0].damage, 0);
 }

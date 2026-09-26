@@ -27,7 +27,7 @@ pub(super) struct SiteGenesisTail {
 }
 
 impl ResolutionContinuation {
-    fn followed_by(self, next: Self) -> Self {
+    pub(super) fn followed_by(self, next: Self) -> Self {
         let mut sequence = match self {
             Self::Sequence(sequence) => sequence,
             first => vec![first],
@@ -176,6 +176,11 @@ impl Game {
     ) -> Result<(), GameError> {
         if self.position.terminal.is_some() {
             self.emit_interrupted_magic_resolved(Some(&continuation), outcomes);
+        } else if let Some(pending) = &mut self.position.pending_damage_order {
+            pending.after = Some(match pending.after.take() {
+                Some(first) => first.followed_by(continuation),
+                None => continuation,
+            });
         } else if let Some(pending) = &mut self.position.pending_deathrites {
             pending.continuation = Some(match pending.continuation.take() {
                 Some(first) => first.followed_by(continuation),
