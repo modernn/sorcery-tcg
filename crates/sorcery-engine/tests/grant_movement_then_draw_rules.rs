@@ -230,11 +230,9 @@ fn gift_ally_ids(session: &Session) -> Vec<String> {
         .legal_actions()
         .expect("gift actions")
         .into_iter()
-        .filter(|action| {
-            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-gift"
-        })
+        .filter(|action| action.descriptor["kind"] == "choose-ability")
         .filter_map(|action| {
-            action.descriptor["ally"]["instanceId"]
+            action.descriptor["target"]["instanceId"]
                 .as_str()
                 .map(ToOwned::to_owned)
         })
@@ -327,11 +325,13 @@ fn through_south_pass_to_north_main(session: &mut Session) {
 }
 
 fn grant_movement(session: &mut Session, ally_id: &str) -> (Value, Receipt) {
-    accept_where(session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-gift"
-            && descriptor["ally"]["instanceId"] == ally_id
-    })
+    let (descriptor, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-gift"
+    });
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "choose-ability" && descriptor["target"]["instanceId"] == ally_id
+    });
+    (descriptor, receipt)
 }
 
 fn expire_grant_movement(session: &mut Session, ally_id: &str, grant_source: &str) {
@@ -400,6 +400,9 @@ fn rule_catalog_0535_movement_grant_offers_allies_then_draws_a_spell() {
         .as_str()
         .expect("drawn identity")
         .to_owned();
+    let (grant_descriptor, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-gift"
+    });
     let allies = gift_ally_ids(&session);
     assert!(allies.contains(&ally_id));
     assert!(allies.contains(&north_avatar));
@@ -407,14 +410,12 @@ fn rule_catalog_0535_movement_grant_offers_allies_then_draws_a_spell() {
     assert!(!allies.contains(&enemy_id));
 
     let (_, granted) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-gift"
-            && descriptor["ally"]["instanceId"] == ally_id
+        descriptor["kind"] == "choose-ability" && descriptor["target"]["instanceId"] == ally_id
     });
     assert_eq!(
         event_types(&granted),
         [
-            "magic-cast",
+            "ability-choice-committed",
             "movement-granted",
             "spell-drawn",
             "magic-resolved"
@@ -425,7 +426,7 @@ fn rule_catalog_0535_movement_grant_offers_allies_then_draws_a_spell() {
     let after = state(&session);
     assert_eq!(
         modifier_sources(unit(&after, &ally_id), "movement")[0],
-        granted.events[0].payload["instanceId"]
+        grant_descriptor["cardInstanceId"]
     );
     assert!(
         after["players"]["north"]["hand"]["spellbook"]
@@ -469,11 +470,7 @@ fn rule_catalog_0536_granted_movement_then_draw_reaches_a_two_step_cell() {
         "a 1-step minion cannot reach a cell two steps away"
     );
 
-    accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-gift"
-            && descriptor["ally"]["instanceId"] == ally_id
-    });
+    grant_movement(&mut session, &ally_id);
     assert!(
         can_move_to(&session, &ally_id, "C2"),
         "granted +1 movement lets the minion reach a cell two steps away"
@@ -501,7 +498,7 @@ fn rule_catalog_1614_granted_movement_reaches_two_step_cell_before_end_of_turn()
     assert_eq!(
         event_types(&receipt),
         [
-            "magic-cast",
+            "ability-choice-committed",
             "movement-granted",
             "spell-drawn",
             "magic-resolved"
@@ -550,7 +547,7 @@ fn rule_catalog_1617_printed_and_granted_movement_compose_while_grant_is_active(
     assert_eq!(
         event_types(&receipt),
         [
-            "magic-cast",
+            "ability-choice-committed",
             "movement-granted",
             "spell-drawn",
             "magic-resolved"
@@ -694,7 +691,9 @@ fn try_pending_deathrite_with_allied_minion(
     if !north_has_gift_and_rain(&state(&session)) {
         return None;
     }
-    if !gift_ally_ids(&session).contains(&ally_id) {
+    if !session.legal_actions().ok()?.iter().any(|action| {
+        action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-gift"
+    }) {
         return None;
     }
     try_accept_where(&mut session, |descriptor| {
@@ -773,6 +772,9 @@ fn rule_catalog_1066_grant_movement_then_draw_withheld_during_pending_deathrite_
     assert_eq!(resumed["decisionSeat"], "north");
     assert!(resumed["pendingDeathrites"].is_null());
     assert!(unit(&resumed, &ally_id).is_object());
+    let (grant_descriptor, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-gift"
+    });
     assert!(gift_ally_ids(session).contains(&ally_id));
 
     let library_top = resumed["players"]["north"]["spellbook"]
@@ -789,14 +791,12 @@ fn rule_catalog_1066_grant_movement_then_draw_withheld_during_pending_deathrite_
         .len();
 
     let (_, granted) = accept_where(session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-gift"
-            && descriptor["ally"]["instanceId"] == ally_id
+        descriptor["kind"] == "choose-ability" && descriptor["target"]["instanceId"] == ally_id
     });
     assert_eq!(
         event_types(&granted),
         [
-            "magic-cast",
+            "ability-choice-committed",
             "movement-granted",
             "spell-drawn",
             "magic-resolved"
@@ -807,7 +807,7 @@ fn rule_catalog_1066_grant_movement_then_draw_withheld_during_pending_deathrite_
     let after = state(session);
     assert_eq!(
         modifier_sources(unit(&after, &ally_id), "movement")[0],
-        granted.events[0].payload["instanceId"]
+        grant_descriptor["cardInstanceId"]
     );
     let hand_after = after["players"]["north"]["hand"]["spellbook"]
         .as_array()

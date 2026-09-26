@@ -84,6 +84,32 @@ test('reviewed local bindings require exact source identity, complete review and
     new Map([...pool, ['unbound', { definition: facts.b!, presetIds: [] }]])), /conflicting/);
 });
 
+test('reviewed bindings replace matching preset facts only with an explicit prior hash', () => {
+  const source = authority.cards.find((card) => card.stableId === 'unbound')!;
+  const previous = { ...facts.a!, ordinary: true as const };
+  const replacement = { ...previous, charge: true as const };
+  const pool = new Map<string, { definition: GameCardDefinition; presetIds: readonly string[] }>([
+    ['unbound', { definition: previous, presetIds: ['synthetic-preset'] }],
+  ]);
+  const row = {
+    cardId: source.stableId,
+    sourceCardHash: identityHash(source as unknown as JsonValue),
+    replacesFactsHash: identityHash(previous as JsonValue),
+    facts: replacement,
+    review: { entireRulesText: true, proofs: ['synthetic replacement proof'] },
+  };
+  const file = { schemaVersion: 1, authorityHash: authority.authorityHash,
+    revisionId: authority.revisionId, cards: [row] };
+  const merged = mergeReviewedCardBindings(file, authority, pool);
+  assert.deepEqual(merged.get('unbound')?.definition, replacement);
+  assert.deepEqual(merged.get('unbound')?.presetIds, ['reviewed-local', 'synthetic-preset']);
+  assert.throws(() => mergeReviewedCardBindings({ ...file,
+    cards: [{ ...row, replacesFactsHash: `sha256:${'f'.repeat(64)}` }] }, authority, pool), /replacement/);
+  assert.throws(() => mergeReviewedCardBindings({ ...file,
+    cards: [{ ...row, replacesFactsHash: identityHash(replacement as JsonValue) }] }, authority,
+  new Map()), /replacement/);
+});
+
 test('optional reviewed binding file fails closed on malformed data and file aliases', async () => {
   const root = await mkdtemp(join(tmpdir(), 'reviewed-bindings-'));
   const pool = buildPresetCardPool(authority, presets);

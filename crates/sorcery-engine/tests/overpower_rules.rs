@@ -356,33 +356,45 @@ fn avatar_stats(snapshot: &Value, seat: &str) -> (u64, u64) {
 }
 
 fn overpower_ally_ids(session: &Session) -> Vec<String> {
-    let actions = session.legal_actions().expect("Overpower actions");
-    let Some(spell_id) = actions.iter().find_map(|action| {
-        if action.descriptor["kind"] == "cast-magic"
-            && action.descriptor["cardId"] == "north-overpower"
-        {
-            action.descriptor["cardInstanceId"]
-                .as_str()
-                .map(ToOwned::to_owned)
-        } else {
-            None
-        }
-    }) else {
-        return Vec::new();
-    };
-    actions
+    session
+        .legal_actions()
+        .expect("Overpower actions")
         .into_iter()
-        .filter(|action| {
-            action.descriptor["kind"] == "cast-magic"
-                && action.descriptor["cardInstanceId"] == spell_id
-        })
+        .filter(|action| action.descriptor["kind"] == "choose-ability")
         .filter_map(|action| {
-            assert!(action.descriptor["target"].is_null());
-            action.descriptor["ally"]["instanceId"]
+            action.descriptor["target"]["instanceId"]
                 .as_str()
                 .map(ToOwned::to_owned)
         })
         .collect()
+}
+
+fn overpower_available(session: &Session) -> bool {
+    session.legal_actions().is_ok_and(|actions| {
+        actions.iter().any(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-overpower"
+        })
+    })
+}
+
+fn grant_overpower(
+    session: &mut Session,
+    card_instance_id: Option<&str>,
+    target_id: &str,
+) -> (Value, Receipt, Receipt) {
+    let (cast, cast_receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-overpower"
+            && card_instance_id.is_none_or(|id| descriptor["cardInstanceId"] == id)
+    });
+    let source = cast["cardInstanceId"].clone();
+    let (_, choice_receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "choose-ability"
+            && descriptor["sourceInstanceId"] == source
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    (cast, cast_receipt, choice_receipt)
 }
 
 fn assert_exact_replay(session: &Session) {
@@ -528,7 +540,7 @@ fn try_pending_deathrite_with_ready_visitor(
     let avatar_id = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
         .as_str()?
         .to_owned();
-    if !overpower_ally_ids(&session).contains(&avatar_id) {
+    if !overpower_available(&session) {
         return None;
     }
     try_accept_where(&mut session, |descriptor| {
@@ -609,14 +621,15 @@ fn rule_catalog_0700_overpower_changes_current_power_until_the_current_end_phase
     let mut session = opening_main(&encoded);
     let (fighter_id, enemy_id, _) = play_to_powered_board(&mut session);
 
-    let (cast, granted) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-overpower"
-            && descriptor["ally"]["instanceId"] == fighter_id
-    });
+    let (cast, cast_receipt, granted) = grant_overpower(&mut session, None, &fighter_id);
+    assert_eq!(event_types(&cast_receipt), ["magic-cast"]);
     assert_eq!(
         event_types(&granted),
-        ["magic-cast", "power-granted", "magic-resolved"]
+        [
+            "ability-choice-committed",
+            "power-granted",
+            "magic-resolved"
+        ]
     );
     let source_id = cast["cardInstanceId"]
         .as_str()
@@ -703,11 +716,17 @@ fn rule_catalog_0700_overpower_changes_current_power_until_the_current_end_phase
 }
 
 #[test]
+#[allow(clippy::too_many_lines)] // Keep the cast, choice, stacking, and expiry proof in order.
 fn rule_catalog_1128_overpower_offers_allies_and_stacks_until_end_phase() {
     let encoded = seed_with(1700);
     let mut session = opening_main(&encoded);
     let (fighter_id, enemy_id, avatar_id) = play_to_powered_board(&mut session);
 
+    let checkpoint = session.clone();
+    let (avatar_cast, avatar_cast_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-overpower"
+    });
+    assert_eq!(event_types(&avatar_cast_receipt), ["magic-cast"]);
     let mut ally_ids = overpower_ally_ids(&session);
     ally_ids.sort();
     let mut expected = vec![avatar_id.clone(), fighter_id.clone()];
@@ -715,15 +734,18 @@ fn rule_catalog_1128_overpower_offers_allies_and_stacks_until_end_phase() {
     assert_eq!(ally_ids, expected);
     assert!(!ally_ids.contains(&enemy_id));
 
-    let checkpoint = session.clone();
     let (_, avatar_grant) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-overpower"
-            && descriptor["ally"]["kind"] == "avatar"
+        descriptor["kind"] == "choose-ability"
+            && descriptor["sourceInstanceId"] == avatar_cast["cardInstanceId"]
+            && descriptor["target"]["instanceId"] == avatar_id
     });
     assert_eq!(
         event_types(&avatar_grant),
-        ["magic-cast", "power-granted", "magic-resolved"]
+        [
+            "ability-choice-committed",
+            "power-granted",
+            "magic-resolved"
+        ]
     );
     let (_, avatar_ended) =
         accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
@@ -758,16 +780,40 @@ fn rule_catalog_1128_overpower_offers_allies_and_stacks_until_end_phase() {
         })
         .collect();
     assert_eq!(overpower_ids.len(), 2);
-    accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardInstanceId"] == overpower_ids[0]
-            && descriptor["ally"]["instanceId"] == fighter_id
+    let (first_cast, first_cast_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardInstanceId"] == overpower_ids[0]
     });
-    accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardInstanceId"] == overpower_ids[1]
-            && descriptor["ally"]["instanceId"] == fighter_id
+    assert_eq!(event_types(&first_cast_receipt), ["magic-cast"]);
+    let (_, first_grant) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "choose-ability"
+            && descriptor["sourceInstanceId"] == first_cast["cardInstanceId"]
+            && descriptor["target"]["instanceId"] == fighter_id
     });
+    assert_eq!(
+        event_types(&first_grant),
+        [
+            "ability-choice-committed",
+            "power-granted",
+            "magic-resolved"
+        ]
+    );
+    let (second_cast, second_cast_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardInstanceId"] == overpower_ids[1]
+    });
+    assert_eq!(event_types(&second_cast_receipt), ["magic-cast"]);
+    let (_, second_grant) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "choose-ability"
+            && descriptor["sourceInstanceId"] == second_cast["cardInstanceId"]
+            && descriptor["target"]["instanceId"] == fighter_id
+    });
+    assert_eq!(
+        event_types(&second_grant),
+        [
+            "ability-choice-committed",
+            "power-granted",
+            "magic-resolved"
+        ]
+    );
     assert_eq!(
         modifier_sources(realm_unit(&state(&session), &fighter_id), "power"),
         json!(overpower_ids)
@@ -806,14 +852,15 @@ fn rule_catalog_1140_overpower_power_expires_after_end_phase_cleanup() {
     let mut session = opening_main(&encoded);
     let (fighter_id, enemy_id, _) = play_to_powered_board(&mut session);
 
-    let (cast, granted) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-overpower"
-            && descriptor["ally"]["instanceId"] == fighter_id
-    });
+    let (cast, cast_receipt, granted) = grant_overpower(&mut session, None, &fighter_id);
+    assert_eq!(event_types(&cast_receipt), ["magic-cast"]);
     assert_eq!(
         event_types(&granted),
-        ["magic-cast", "power-granted", "magic-resolved"]
+        [
+            "ability-choice-committed",
+            "power-granted",
+            "magic-resolved"
+        ]
     );
     let source_id = cast["cardInstanceId"]
         .as_str()
@@ -883,6 +930,7 @@ fn rule_catalog_1140_overpower_power_expires_after_end_phase_cleanup() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)] // One scenario compares Avatar and disabled-minion grants.
 fn rule_catalog_0722_temporary_power_raises_observed_avatar_and_disabled_minion_stats() {
     let encoded = seed_for_power_observed(722);
     let mut session = opening_main(&encoded);
@@ -941,6 +989,10 @@ fn rule_catalog_0722_temporary_power_raises_observed_avatar_and_disabled_minion_
     assert_eq!(disabled_fighter["attack"], 2);
     assert_eq!(disabled_fighter["defense"], 2);
 
+    let (avatar_cast, avatar_cast_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-overpower"
+    });
+    assert_eq!(event_types(&avatar_cast_receipt), ["magic-cast"]);
     let mut ally_ids = overpower_ally_ids(&session);
     ally_ids.sort();
     let mut expected_allies = vec![avatar_id.clone(), fighter_id.clone()];
@@ -948,13 +1000,17 @@ fn rule_catalog_0722_temporary_power_raises_observed_avatar_and_disabled_minion_
     assert_eq!(ally_ids, expected_allies);
 
     let (_, avatar_grant) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-overpower"
-            && descriptor["ally"]["kind"] == "avatar"
+        descriptor["kind"] == "choose-ability"
+            && descriptor["sourceInstanceId"] == avatar_cast["cardInstanceId"]
+            && descriptor["target"]["instanceId"] == avatar_id
     });
     assert_eq!(
         event_types(&avatar_grant),
-        ["magic-cast", "power-granted", "magic-resolved"]
+        [
+            "ability-choice-committed",
+            "power-granted",
+            "magic-resolved"
+        ]
     );
     let after_avatar = observed(&session);
     assert_eq!(avatar_stats(&after_avatar, "north"), (3, 3));
@@ -965,14 +1021,22 @@ fn rule_catalog_0722_temporary_power_raises_observed_avatar_and_disabled_minion_
         Some(1)
     );
 
+    let (fighter_cast, fighter_cast_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-overpower"
+    });
+    assert_eq!(event_types(&fighter_cast_receipt), ["magic-cast"]);
     let (_, fighter_grant) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-overpower"
-            && descriptor["ally"]["instanceId"] == fighter_id
+        descriptor["kind"] == "choose-ability"
+            && descriptor["sourceInstanceId"] == fighter_cast["cardInstanceId"]
+            && descriptor["target"]["instanceId"] == fighter_id
     });
     assert_eq!(
         event_types(&fighter_grant),
-        ["magic-cast", "power-granted", "magic-resolved"]
+        [
+            "ability-choice-committed",
+            "power-granted",
+            "magic-resolved"
+        ]
     );
     let after_fighter = observed(&session);
     let powered = observed_unit(&after_fighter, &fighter_id);
@@ -1040,16 +1104,24 @@ fn rule_catalog_1053_overpower_magic_withheld_during_pending_deathrite_order() {
     assert_eq!(resumed["decisionSeat"], "north");
     assert!(resumed["pendingDeathrites"].is_null());
     assert!(realm_unit_opt(&resumed, &visitor_id).is_some());
-    assert!(overpower_ally_ids(session).contains(&avatar_id));
+    assert!(overpower_available(session));
 
+    let (cast, cast_receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-overpower"
+    });
+    assert_eq!(event_types(&cast_receipt), ["magic-cast"]);
     let (_, receipt) = accept_where(session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-overpower"
-            && descriptor["ally"]["instanceId"] == avatar_id
+        descriptor["kind"] == "choose-ability"
+            && descriptor["sourceInstanceId"] == cast["cardInstanceId"]
+            && descriptor["target"]["instanceId"] == avatar_id
     });
     assert_eq!(
         event_types(&receipt),
-        ["magic-cast", "power-granted", "magic-resolved"]
+        [
+            "ability-choice-committed",
+            "power-granted",
+            "magic-resolved"
+        ]
     );
     assert_eq!(avatar_stats(&observed(session), "north"), (3, 3));
     assert_exact_replay(session);

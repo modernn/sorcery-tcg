@@ -264,12 +264,17 @@ fn summon_north_ally(session: &mut Session) -> String {
         .to_owned()
 }
 
-fn grant_first_strike(session: &mut Session, ally_id: &str) -> (Value, Receipt) {
-    accept_where(session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-grant"
-            && descriptor["ally"]["instanceId"] == ally_id
-    })
+fn grant_first_strike(session: &mut Session, ally_id: &str) -> (Value, Receipt, Receipt) {
+    let (cast, cast_receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-grant"
+    });
+    let source = cast["cardInstanceId"].clone();
+    let (_, choice_receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "choose-ability"
+            && descriptor["sourceInstanceId"] == source
+            && descriptor["target"]["instanceId"] == ally_id
+    });
+    (cast, cast_receipt, choice_receipt)
 }
 
 fn grant_ally_ids(session: &Session) -> Vec<String> {
@@ -277,16 +282,22 @@ fn grant_ally_ids(session: &Session) -> Vec<String> {
         .legal_actions()
         .expect("grant actions")
         .into_iter()
-        .filter(|action| {
-            action.descriptor["kind"] == "cast-magic"
-                && action.descriptor["cardId"] == "north-grant"
-        })
+        .filter(|action| action.descriptor["kind"] == "choose-ability")
         .filter_map(|action| {
-            action.descriptor["ally"]["instanceId"]
+            action.descriptor["target"]["instanceId"]
                 .as_str()
                 .map(ToOwned::to_owned)
         })
         .collect()
+}
+
+fn grant_available(session: &Session) -> bool {
+    session.legal_actions().is_ok_and(|actions| {
+        actions.iter().any(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-grant"
+        })
+    })
 }
 
 fn south_summons_visitor_at_c4(session: &mut Session) -> String {
@@ -404,10 +415,15 @@ fn rule_catalog_0282_grant_first_strike_lasts_only_until_end_of_turn() {
             .is_some_and(Vec::is_empty)
     );
 
-    let (descriptor, receipt) = grant_first_strike(&mut session, &ally_id);
+    let (descriptor, cast_receipt, receipt) = grant_first_strike(&mut session, &ally_id);
+    assert_eq!(event_types(&cast_receipt), ["magic-cast"]);
     assert_eq!(
         event_types(&receipt),
-        ["magic-cast", "first-strike-granted", "magic-resolved"]
+        [
+            "ability-choice-committed",
+            "first-strike-granted",
+            "magic-resolved"
+        ]
     );
     assert_eq!(receipt.events[1].payload["instanceId"], ally_id);
     assert_eq!(receipt.events[1].payload["seat"], "north");
@@ -500,7 +516,7 @@ fn rule_catalog_1534_printed_and_granted_first_strike_compose_while_attacking() 
     let mut session = opening_main_with_ally(&printed_first_strike_fighter());
     let ally_id = summon_north_ally(&mut session);
     let enemy_id = south_summons_visitor_at_c4(&mut session);
-    let (descriptor, _) = grant_first_strike(&mut session, &ally_id);
+    let (descriptor, _, _) = grant_first_strike(&mut session, &ally_id);
     assert!(
         modifier_sources(unit(&state(&session), &ally_id), "first-strike")
             .as_array()
@@ -525,7 +541,7 @@ fn rule_catalog_1535_printed_and_granted_first_strike_compose_while_defending() 
     let mut session = opening_main_with_ally(&printed_first_strike_fighter());
     let ally_id = summon_north_ally(&mut session);
     let enemy_id = south_summons_visitor_at_c4(&mut session);
-    let (descriptor, _) = grant_first_strike(&mut session, &ally_id);
+    let (descriptor, _, _) = grant_first_strike(&mut session, &ally_id);
     assert_eq!(
         &descriptor["cardInstanceId"],
         modifier_sources(unit(&state(&session), &ally_id), "first-strike")
@@ -782,7 +798,7 @@ fn rule_catalog_1573_defending_only_printed_plus_grant_strikes_first_after_grant
     let mut session = opening_main_with_ally(&defending_only_fighter());
     let ally_id = summon_north_ally(&mut session);
     let enemy_id = south_summons_visitor_at_c4(&mut session);
-    let (descriptor, _) = grant_first_strike(&mut session, &ally_id);
+    let (descriptor, _, _) = grant_first_strike(&mut session, &ally_id);
     expire_grant_first_strike(
         &mut session,
         &ally_id,
@@ -801,7 +817,7 @@ fn rule_catalog_1574_printed_first_strike_plus_grant_strikes_first_after_grant_e
     let mut session = opening_main_with_ally(&printed_first_strike_fighter());
     let ally_id = summon_north_ally(&mut session);
     let enemy_id = south_summons_visitor_at_c4(&mut session);
-    let (descriptor, _) = grant_first_strike(&mut session, &ally_id);
+    let (descriptor, _, _) = grant_first_strike(&mut session, &ally_id);
     expire_grant_first_strike(
         &mut session,
         &ally_id,
@@ -820,7 +836,7 @@ fn rule_catalog_1575_granted_first_strike_expires_before_ally_attacks_on_later_t
     let mut session = opening_main();
     let ally_id = summon_north_ally(&mut session);
     let enemy_id = south_summons_visitor_at_c4(&mut session);
-    let (descriptor, _) = grant_first_strike(&mut session, &ally_id);
+    let (descriptor, _, _) = grant_first_strike(&mut session, &ally_id);
     expire_grant_first_strike(
         &mut session,
         &ally_id,
@@ -839,7 +855,7 @@ fn rule_catalog_1576_attacking_only_printed_plus_grant_trades_after_grant_expire
     let mut session = opening_main_with_ally(&attacking_only_fighter());
     let ally_id = summon_north_ally(&mut session);
     let enemy_id = south_summons_visitor_at_c4(&mut session);
-    let (descriptor, _) = grant_first_strike(&mut session, &ally_id);
+    let (descriptor, _, _) = grant_first_strike(&mut session, &ally_id);
     expire_grant_first_strike(
         &mut session,
         &ally_id,
@@ -856,7 +872,7 @@ fn rule_catalog_1577_defending_only_printed_persists_after_grant_expires_while_d
     let mut session = opening_main_with_ally(&defending_only_fighter());
     let ally_id = summon_north_ally(&mut session);
     let enemy_id = south_summons_visitor_at_c4(&mut session);
-    let (descriptor, _) = grant_first_strike(&mut session, &ally_id);
+    let (descriptor, _, _) = grant_first_strike(&mut session, &ally_id);
     expire_grant_first_strike(
         &mut session,
         &ally_id,
@@ -866,7 +882,7 @@ fn rule_catalog_1577_defending_only_printed_persists_after_grant_expires_while_d
     let mut plain = opening_main();
     let plain_ally = summon_north_ally(&mut plain);
     let plain_enemy = south_summons_visitor_at_c4(&mut plain);
-    let (plain_descriptor, plain_grant) = grant_first_strike(&mut plain, &plain_ally);
+    let (plain_descriptor, _, plain_grant) = grant_first_strike(&mut plain, &plain_ally);
     expire_grant_first_strike(
         &mut plain,
         &plain_ally,
@@ -1019,7 +1035,7 @@ fn try_pending_deathrite_with_allied_minion(
     if !north_has_grant_and_rain(&state(&session)) {
         return None;
     }
-    if !grant_ally_ids(&session).contains(&ally_id) {
+    if !grant_available(&session) {
         return None;
     }
     try_accept_where(&mut session, |descriptor| {
@@ -1100,17 +1116,22 @@ fn rule_catalog_1108_grant_first_strike_withheld_during_pending_deathrite_order(
     assert_eq!(resumed["decisionSeat"], "north");
     assert!(resumed["pendingDeathrites"].is_null());
     assert!(unit(&resumed, &ally_id).is_object());
-    assert!(grant_ally_ids(session).contains(&ally_id));
+    assert!(grant_available(session));
     assert!(
         modifier_sources(unit(&resumed, &ally_id), "first-strike")
             .as_array()
             .is_some_and(Vec::is_empty)
     );
 
-    let (descriptor, receipt) = grant_first_strike(session, &ally_id);
+    let (descriptor, cast_receipt, receipt) = grant_first_strike(session, &ally_id);
+    assert_eq!(event_types(&cast_receipt), ["magic-cast"]);
     assert_eq!(
         event_types(&receipt),
-        ["magic-cast", "first-strike-granted", "magic-resolved"]
+        [
+            "ability-choice-committed",
+            "first-strike-granted",
+            "magic-resolved"
+        ]
     );
     assert_eq!(receipt.events[1].payload["instanceId"], ally_id);
     assert_eq!(receipt.events[1].payload["seat"], "north");
@@ -1132,8 +1153,17 @@ fn avatar_receives_first_strike_from_an_engine_issued_ally_grant_and_replays_exp
     let avatar_id = before["players"]["north"]["avatar"]["card"]["instanceId"]
         .as_str()
         .expect("Avatar identity");
-    assert!(grant_ally_ids(&session).iter().any(|id| id == avatar_id));
-    let (descriptor, _) = grant_first_strike(&mut session, avatar_id);
+    assert!(grant_available(&session));
+    let (descriptor, cast_receipt, choice_receipt) = grant_first_strike(&mut session, avatar_id);
+    assert_eq!(event_types(&cast_receipt), ["magic-cast"]);
+    assert_eq!(
+        event_types(&choice_receipt),
+        [
+            "ability-choice-committed",
+            "first-strike-granted",
+            "magic-resolved"
+        ]
+    );
     assert_eq!(
         modifier_sources(
             &state(&session)["players"]["north"]["avatar"],

@@ -8204,32 +8204,31 @@ test('RULE-03 Charge Magic grants an untargeted ally Charge only for the current
           instanceId === printedCharge.instanceId)?.warded,
       }, { region: 'underground', stealthed: true, warded: true });
       const casts = (await ctx.legalActions('north')).filter(({ descriptor }) =>
-        descriptor.kind === 'cast-magic'
+        descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === chargeCards[0]?.instanceId);
+      assert.equal(casts.length, 1);
+      assert.equal(casts[0]?.descriptor.kind === 'cast-magic' && casts[0].descriptor.ally === undefined, true);
+      await withFork(ctx, async (choiceFork) => {
+        await choiceFork.take(({ descriptor }) => descriptor.kind === 'cast-magic'
           && descriptor.cardInstanceId === chargeCards[0]?.instanceId);
-      const allyIds = casts.flatMap(({ descriptor }) => descriptor.kind === 'cast-magic'
-        && descriptor.ally ? [descriptor.ally.instanceId] : []).sort();
-      assert.deepEqual(allyIds, [
-        ctx.state.players.north.avatar.card.instanceId,
-        printedCharge.instanceId,
-        summoned.instanceId,
-      ].sort());
-      assert.equal(allyIds.includes(enemy.instanceId), false);
-      assert.equal(casts.every(({ descriptor }) => descriptor.kind === 'cast-magic'
-        && descriptor.target === undefined), true);
-      assert.equal(casts.find(({ descriptor }) => descriptor.kind === 'cast-magic'
-        && descriptor.ally?.instanceId === summoned.instanceId)?.label.includes('grant Charge'), true);
+        const choices = await choiceFork.legalActions('north');
+        const allyIds = choices.flatMap(({ descriptor }) => descriptor.kind === 'choose-ability'
+          && descriptor.target ? [descriptor.target.instanceId] : []).sort();
+        assert.deepEqual(allyIds, [ctx.state.players.north.avatar.card.instanceId,
+          printedCharge.instanceId, summoned.instanceId].sort());
+        assert.equal(allyIds.includes(enemy.instanceId), false);
+      });
       assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
-        descriptor.kind === 'move-and-attack'
-          && descriptor.unitInstanceId === summoned.instanceId), false);
+        descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === summoned.instanceId), false);
 
       const versionBefore = ctx.state.stateVersion;
       await withFork(ctx, async (avatarFork) => {
         await avatarFork.take(({ descriptor }) =>
           descriptor.kind === 'cast-magic'
-            && descriptor.cardInstanceId === chargeCards[0]?.instanceId
-            && descriptor.ally?.kind === 'avatar');
+            && descriptor.cardInstanceId === chargeCards[0]?.instanceId);
+        await avatarFork.take(({ descriptor }) => descriptor.kind === 'choose-ability'
+          && descriptor.target?.kind === 'avatar');
         assert.deepEqual(avatarFork.session.transcript.at(-1)?.events.map(({ type }) => type), [
-          'magic-cast',
+          'ability-choice-committed',
           'charge-granted',
           'magic-resolved',
         ]);
@@ -8238,14 +8237,14 @@ test('RULE-03 Charge Magic grants an untargeted ally Charge only for the current
         assert.equal(await avatarFork.verifyReplay(), true);
       });
 
+      await ctx.take(({ descriptor }) => descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === chargeCards[0]?.instanceId);
       const first = await ctx.step(await ctx.action(({ descriptor }) =>
-        descriptor.kind === 'cast-magic'
-          && descriptor.cardInstanceId === chargeCards[0]?.instanceId
-          && descriptor.ally?.instanceId === summoned.instanceId));
+        descriptor.kind === 'choose-ability' && descriptor.target?.instanceId === summoned.instanceId));
       assert.equal(first.accepted, true);
       if (!first.accepted) return;
       assert.deepEqual(first.receipt.events.map(({ type }) => type), [
-        'magic-cast',
+        'ability-choice-committed',
         'charge-granted',
         'magic-resolved',
       ]);
@@ -8255,10 +8254,10 @@ test('RULE-03 Charge Magic grants an untargeted ally Charge only for the current
         descriptor.kind === 'move-and-attack'
           && descriptor.unitInstanceId === summoned.instanceId), true);
 
+      await ctx.take(({ descriptor }) => descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === chargeCards[1]?.instanceId);
       const second = await ctx.step(await ctx.action(({ descriptor }) =>
-        descriptor.kind === 'cast-magic'
-          && descriptor.cardInstanceId === chargeCards[1]?.instanceId
-          && descriptor.ally?.instanceId === summoned.instanceId));
+        descriptor.kind === 'choose-ability' && descriptor.target?.instanceId === summoned.instanceId));
       assert.equal(second.accepted, true);
       if (!second.accepted) return;
       assert.deepEqual(temporarySources(ctx.state.realm.units.find(({ instanceId }) =>
@@ -8266,7 +8265,7 @@ test('RULE-03 Charge Magic grants an untargeted ally Charge only for the current
       assert.equal(ctx.state.players.north.mana, 0);
       assert.equal(ctx.state.players.north.cemetery.filter(({ instanceId }) =>
         chargeCards.some((card) => card.instanceId === instanceId)).length, 2);
-      assert.equal(ctx.state.stateVersion, versionBefore + 2);
+      assert.equal(ctx.state.stateVersion, versionBefore + 4);
       assert.equal(first.receipt.randomDraws.length + second.receipt.randomDraws.length, 0);
 
       await ctx.take(({ descriptor }) => descriptor.kind === 'move-and-attack'
@@ -8416,25 +8415,23 @@ test('RULE-03 Overpower changes current power for source-aware prevention until 
       const northAvatarId = ctx.state.players.north.avatar.card.instanceId;
       const casts = (await ctx.legalActions('north')).filter(({ descriptor }) =>
         descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === overpower.instanceId);
-      assert.deepEqual(casts.flatMap(({ descriptor }) => descriptor.kind === 'cast-magic'
-        && descriptor.ally ? [descriptor.ally.instanceId] : []).sort(), [
-        northAvatarId,
-        disabled.instanceId,
-        fighter.instanceId,
-        hidden.instanceId,
-      ].sort());
-      assert.equal(casts.some(({ descriptor }) => descriptor.kind === 'cast-magic'
-        && descriptor.ally?.instanceId === enemy.instanceId), false);
-      assert.equal(casts.every(({ descriptor }) => descriptor.kind === 'cast-magic'
-        && descriptor.target === undefined && descriptor.targetLocation === undefined), true);
-      assert.equal(casts.find(({ descriptor }) => descriptor.kind === 'cast-magic'
-        && descriptor.ally?.instanceId === fighter.instanceId)?.label.includes('grant +2 power'), true);
+      assert.equal(casts.length, 1);
+      assert.equal(casts[0]?.descriptor.kind === 'cast-magic' && casts[0].descriptor.ally === undefined, true);
+      await withFork(ctx, async (choiceFork) => {
+        await choiceFork.take(({ descriptor }) => descriptor.kind === 'cast-magic'
+          && descriptor.cardInstanceId === overpower.instanceId);
+        const choices = await choiceFork.legalActions('north');
+        const allyIds = choices.flatMap(({ descriptor }) => descriptor.kind === 'choose-ability'
+          && descriptor.target ? [descriptor.target.instanceId] : []).sort();
+        assert.deepEqual(allyIds, [northAvatarId, disabled.instanceId, fighter.instanceId, hidden.instanceId].sort());
+        assert.equal(allyIds.includes(enemy.instanceId), false);
+      });
 
       await withFork(ctx, async (avatarFork) => {
         await avatarFork.take(({ descriptor }) =>
           descriptor.kind === 'cast-magic'
-            && descriptor.cardInstanceId === overpower.instanceId
-            && descriptor.ally?.kind === 'avatar');
+            && descriptor.cardInstanceId === overpower.instanceId);
+        await avatarFork.take(({ descriptor }) => descriptor.kind === 'choose-ability' && descriptor.target?.kind === 'avatar');
         assert.deepEqual({
           attack: avatarFork.observe('north').players.north.avatar.attack,
           defense: avatarFork.observe('north').players.north.avatar.defense,
@@ -8457,8 +8454,8 @@ test('RULE-03 Overpower changes current power for source-aware prevention until 
       await withFork(ctx, async (disabledFork) => {
         await disabledFork.take(({ descriptor }) =>
           descriptor.kind === 'cast-magic'
-            && descriptor.cardInstanceId === overpower.instanceId
-            && descriptor.ally?.instanceId === disabled.instanceId);
+            && descriptor.cardInstanceId === overpower.instanceId);
+        await disabledFork.take(({ descriptor }) => descriptor.kind === 'choose-ability' && descriptor.target?.instanceId === disabled.instanceId);
         const disabledView = disabledFork.observe('north').realm.units.find(({ instanceId }) =>
           instanceId === disabled.instanceId);
         assert.deepEqual({
@@ -8469,14 +8466,14 @@ test('RULE-03 Overpower changes current power for source-aware prevention until 
         assert.equal(await disabledFork.verifyReplay(), true);
       });
 
+      await ctx.take(({ descriptor }) => descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === overpower.instanceId);
       const powered = await ctx.step(await ctx.action(({ descriptor }) =>
-        descriptor.kind === 'cast-magic'
-          && descriptor.cardInstanceId === overpower.instanceId
-          && descriptor.ally?.instanceId === fighter.instanceId));
+        descriptor.kind === 'choose-ability' && descriptor.target?.instanceId === fighter.instanceId));
       assert.equal(powered.accepted, true);
       if (!powered.accepted) return;
       assert.deepEqual(powered.receipt.events.map(({ type }) => type), [
-        'magic-cast',
+        'ability-choice-committed',
         'power-granted',
         'magic-resolved',
       ]);
@@ -28191,19 +28188,25 @@ test('RULE-04 grant-First-Strike Magic lasts this turn and kills before return d
     }
     const grantAction = await ctx.action(({ descriptor }) =>
       descriptor.kind === 'cast-magic'
-        && descriptor.cardId === 'grant-first-strike-north-grant'
-        && descriptor.ally?.instanceId === allyId);
+        && descriptor.cardId === 'grant-first-strike-north-grant');
     assert.equal(grantAction.descriptor.kind === 'cast-magic', true);
     if (grantAction.descriptor.kind !== 'cast-magic') {
       return;
     }
-    const granted = await ctx.step(grantAction);
+    const grantSourceId = grantAction.descriptor.cardInstanceId;
+    const cast = await ctx.step(grantAction);
+    assert.ok(cast.accepted);
+    assert.deepEqual(cast.receipt.events.map(({ type }) => type), ['magic-cast']);
+    const granted = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'choose-ability'
+        && descriptor.sourceInstanceId === grantSourceId
+        && descriptor.target?.instanceId === allyId));
     assert.equal(granted.accepted, true);
     if (!granted.accepted) {
       return;
     }
     assert.deepEqual(granted.receipt.events.map(({ type }) => type), [
-      'magic-cast',
+      'ability-choice-committed',
       'first-strike-granted',
       'magic-resolved',
     ]);
@@ -28279,8 +28282,9 @@ test('RULE-04 grant-First-Strike Magic lasts this turn and kills before return d
     });
     await ctx.take(({ descriptor }) =>
       descriptor.kind === 'cast-magic'
-        && descriptor.cardId === 'grant-first-strike-north-grant'
-        && descriptor.ally?.instanceId === allyId);
+        && descriptor.cardId === 'grant-first-strike-north-grant');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'choose-ability'
+      && descriptor.target?.instanceId === allyId);
     await strike(ctx, allyId, enemyId);
     assert.equal(
       ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.damage,

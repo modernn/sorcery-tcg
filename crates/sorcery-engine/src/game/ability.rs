@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::ability::TemporaryModifierKind;
 pub(super) use crate::ability::{
     AbilityProgram, Effect, SelectionSpec, SpatialRelation, UnitChoiceSpec, UnitSet,
 };
@@ -82,9 +83,66 @@ fn ability_with_options<const N: usize>(
     })
 }
 
+fn ally_grant(
+    modifier: TemporaryModifierKind,
+    amount: u16,
+    kind: Option<super::UnitKind>,
+    draw_spell: bool,
+) -> Arc<AbilityProgram> {
+    let mut effects = vec![
+        Effect::ChooseUnit(UnitChoiceSpec {
+            kind,
+            relation: SpatialRelation::Anywhere,
+            allied_only: true,
+            optional: false,
+        }),
+        Effect::GrantThisTurn {
+            recipients: UnitSet::Chosen,
+            modifier,
+            amount,
+        },
+    ];
+    if draw_spell {
+        effects.push(Effect::Draw {
+            zone: DeckZone::Spellbook,
+            count: 1,
+        });
+    }
+    Arc::new(AbilityProgram {
+        selection: None,
+        optional_selection: false,
+        effects: effects.into_boxed_slice(),
+    })
+}
+
 fn compile_magic(facts: &crate::facts::MagicFacts) -> Option<Arc<AbilityProgram>> {
     let effect = match &facts.effect {
         MagicEffect::Program(program) => return Some(Arc::clone(program)),
+        MagicEffect::GrantChargeToAllyThisTurn => {
+            return Some(ally_grant(TemporaryModifierKind::Charge, 1, None, false));
+        }
+        MagicEffect::GrantFirstStrikeToAllyThisTurn => {
+            return Some(ally_grant(
+                TemporaryModifierKind::FirstStrike,
+                1,
+                None,
+                false,
+            ));
+        }
+        MagicEffect::GrantMovementOneToAllyThisTurnThenDrawSpell => {
+            return Some(ally_grant(TemporaryModifierKind::Movement, 1, None, true));
+        }
+        MagicEffect::GrantPowerTwoToAllyThisTurn => {
+            return Some(ally_grant(TemporaryModifierKind::Power, 2, None, false));
+        }
+        MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell => {
+            return Some(ally_grant(
+                TemporaryModifierKind::Power,
+                2,
+                Some(super::UnitKind::Minion),
+                true,
+            ));
+        }
         MagicEffect::DamageTargetUnit {
             amount,
             target_nearby,

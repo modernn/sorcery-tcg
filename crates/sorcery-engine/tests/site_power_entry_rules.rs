@@ -555,10 +555,13 @@ fn rule_catalog_0324_derived_power_closes_an_otherwise_legal_entry() {
             && descriptor["cell"] == "C3"
     });
     assert!(offers(&session, steps_to(&light_id, "C3")));
+    let (cast, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-overpower"
+    });
     accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-overpower"
-            && descriptor["ally"]["instanceId"] == light_id
+        descriptor["kind"] == "choose-ability"
+            && descriptor["sourceInstanceId"] == cast["cardInstanceId"]
+            && descriptor["target"]["instanceId"] == light_id
     });
     assert!(!offers(&session, steps_to(&light_id, "C3")));
     assert_exact_replay(&session);

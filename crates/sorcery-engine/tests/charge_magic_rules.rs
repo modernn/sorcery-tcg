@@ -310,12 +310,17 @@ fn summon_north_ally_at(session: &mut Session, cell: &str) -> String {
         .to_owned()
 }
 
-fn grant_charge(session: &mut Session, ally_id: &str) -> (Value, Receipt) {
-    accept_where(session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-charge"
-            && descriptor["ally"]["instanceId"] == ally_id
-    })
+fn grant_charge(session: &mut Session, ally_id: &str) -> (Value, Receipt, Receipt) {
+    let (cast, cast_receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-charge"
+    });
+    let source = cast["cardInstanceId"].clone();
+    let (_, choice_receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "choose-ability"
+            && descriptor["sourceInstanceId"] == source
+            && descriptor["target"]["instanceId"] == ally_id
+    });
+    (cast, cast_receipt, choice_receipt)
 }
 
 fn complete_pending_draws(session: &mut Session) {
@@ -419,10 +424,14 @@ fn try_setup_later_fresh_summon(encoded: &str) -> Option<(Session, String)> {
             && descriptor["cell"] == "C4"
     })?;
     let first_id = summoned["cardInstanceId"].as_str()?.to_owned();
-    let (descriptor, _) = try_accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-charge"
-            && descriptor["ally"]["instanceId"] == first_id
+    let (cast, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-charge"
+    })?;
+    let source = cast["cardInstanceId"].clone();
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "choose-ability"
+            && descriptor["sourceInstanceId"] == source
+            && descriptor["target"]["instanceId"] == first_id
     })?;
     try_expire_grant_charge(&mut session, &first_id)?;
     if !prepare_fresh_summon_on_later_turn(&mut session) {
@@ -434,7 +443,6 @@ fn try_setup_later_fresh_summon(encoded: &str) -> Option<(Session, String)> {
             && descriptor["cell"] == "C3"
     })?;
     let second_id = second["cardInstanceId"].as_str()?.to_owned();
-    let _ = descriptor;
     Some((session, second_id))
 }
 
@@ -451,24 +459,13 @@ fn setup_later_fresh_summon(north_ally: &Value, start: u32) -> (Session, String)
     try_setup_later_fresh_summon(&encoded).expect("replay later fresh summon setup")
 }
 
-fn charge_targets(session: &Session) -> Vec<String> {
-    let mut targets: Vec<_> = session
-        .legal_actions()
-        .expect("charge actions")
-        .into_iter()
-        .filter(|action| {
+fn charge_available(session: &Session) -> bool {
+    session.legal_actions().is_ok_and(|actions| {
+        actions.iter().any(|action| {
             action.descriptor["kind"] == "cast-magic"
                 && action.descriptor["cardId"] == "north-charge"
         })
-        .filter_map(|action| {
-            action.descriptor["ally"]["instanceId"]
-                .as_str()
-                .map(ToOwned::to_owned)
-        })
-        .collect();
-    targets.sort_unstable();
-    targets.dedup();
-    targets
+    })
 }
 
 fn deathrite_charge_manifest(seed: u32) -> String {
@@ -571,7 +568,7 @@ fn try_pending_deathrite(encoded: &str) -> Option<PendingDeathriteChargeSetup> {
     if !north_has_charge_and_rain(&state(&session)) {
         return None;
     }
-    if charge_targets(&session).is_empty() {
+    if !charge_available(&session) {
         return None;
     }
     try_accept_where(&mut session, |descriptor| {
@@ -648,12 +645,23 @@ fn rule_catalog_0597_charge_magic_lets_a_summoning_sick_ally_move_and_attack() {
         .to_owned();
     assert!(!has_move_and_attack(&session, &ally_id));
 
-    let (_, granted) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-charge"
-            && descriptor["ally"]["instanceId"] == ally_id
+    let (cast, cast_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-charge"
     });
-    assert!(event_types(&granted).contains(&"charge-granted"));
+    assert_eq!(event_types(&cast_receipt), ["magic-cast"]);
+    let (_, granted) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "choose-ability"
+            && descriptor["sourceInstanceId"] == cast["cardInstanceId"]
+            && descriptor["target"]["instanceId"] == ally_id
+    });
+    assert_eq!(
+        event_types(&granted),
+        [
+            "ability-choice-committed",
+            "charge-granted",
+            "magic-resolved"
+        ]
+    );
     assert!(has_move_and_attack(&session, &ally_id));
     assert_exact_replay(&session);
 }
@@ -681,15 +689,22 @@ fn rule_catalog_0598_charge_magic_grants_charge_to_the_avatar_when_no_minion_is_
         .expect("north avatar identity")
         .to_owned();
 
-    let (cast, receipt) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-charge"
-            && descriptor["ally"]["kind"] == "avatar"
+    let (cast, cast_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-charge"
     });
-    assert_eq!(cast["ally"]["instanceId"], avatar_id);
+    assert_eq!(event_types(&cast_receipt), ["magic-cast"]);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "choose-ability"
+            && descriptor["sourceInstanceId"] == cast["cardInstanceId"]
+            && descriptor["target"]["instanceId"] == avatar_id
+    });
     assert_eq!(
         event_types(&receipt),
-        ["magic-cast", "charge-granted", "magic-resolved"]
+        [
+            "ability-choice-committed",
+            "charge-granted",
+            "magic-resolved"
+        ]
     );
     assert_exact_replay(&session);
 }
@@ -726,7 +741,7 @@ fn rule_catalog_1033_charge_magic_withheld_during_pending_deathrite_order() {
             .iter()
             .all(|action| action.descriptor["kind"] != "cast-magic")
     );
-    assert!(charge_targets(session).is_empty());
+    assert!(!charge_available(session));
     assert!(!has_move_and_attack(session, &ally_id));
 
     let order_sources: Vec<_> = session
@@ -751,16 +766,17 @@ fn rule_catalog_1033_charge_magic_withheld_during_pending_deathrite_order() {
     assert_eq!(resumed["phase"], "main");
     assert_eq!(resumed["decisionSeat"], "north");
     assert!(resumed["pendingDeathrites"].is_null());
-    assert!(charge_targets(session).contains(&ally_id));
+    assert!(charge_available(session));
 
-    let (_, receipt) = accept_where(session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-charge"
-            && descriptor["ally"]["instanceId"] == ally_id
-    });
+    let (_cast, cast_receipt, receipt) = grant_charge(session, &ally_id);
+    assert_eq!(event_types(&cast_receipt), ["magic-cast"]);
     assert_eq!(
         event_types(&receipt),
-        ["magic-cast", "charge-granted", "magic-resolved"]
+        [
+            "ability-choice-committed",
+            "charge-granted",
+            "magic-resolved"
+        ]
     );
     assert!(has_move_and_attack(session, &ally_id));
     assert_exact_replay(session);
@@ -782,10 +798,15 @@ fn rule_catalog_1624_granted_charge_moves_and_attacks_before_end_of_turn() {
     let mut session = opening_main(&encoded);
     let ally_id = summon_north_ally(&mut session);
     assert!(!has_move_and_attack(&session, &ally_id));
-    let (descriptor, receipt) = grant_charge(&mut session, &ally_id);
+    let (descriptor, cast_receipt, receipt) = grant_charge(&mut session, &ally_id);
+    assert_eq!(event_types(&cast_receipt), ["magic-cast"]);
     assert_eq!(
         event_types(&receipt),
-        ["magic-cast", "charge-granted", "magic-resolved"]
+        [
+            "ability-choice-committed",
+            "charge-granted",
+            "magic-resolved"
+        ]
     );
     assert_eq!(
         modifier_sources(unit(&state(&session), &ally_id), "charge"),
@@ -818,10 +839,15 @@ fn rule_catalog_1627_printed_and_granted_charge_compose_while_grant_is_active() 
     let encoded = seed_with_ally_and_charge(&printed_charger(), 1627);
     let mut session = opening_main(&encoded);
     let ally_id = summon_north_ally(&mut session);
-    let (descriptor, receipt) = grant_charge(&mut session, &ally_id);
+    let (descriptor, cast_receipt, receipt) = grant_charge(&mut session, &ally_id);
+    assert_eq!(event_types(&cast_receipt), ["magic-cast"]);
     assert_eq!(
         event_types(&receipt),
-        ["magic-cast", "charge-granted", "magic-resolved"]
+        [
+            "ability-choice-committed",
+            "charge-granted",
+            "magic-resolved"
+        ]
     );
     assert_eq!(
         modifier_sources(unit(&state(&session), &ally_id), "charge"),

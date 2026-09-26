@@ -3628,212 +3628,155 @@ impl Game {
                         tempted_destination: choice.tempted_destination,
                         tempted_enemy: choice.tempted_enemy.clone(),
                     };
-                    let label =
-                        (if matches!(facts.effect, MagicEffect::GrantFirstStrikeToAllyThisTurn) {
-                            let ActionDescriptor::CastMagic {
-                                ally: Some(ally), ..
-                            } = &descriptor
-                            else {
-                                return Err(invalid("First Strike grant action requires an ally"));
-                            };
-                            format!(
-                                "Cast {} to grant First Strike to {} {}…",
-                                definition.id,
-                                ally.kind(),
-                                &ally.instance_id().as_str()[..15]
-                            )
-                        } else if matches!(
-                            facts.effect,
-                            MagicEffect::GrantLethalToAllyThisTurn
-                                | MagicEffect::GrantLethalToAllyThisTurnThenDrawSpell
-                        ) {
-                            let ActionDescriptor::CastMagic {
-                                ally: Some(ally), ..
-                            } = &descriptor
-                            else {
-                                return Err(invalid("Lethal grant action requires an ally"));
-                            };
-                            format!(
-                                "Cast {} to grant Lethal{} to {} {}…",
-                                definition.id,
-                                if matches!(
-                                    facts.effect,
-                                    MagicEffect::GrantLethalToAllyThisTurnThenDrawSpell
-                                ) {
-                                    " and draw"
-                                } else {
-                                    ""
-                                },
-                                ally.kind(),
-                                &ally.instance_id().as_str()[..15]
-                            )
-                        } else if matches!(
-                            facts.effect,
-                            MagicEffect::GrantDoubleDamageToAllyNextStrikeThisTurn
-                        ) {
-                            let ActionDescriptor::CastMagic {
-                                ally: Some(ally), ..
-                            } = &descriptor
-                            else {
-                                return Err(invalid(
-                                    "next-strike double grant action requires an ally",
-                                ));
-                            };
-                            format!(
-                                "Cast {} to grant double damage on the next strike to {} {}…",
-                                definition.id,
-                                ally.kind(),
-                                &ally.instance_id().as_str()[..15]
-                            )
-                        } else if matches!(
-                            facts.effect,
-                            MagicEffect::SummonTokenToAlliedMinionThenDrawSpell(_)
-                        ) {
-                            if let ActionDescriptor::CastMagic {
-                                ally: Some(ally), ..
-                            } = &descriptor
-                            {
-                                format!(
-                                    "Cast {} to summon a token to {} {} and draw…",
-                                    definition.id,
-                                    ally.kind(),
-                                    &ally.instance_id().as_str()[..15]
-                                )
+                    let label = (if matches!(
+                        facts.effect,
+                        MagicEffect::GrantLethalToAllyThisTurn
+                            | MagicEffect::GrantLethalToAllyThisTurnThenDrawSpell
+                    ) {
+                        let ActionDescriptor::CastMagic {
+                            ally: Some(ally), ..
+                        } = &descriptor
+                        else {
+                            return Err(invalid("Lethal grant action requires an ally"));
+                        };
+                        format!(
+                            "Cast {} to grant Lethal{} to {} {}…",
+                            definition.id,
+                            if matches!(
+                                facts.effect,
+                                MagicEffect::GrantLethalToAllyThisTurnThenDrawSpell
+                            ) {
+                                " and draw"
                             } else {
-                                descriptor
-                                    .state_independent_label()
-                                    .ok_or_else(|| invalid("cast-magic action requires a label"))?
-                            }
-                        } else if matches!(
-                            facts.effect,
-                            MagicEffect::GrantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell
-                        ) {
-                            if let ActionDescriptor::CastMagic {
-                                ally: Some(ally), ..
-                            } = &descriptor
-                            {
-                                format!(
-                                    "Cast {} to grant Stealth and draw to {} {}…",
-                                    definition.id,
-                                    ally.kind(),
-                                    &ally.instance_id().as_str()[..15]
-                                )
-                            } else {
-                                descriptor
-                                    .state_independent_label()
-                                    .ok_or_else(|| invalid("cast-magic action requires a label"))?
-                            }
-                        } else if matches!(
-                            facts.effect,
-                            MagicEffect::GrantMovementOneToAllyThisTurnThenDrawSpell
-                        ) {
-                            let ActionDescriptor::CastMagic {
-                                ally: Some(ally), ..
-                            } = &descriptor
-                            else {
-                                return Err(invalid("movement-grant action requires an ally"));
-                            };
+                                ""
+                            },
+                            ally.kind(),
+                            &ally.instance_id().as_str()[..15]
+                        )
+                    } else if matches!(
+                        facts.effect,
+                        MagicEffect::GrantDoubleDamageToAllyNextStrikeThisTurn
+                    ) {
+                        let ActionDescriptor::CastMagic {
+                            ally: Some(ally), ..
+                        } = &descriptor
+                        else {
+                            return Err(invalid(
+                                "next-strike double grant action requires an ally",
+                            ));
+                        };
+                        format!(
+                            "Cast {} to grant double damage on the next strike to {} {}…",
+                            definition.id,
+                            ally.kind(),
+                            &ally.instance_id().as_str()[..15]
+                        )
+                    } else if matches!(
+                        facts.effect,
+                        MagicEffect::SummonTokenToAlliedMinionThenDrawSpell(_)
+                    ) {
+                        if let ActionDescriptor::CastMagic {
+                            ally: Some(ally), ..
+                        } = &descriptor
+                        {
                             format!(
-                                "Cast {} to grant +1 movement and draw to {} {}…",
+                                "Cast {} to summon a token to {} {} and draw…",
                                 definition.id,
                                 ally.kind(),
                                 &ally.instance_id().as_str()[..15]
-                            )
-                        } else if matches!(facts.effect, MagicEffect::GrantRangedToAllyThisTurn) {
-                            let ActionDescriptor::CastMagic {
-                                ally: Some(ally), ..
-                            } = &descriptor
-                            else {
-                                return Err(invalid("Ranged grant action requires an ally"));
-                            };
-                            format!(
-                                "Cast {} to grant Ranged to {} {}…",
-                                definition.id,
-                                ally.kind(),
-                                &ally.instance_id().as_str()[..15]
-                            )
-                        } else if matches!(
-                            facts.effect,
-                            MagicEffect::GrantAirborneToAllyThisTurn
-                                | MagicEffect::GrantAirborneToAllyThisTurnThenDrawSpell
-                        ) {
-                            let ActionDescriptor::CastMagic {
-                                ally: Some(ally), ..
-                            } = &descriptor
-                            else {
-                                return Err(invalid("Airborne grant action requires an ally"));
-                            };
-                            format!(
-                                "Cast {} to grant Airborne{} to {} {}…",
-                                definition.id,
-                                if matches!(
-                                    facts.effect,
-                                    MagicEffect::GrantAirborneToAllyThisTurnThenDrawSpell
-                                ) {
-                                    " and draw"
-                                } else {
-                                    ""
-                                },
-                                ally.kind(),
-                                &ally.instance_id().as_str()[..15]
-                            )
-                        } else if matches!(
-                            facts.effect,
-                            MagicEffect::GrantPowerTwoToAllyThisTurn
-                                | MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell
-                        ) {
-                            let ActionDescriptor::CastMagic {
-                                ally: Some(ally), ..
-                            } = &descriptor
-                            else {
-                                return Err(invalid("power-grant action requires an ally"));
-                            };
-                            format!(
-                                "Cast {} to grant +2 power{} to {} {}…",
-                                definition.id,
-                                if matches!(
-                                    facts.effect,
-                                    MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell
-                                ) {
-                                    " and draw"
-                                } else {
-                                    ""
-                                },
-                                ally.kind(),
-                                &ally.instance_id().as_str()[..15]
-                            )
-                        } else if matches!(facts.effect, MagicEffect::LeapAttackAlly) {
-                            let ActionDescriptor::CastMagic {
-                                ally: Some(ally),
-                                ally_destination: Some(destination),
-                                ally_strike_location,
-                                ..
-                            } = &descriptor
-                            else {
-                                return Err(invalid(
-                                    "Leap Attack action requires an ally destination",
-                                ));
-                            };
-                            let from = self.unit_target_location(ally)?;
-                            let stays = from == *destination;
-                            let strike = ally_strike_location.unwrap_or(*destination);
-                            format!(
-                                "Cast {}: {} {}… {} and strikes enemies at {}",
-                                definition.id,
-                                ally.kind(),
-                                &ally.instance_id().as_str()[..15],
-                                if stays {
-                                    "stays".to_owned()
-                                } else {
-                                    format!("steps to {}", destination.cell)
-                                },
-                                strike.cell
                             )
                         } else {
                             descriptor
                                 .state_independent_label()
                                 .ok_or_else(|| invalid("cast-magic action requires a label"))?
-                        }) + &self.minion_caster_suffix(seat, caster_instance_id);
+                        }
+                    } else if matches!(
+                        facts.effect,
+                        MagicEffect::GrantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell
+                    ) {
+                        if let ActionDescriptor::CastMagic {
+                            ally: Some(ally), ..
+                        } = &descriptor
+                        {
+                            format!(
+                                "Cast {} to grant Stealth and draw to {} {}…",
+                                definition.id,
+                                ally.kind(),
+                                &ally.instance_id().as_str()[..15]
+                            )
+                        } else {
+                            descriptor
+                                .state_independent_label()
+                                .ok_or_else(|| invalid("cast-magic action requires a label"))?
+                        }
+                    } else if matches!(facts.effect, MagicEffect::GrantRangedToAllyThisTurn) {
+                        let ActionDescriptor::CastMagic {
+                            ally: Some(ally), ..
+                        } = &descriptor
+                        else {
+                            return Err(invalid("Ranged grant action requires an ally"));
+                        };
+                        format!(
+                            "Cast {} to grant Ranged to {} {}…",
+                            definition.id,
+                            ally.kind(),
+                            &ally.instance_id().as_str()[..15]
+                        )
+                    } else if matches!(
+                        facts.effect,
+                        MagicEffect::GrantAirborneToAllyThisTurn
+                            | MagicEffect::GrantAirborneToAllyThisTurnThenDrawSpell
+                    ) {
+                        let ActionDescriptor::CastMagic {
+                            ally: Some(ally), ..
+                        } = &descriptor
+                        else {
+                            return Err(invalid("Airborne grant action requires an ally"));
+                        };
+                        format!(
+                            "Cast {} to grant Airborne{} to {} {}…",
+                            definition.id,
+                            if matches!(
+                                facts.effect,
+                                MagicEffect::GrantAirborneToAllyThisTurnThenDrawSpell
+                            ) {
+                                " and draw"
+                            } else {
+                                ""
+                            },
+                            ally.kind(),
+                            &ally.instance_id().as_str()[..15]
+                        )
+                    } else if matches!(facts.effect, MagicEffect::LeapAttackAlly) {
+                        let ActionDescriptor::CastMagic {
+                            ally: Some(ally),
+                            ally_destination: Some(destination),
+                            ally_strike_location,
+                            ..
+                        } = &descriptor
+                        else {
+                            return Err(invalid("Leap Attack action requires an ally destination"));
+                        };
+                        let from = self.unit_target_location(ally)?;
+                        let stays = from == *destination;
+                        let strike = ally_strike_location.unwrap_or(*destination);
+                        format!(
+                            "Cast {}: {} {}… {} and strikes enemies at {}",
+                            definition.id,
+                            ally.kind(),
+                            &ally.instance_id().as_str()[..15],
+                            if stays {
+                                "stays".to_owned()
+                            } else {
+                                format!("steps to {}", destination.cell)
+                            },
+                            strike.cell
+                        )
+                    } else {
+                        descriptor
+                            .state_independent_label()
+                            .ok_or_else(|| invalid("cast-magic action requires a label"))?
+                    }) + &self.minion_caster_suffix(seat, caster_instance_id);
                     self.push_action(actions, descriptor, label);
                 }
             }
@@ -7068,12 +7011,8 @@ impl Game {
                 vec![MagicChoice::default()]
             }
             MagicEffect::GrantAirborneToAllyThisTurn
-            | MagicEffect::GrantChargeToAllyThisTurn
             | MagicEffect::GrantDoubleDamageToAllyNextStrikeThisTurn
-            | MagicEffect::GrantFirstStrikeToAllyThisTurn
             | MagicEffect::GrantLethalToAllyThisTurn
-            | MagicEffect::GrantMovementOneToAllyThisTurnThenDrawSpell
-            | MagicEffect::GrantPowerTwoToAllyThisTurn
             | MagicEffect::GrantRangedToAllyThisTurn => self
                 .controlled_allies(seat)
                 .into_iter()
@@ -7083,8 +7022,7 @@ impl Game {
                 })
                 .collect(),
             MagicEffect::GrantAirborneToAllyThisTurnThenDrawSpell
-            | MagicEffect::GrantLethalToAllyThisTurnThenDrawSpell
-            | MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell => self
+            | MagicEffect::GrantLethalToAllyThisTurnThenDrawSpell => self
                 .controlled_allies(seat)
                 .into_iter()
                 .filter(|ally| matches!(ally, UnitTarget::Minion { .. }))
@@ -7539,6 +7477,11 @@ impl Game {
                 targets
             }
             MagicEffect::Program(_)
+            | MagicEffect::GrantChargeToAllyThisTurn
+            | MagicEffect::GrantFirstStrikeToAllyThisTurn
+            | MagicEffect::GrantMovementOneToAllyThisTurnThenDrawSpell
+            | MagicEffect::GrantPowerTwoToAllyThisTurn
+            | MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell
             | MagicEffect::DamageTargetUnit { .. }
             | MagicEffect::UntapTargetMinion
             | MagicEffect::DrawSites(_)
@@ -20444,26 +20387,6 @@ impl Game {
                 });
                 self.apply_genesis_draws(seat, card_instance_id, DeckZone::Spellbook, 1, outcomes);
             }
-            MagicEffect::GrantFirstStrikeToAllyThisTurn => {
-                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
-                let kind = match ally {
-                    UnitTarget::Avatar { .. } => UnitKind::Avatar,
-                    UnitTarget::Minion { .. } => UnitKind::Minion,
-                };
-                self.temporary_modifiers_mut(kind, ally.seat(), ally.instance_id())?
-                    .grant(
-                        TemporaryModifierKind::FirstStrike,
-                        1,
-                        card_instance_id.clone(),
-                    );
-                outcomes.push("first-strike-granted", || {
-                    json!({
-                        "instanceId": ally.instance_id(),
-                        "seat": ally.seat(),
-                        "sourceInstanceId": card_instance_id,
-                    })
-                });
-            }
             MagicEffect::GrantLethalToAllyThisTurn => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
                 if let UnitTarget::Minion {
@@ -20509,24 +20432,6 @@ impl Game {
                     })
                 });
             }
-            MagicEffect::GrantMovementOneToAllyThisTurnThenDrawSpell => {
-                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
-                let kind = match ally {
-                    UnitTarget::Avatar { .. } => UnitKind::Avatar,
-                    UnitTarget::Minion { .. } => UnitKind::Minion,
-                };
-                self.temporary_modifiers_mut(kind, ally.seat(), ally.instance_id())?
-                    .grant(TemporaryModifierKind::Movement, 1, card_instance_id.clone());
-                outcomes.push("movement-granted", || {
-                    json!({
-                        "amount": 1,
-                        "instanceId": ally.instance_id(),
-                        "seat": ally.seat(),
-                        "sourceInstanceId": card_instance_id,
-                    })
-                });
-                self.apply_genesis_draws(seat, card_instance_id, DeckZone::Spellbook, 1, outcomes);
-            }
             MagicEffect::GrantLethalToAllyThisTurnThenDrawSpell => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
                 let UnitTarget::Minion {
@@ -20554,31 +20459,6 @@ impl Game {
                 });
                 self.apply_genesis_draws(seat, card_instance_id, DeckZone::Spellbook, 1, outcomes);
             }
-            MagicEffect::GrantChargeToAllyThisTurn => {
-                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
-                if let UnitTarget::Minion {
-                    instance_id,
-                    seat: ally_seat,
-                } = ally
-                {
-                    self.position
-                        .units
-                        .iter_mut()
-                        .find(|unit| {
-                            unit.card.instance_id == *instance_id && unit.controller == *ally_seat
-                        })
-                        .ok_or(GameError::IllegalAction)?
-                        .temporary_modifiers
-                        .grant(TemporaryModifierKind::Charge, 1, card_instance_id.clone());
-                }
-                outcomes.push("charge-granted", || {
-                    json!({
-                        "instanceId": ally.instance_id(),
-                        "seat": ally.seat(),
-                        "sourceInstanceId": card_instance_id,
-                    })
-                });
-            }
             MagicEffect::GrantRangedToAllyThisTurn => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
                 if let UnitTarget::Minion {
@@ -20603,51 +20483,6 @@ impl Game {
                         "sourceInstanceId": card_instance_id,
                     })
                 });
-            }
-            MagicEffect::GrantPowerTwoToAllyThisTurn => {
-                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
-                let kind = match ally {
-                    UnitTarget::Avatar { .. } => UnitKind::Avatar,
-                    UnitTarget::Minion { .. } => UnitKind::Minion,
-                };
-                self.temporary_modifiers_mut(kind, ally.seat(), ally.instance_id())?
-                    .grant(TemporaryModifierKind::Power, 2, card_instance_id.clone());
-                outcomes.push("power-granted", || {
-                    json!({
-                        "amount": 2,
-                        "instanceId": ally.instance_id(),
-                        "seat": ally.seat(),
-                        "sourceInstanceId": card_instance_id,
-                    })
-                });
-            }
-            MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell => {
-                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
-                let UnitTarget::Minion {
-                    instance_id,
-                    seat: ally_seat,
-                } = ally
-                else {
-                    return Err(GameError::IllegalAction);
-                };
-                self.position
-                    .units
-                    .iter_mut()
-                    .find(|unit| {
-                        unit.card.instance_id == *instance_id && unit.controller == *ally_seat
-                    })
-                    .ok_or(GameError::IllegalAction)?
-                    .temporary_modifiers
-                    .grant(TemporaryModifierKind::Power, 2, card_instance_id.clone());
-                outcomes.push("power-granted", || {
-                    json!({
-                        "amount": 2,
-                        "instanceId": instance_id,
-                        "seat": ally_seat,
-                        "sourceInstanceId": card_instance_id,
-                    })
-                });
-                self.apply_genesis_draws(seat, card_instance_id, DeckZone::Spellbook, 1, outcomes);
             }
             MagicEffect::LeapAttackAlly => {
                 self.apply_leap_attack(
@@ -21743,6 +21578,11 @@ impl Game {
             }
             // Compiled entries have already transferred ownership to the common runner.
             MagicEffect::Program(_)
+            | MagicEffect::GrantChargeToAllyThisTurn
+            | MagicEffect::GrantFirstStrikeToAllyThisTurn
+            | MagicEffect::GrantMovementOneToAllyThisTurnThenDrawSpell
+            | MagicEffect::GrantPowerTwoToAllyThisTurn
+            | MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell
             | MagicEffect::DamageTargetUnit { .. }
             | MagicEffect::UntapTargetMinion
             | MagicEffect::DrawSites(_)

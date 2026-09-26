@@ -16,6 +16,7 @@ const bindingFile = z.strictObject({
   cards: z.array(z.strictObject({
     cardId: z.string().min(1).max(256),
     sourceCardHash: hash,
+    replacesFactsHash: hash.optional(),
     facts: z.record(z.string(), z.unknown()),
     review: z.strictObject({
       entireRulesText: z.literal(true),
@@ -25,6 +26,8 @@ const bindingFile = z.strictObject({
 });
 
 /** Reviewed local data binds cards to existing engine facts, never to executable code.
+ * A replacement must name the exact canonical hash of an existing preset fact row;
+ * this makes moving a card from scenario facts to reviewed facts explicit and fail closed.
  * Review references are provenance, not a claim of verified authority or ranked eligibility.
  */
 export function mergeReviewedCardBindings(
@@ -73,7 +76,12 @@ export function mergeReviewedCardBindings(
       }
     }
     const previous = pool.get(row.cardId);
-    if (previous && canonicalJson(previous.definition as JsonValue) !== canonicalJson(definition as JsonValue)) {
+    if (row.replacesFactsHash !== undefined) {
+      if (previous === undefined
+        || identityHash(previous.definition as JsonValue) !== row.replacesFactsHash) {
+        throw new Error(`reviewed replacement does not match existing preset facts: ${row.cardId}`);
+      }
+    } else if (previous && canonicalJson(previous.definition as JsonValue) !== canonicalJson(definition as JsonValue)) {
       throw new Error(`conflicting reviewed facts: ${row.cardId}`);
     }
     pool.set(row.cardId, { definition,

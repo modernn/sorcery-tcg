@@ -261,15 +261,23 @@ fn gift_ally_ids(session: &Session) -> Vec<String> {
         .legal_actions()
         .expect("gift actions")
         .into_iter()
-        .filter(|action| {
-            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-gift"
-        })
+        .filter(|action| action.descriptor["kind"] == "choose-ability")
         .filter_map(|action| {
-            action.descriptor["ally"]["instanceId"]
+            action.descriptor["target"]["instanceId"]
                 .as_str()
                 .map(ToOwned::to_owned)
         })
         .collect()
+}
+
+fn grant_power(session: &mut Session, ally_id: &str) -> (Value, Receipt) {
+    let (descriptor, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-gift"
+    });
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "choose-ability" && descriptor["target"]["instanceId"] == ally_id
+    });
+    (descriptor, receipt)
 }
 
 fn assert_exact_replay(session: &Session) {
@@ -347,20 +355,21 @@ fn rule_catalog_0529_power_grant_offers_allied_minions_then_draws_a_spell() {
         .as_array()
         .expect("north hand")
         .len();
+    let (grant_descriptor, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-gift"
+    });
     let allies = gift_ally_ids(&session);
     assert!(allies.contains(&ally_id));
     assert!(!allies.contains(&north_avatar));
     assert!(!allies.contains(&enemy_id));
 
     let (_, granted) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-gift"
-            && descriptor["ally"]["instanceId"] == ally_id
+        descriptor["kind"] == "choose-ability" && descriptor["target"]["instanceId"] == ally_id
     });
     assert_eq!(
         event_types(&granted),
         [
-            "magic-cast",
+            "ability-choice-committed",
             "power-granted",
             "spell-drawn",
             "magic-resolved"
@@ -371,7 +380,7 @@ fn rule_catalog_0529_power_grant_offers_allied_minions_then_draws_a_spell() {
     let after = state(&session);
     assert_eq!(
         modifier_sources(unit(&after, &ally_id), "power")[0],
-        granted.events[0].payload["instanceId"]
+        grant_descriptor["cardInstanceId"]
     );
     let hand_after = after["players"]["north"]["hand"]["spellbook"]
         .as_array()
@@ -426,15 +435,11 @@ fn rule_catalog_0530_power_grant_then_empty_spellbook_is_a_deck_out() {
         .as_str()
         .expect("ally instance identity")
         .to_owned();
-    let (_, granted) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-gift"
-            && descriptor["ally"]["instanceId"] == ally_id
-    });
+    let (_, granted) = grant_power(&mut session, &ally_id);
     assert_eq!(
         event_types(&granted),
         [
-            "magic-cast",
+            "ability-choice-committed",
             "power-granted",
             "magic-resolved",
             "game-ended"
@@ -569,7 +574,9 @@ fn try_pending_deathrite_with_allied_minion(
     if !north_has_gift_and_rain(&state(&session)) {
         return None;
     }
-    if !gift_ally_ids(&session).contains(&ally_id) {
+    if !session.legal_actions().ok()?.iter().any(|action| {
+        action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-gift"
+    }) {
         return None;
     }
     try_accept_where(&mut session, |descriptor| {
@@ -648,6 +655,9 @@ fn rule_catalog_1061_grant_power_then_draw_withheld_during_pending_deathrite_ord
     assert_eq!(resumed["decisionSeat"], "north");
     assert!(resumed["pendingDeathrites"].is_null());
     assert!(unit(&resumed, &ally_id).is_object());
+    let (grant_descriptor, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-gift"
+    });
     assert!(gift_ally_ids(session).contains(&ally_id));
 
     let library_top = resumed["players"]["north"]["spellbook"]
@@ -664,14 +674,12 @@ fn rule_catalog_1061_grant_power_then_draw_withheld_during_pending_deathrite_ord
         .len();
 
     let (_, granted) = accept_where(session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-gift"
-            && descriptor["ally"]["instanceId"] == ally_id
+        descriptor["kind"] == "choose-ability" && descriptor["target"]["instanceId"] == ally_id
     });
     assert_eq!(
         event_types(&granted),
         [
-            "magic-cast",
+            "ability-choice-committed",
             "power-granted",
             "spell-drawn",
             "magic-resolved"
@@ -682,7 +690,7 @@ fn rule_catalog_1061_grant_power_then_draw_withheld_during_pending_deathrite_ord
     let after = state(session);
     assert_eq!(
         modifier_sources(unit(&after, &ally_id), "power")[0],
-        granted.events[0].payload["instanceId"]
+        grant_descriptor["cardInstanceId"]
     );
     let hand_after = after["players"]["north"]["hand"]["spellbook"]
         .as_array()
@@ -836,19 +844,9 @@ fn power_combat_setup_with_gift(ally: &Value, start: u32) -> PowerCombatSetup {
         .map(|seed| power_combat_manifest_with_north_ally(ally, seed))
         .find_map(|candidate| {
             let setup = try_power_combat_setup(&candidate)?;
-            gift_ally_ids(&setup.session)
-                .contains(&setup.ally_id)
-                .then_some(setup)
+            session_has_gift_cast(&setup.session).then_some(setup)
         })
         .expect("bounded seed reaching combat setup with grant-power Magic in hand")
-}
-
-fn grant_power(session: &mut Session, ally_id: &str) -> (Value, Receipt) {
-    accept_where(session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-gift"
-            && descriptor["ally"]["instanceId"] == ally_id
-    })
 }
 
 fn through_south_pass_to_north_main(session: &mut Session) {
@@ -856,6 +854,16 @@ fn through_south_pass_to_north_main(session: &mut Session) {
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
     });
+}
+
+fn session_has_gift_cast(session: &Session) -> bool {
+    session
+        .legal_actions()
+        .expect("gift actions")
+        .iter()
+        .any(|action| {
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-gift"
+        })
 }
 
 fn expire_grant_power(session: &mut Session, ally_id: &str, grant_source: &str) {
@@ -949,7 +957,7 @@ fn rule_catalog_1634_granted_power_strikes_at_boosted_power_before_end_of_turn()
     assert_eq!(
         event_types(&receipt),
         [
-            "magic-cast",
+            "ability-choice-committed",
             "power-granted",
             "spell-drawn",
             "magic-resolved"
@@ -1018,7 +1026,7 @@ fn rule_catalog_1637_printed_and_granted_power_compose_while_grant_is_active() {
     assert_eq!(
         event_types(&receipt),
         [
-            "magic-cast",
+            "ability-choice-committed",
             "power-granted",
             "spell-drawn",
             "magic-resolved"

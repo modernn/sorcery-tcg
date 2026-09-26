@@ -405,8 +405,21 @@ or Spellbook; the next instruction follows that draw. It represents one card. A 
 effect drawing multiple unspecified cards still needs a shared upfront deck-count
 declaration and must not be approximated by independent `draw-card` instructions.
 Authored Silence and next-strike replacements remain rejected. Airborne, Lethal, and
-Ranged grants require minion-only recipients. Legacy compound grant inputs still need
-binding migration; this change does not admit additional official cards or decks.
+Ranged grants require minion-only recipients.
+
+Legacy Charge, First Strike, Movement-plus-draw, Power, and Power-plus-draw inputs now
+compile to ordinary choice and grant instructions in this runner. Their separate
+recipient enumeration and execution branches are deleted. A cast pays its costs and
+holds the Magic on the storyline; the subsequent engine-issued choice selects its
+recipient during resolution. Only the Power-plus-draw input restricts that choice to
+minions. Legacy fixed-Spellbook draw order remains explicit in its compiled program;
+an actual card with a different order or deck choice needs its own reviewed program.
+
+Reviewed local bindings can replace preset facts only by naming the exact previous
+facts hash, in addition to the unchanged authority and source-card hashes. A stale or
+absent prior binding rejects the replacement. This allows complete reviewed programs
+to supersede scenario definitions without adding card-specific ingestion branches.
+Binding admission and direct rule probes remain separate from full deck eligibility.
 
 ## Performance and learning
 

@@ -561,15 +561,16 @@ fn rule_catalog_0956_movement_grant_then_empty_spellbook_is_a_deck_out() {
         .as_str()
         .expect("ally instance identity")
         .to_owned();
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-gift"
+    });
     let (_, granted) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-gift"
-            && descriptor["ally"]["instanceId"] == ally_id
+        descriptor["kind"] == "choose-ability" && descriptor["target"]["instanceId"] == ally_id
     });
     assert_eq!(
         event_types(&granted),
         [
-            "magic-cast",
+            "ability-choice-committed",
             "movement-granted",
             "magic-resolved",
             "game-ended"
@@ -705,15 +706,16 @@ fn rule_catalog_0962_power_grant_then_empty_spellbook_is_a_deck_out() {
         .as_str()
         .expect("ally instance identity")
         .to_owned();
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-gift"
+    });
     let (_, granted) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-gift"
-            && descriptor["ally"]["instanceId"] == ally_id
+        descriptor["kind"] == "choose-ability" && descriptor["target"]["instanceId"] == ally_id
     });
     assert_eq!(
         event_types(&granted),
         [
-            "magic-cast",
+            "ability-choice-committed",
             "power-granted",
             "magic-resolved",
             "game-ended"
