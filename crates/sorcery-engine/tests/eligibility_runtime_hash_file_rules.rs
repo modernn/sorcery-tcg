@@ -1,28 +1,32 @@
-//! Direct proof that `SORCERY_VERIFIED_AUTHORITY_HASHES_FILE` extends ranked
-//! eligibility (RULE-CATALOG-0891).
+//! A caller-controlled hash file cannot verify manifest authority (RULE-CATALOG-0891).
 //!
-//! Isolated in its own integration-test binary so the runtime allowlist cache
-//! initializes from this test's hash file before any other eligibility probe.
+//! Kept in a single-test binary because this regression sets a process environment variable.
 
 use serde_json::json;
-use sorcery_engine::eligibility::{
-    eligibility_policy_for_manifest, prime_runtime_authority_hash_file_for_tests,
-};
-
-const RUNTIME_HASH: &str =
-    "sha256:3333333333333333333333333333333333333333333333333333333333333333";
+use sorcery_engine::eligibility::eligibility_policy_for_manifest;
 
 #[test]
-fn rule_catalog_0891_runtime_hash_file_extends_private_local_allowlist() {
-    let path = std::env::temp_dir().join("sorcery-eligibility-runtime-hash-0891.txt");
-    std::fs::write(&path, format!("{RUNTIME_HASH}\n\nnot-a-hash\n"))
-        .expect("write runtime hash file");
-    prime_runtime_authority_hash_file_for_tests(path.to_string_lossy().into_owned());
+#[allow(unsafe_code)]
+fn rule_catalog_0891_runtime_hash_file_cannot_verify_private_local_authority() {
+    let path = std::env::temp_dir().join(format!(
+        "sorcery-eligibility-runtime-hash-0891-{}.txt",
+        std::process::id(),
+    ));
+    std::fs::write(
+        &path,
+        "sha256:3333333333333333333333333333333333333333333333333333333333333333\n\nnot-a-hash\n",
+    )
+    .expect("write untrusted hash file");
+    // SAFETY: this integration-test binary contains only this test and starts no threads.
+    unsafe {
+        std::env::set_var("SORCERY_VERIFIED_AUTHORITY_HASHES_FILE", &path);
+    }
     let policy = eligibility_policy_for_manifest(&json!({
         "authority": {
-            "contentHash": RUNTIME_HASH,
+            "contentHash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
             "mode": "private-local",
         },
     }));
-    assert!(policy.authority_verified);
+    std::fs::remove_file(&path).expect("remove untrusted hash file");
+    assert!(!policy.authority_verified);
 }

@@ -971,10 +971,9 @@ fn raise_supplemental_manifest(seed: u32) -> String {
     }))
 }
 
-fn try_kill_victim_prefix(encoded: &str) -> Option<()> {
+fn assert_kill_victim_prefix(encoded: &str) {
     let mut session = opening_main(encoded);
     kill_south_minion_at_c4(&mut session, "south-victim");
-    Some(())
 }
 
 fn seed_with_start(start: u32, required: &[&str]) -> String {
@@ -985,8 +984,8 @@ fn seed_with_start(start: u32, required: &[&str]) -> String {
             required
                 .iter()
                 .all(|id| opening_spell_ids(candidate).iter().any(|card| card == id))
-                && try_kill_victim_prefix(candidate).is_some()
         })
+        .inspect(|candidate| assert_kill_victim_prefix(candidate))
         .expect("bounded seed with required opening cards")
 }
 
@@ -1114,17 +1113,16 @@ fn seed_with_two_corpses(start: u32) -> String {
             ["north-zap", "north-raise"]
                 .iter()
                 .all(|id| opening_spell_ids(candidate).iter().any(|card| card == id))
-                && try_two_corpses_prefix(candidate).is_some()
         })
+        .inspect(|candidate| assert_two_corpses_prefix(candidate))
         .expect("bounded seed with two cemetery corpses")
 }
 
-fn try_two_corpses_prefix(encoded: &str) -> Option<[String; 2]> {
+fn assert_two_corpses_prefix(encoded: &str) {
     let mut session = opening_main(encoded);
-    let first = kill_south_minion_at_c4(&mut session, "south-victim");
+    kill_south_minion_at_c4(&mut session, "south-victim");
     pass_turn_to_north_spellbook(&mut session);
-    let second = kill_south_minion_at_c4(&mut session, "south-victim-b");
-    Some([first, second])
+    kill_south_minion_at_c4(&mut session, "south-victim-b");
 }
 
 fn setup_two_corpses_in_south_cemetery(session: &mut Session) -> [String; 2] {
@@ -1167,7 +1165,7 @@ fn seed_for_second_raise_new_kill(start: u32) -> String {
             {
                 return None;
             }
-            try_kill_victim_prefix(&encoded)?;
+            assert_kill_victim_prefix(&encoded);
             try_second_raise_new_kill_prefix(&encoded).map(|_| encoded)
         })
         .expect("bounded seed reaching second Raise Dead new-kill setup")
@@ -1217,7 +1215,7 @@ fn seed_for_second_raise_enemy_arrival(start: u32) -> String {
             {
                 return None;
             }
-            try_kill_victim_prefix(&encoded)?;
+            assert_kill_victim_prefix(&encoded);
             try_second_raise_enemy_arrival_prefix(&encoded).map(|_| encoded)
         })
         .expect("bounded seed reaching second Raise Dead enemy-arrival setup")
@@ -1291,8 +1289,7 @@ fn rule_catalog_1896_raise_dead_selects_from_a_multi_minion_cemetery_pool() {
     let selected = cast_raise_select(&mut session);
     assert!(
         corpses.contains(&selected),
-        "expected one of {:?}, got {selected}",
-        corpses
+        "expected one of {corpses:?}, got {selected}"
     );
     assert_exact_replay(&session);
 }

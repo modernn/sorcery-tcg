@@ -1039,10 +1039,6 @@ fn random_choice_deathrite_seed_with(start: u32) -> String {
 }
 
 #[test]
-#[expect(
-    clippy::too_many_lines,
-    reason = "random-choice Deathrite withhold scenario proof keeps assertions inline"
-)]
 fn rule_catalog_1167_random_choice_withheld_during_pending_deathrite_order() {
     let encoded = random_choice_deathrite_seed_with(1167);
     let setup = try_pending_random_choice_before_deathrite_order(&encoded)

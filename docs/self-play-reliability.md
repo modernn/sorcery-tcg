@@ -1,8 +1,8 @@
 # Reliable self-play gates
 
-Self-play remains `unranked_partial_rules_unverified_authority` until the Rust engine covers every
-exercised mechanic and the private authority checks pass. A policy win is not evidence of a correct
-game when a manifest fact was accepted but ignored.
+Self-play remains unranked. Manifest-declared authority hashes and hash files do not establish
+verified facts. A policy win is not evidence of a correct game when a manifest fact was accepted
+but ignored. See [the current local release](local-release.md) and [run commands](../README.md).
 
 ## Required invariants
 
@@ -49,8 +49,9 @@ ordinary debug suite because running the same workload there takes several minut
 
 ## Current blockers to strong unattended self-play
 
-- Rust has direct proofs for all 378 cataloged scenarios on `cursor/square-token-0005` (PR #55).
-  Ranked self-play still waits on private authority verification and merge to `master`.
+- The catalog indexes supported scenarios, not a complete official rules inventory. Redundant
+  batch-size proofs have been removed. Ranked self-play requires an independently verified
+  fact binding; restoring source bytes alone does not supply that trust path.
 - Realm Artifacts are admitted as power Artifacts, Lethal Artifacts, end-turn site-controller
   life-loss Artifacts, the Siege Ballista, the Payload Trebuchet, and the Rolling Boulder, including
   when paired with oversized minions or Cave-In.

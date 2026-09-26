@@ -2,11 +2,14 @@
 
 ## Purpose
 
-Build a TypeScript application for rules-correct, deterministic Sorcery: Contested Realm games, reproducible deck and model evaluation, collection-constrained optimization, and later browser play over the same authoritative engine.
+Build a Rust application for rules-correct, deterministic Sorcery: Contested Realm games, reproducible deck evaluation, checkpoint search, and browser play over the same authoritative engine. TypeScript remains a thin ingestion/server/UI boundary.
 
 **Core value:** Simulation results must be reproducible and rules-correct enough that deck and model comparisons are trustworthy.
 
 ## Current milestone
+
+The phase notes below are historical. The current local release scope and run commands
+are in [README.md](../README.md) and [the release assessment](../docs/local-release.md).
 
 - Phase 1 authority/data infrastructure is implemented and its review findings are resolved or explicitly deferred; see [the Phase 1 review](./phases/01-rules-and-data-authority/01-REVIEW.md) and [retrospective](./phases/01-rules-and-data-authority/01-SUMMARY.md).
 - Phase 2, the deterministic engine contract, is in progress with a frozen JSON state and versioned seeded PRNG kernel. Locked decisions are in [Phase 2 context](./phases/02-deterministic-engine-contract/02-CONTEXT.md).
@@ -14,7 +17,7 @@ Build a TypeScript application for rules-correct, deterministic Sorcery: Contest
 
 ## Non-negotiable constraints
 
-- TypeScript is used across the engine, simulator, agents, optimizer, and browser client.
+- Rust owns the authoritative engine, simulator, deterministic agents, search, checkpoints, and replay.
 - Official rules and card rulings are authoritative; unresolved behavior fails closed.
 - The engine alone owns state and enumerates legal actions.
 - A manifest plus seed reproduces deterministic-agent events byte-for-byte.

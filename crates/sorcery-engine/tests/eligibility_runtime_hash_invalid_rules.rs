@@ -1,43 +1,32 @@
-//! Direct proof that invalid runtime hash-file rows do not widen ranked
-//! eligibility (RULE-CATALOG-0892).
+//! A caller-controlled hash file cannot verify manifest authority (RULE-CATALOG-0892).
 //!
-//! Isolated in its own integration-test binary so the runtime allowlist cache
-//! initializes from this test's hash file before any other eligibility probe.
+//! Kept in a single-test binary because this regression sets a process environment variable.
 
 use serde_json::json;
-use sorcery_engine::eligibility::{
-    TEST_ELIGIBILITY_SCENARIO_AUTHORITY_HASH, eligibility_policy_for_manifest,
-    prime_runtime_authority_hash_file_for_tests,
-};
-
-const UNKNOWN_HASH: &str =
-    "sha256:4444444444444444444444444444444444444444444444444444444444444444";
+use sorcery_engine::eligibility::eligibility_policy_for_manifest;
 
 #[test]
-fn rule_catalog_0892_runtime_hash_file_skips_invalid_lines_without_widening_allowlist() {
-    let path = std::env::temp_dir().join("sorcery-eligibility-runtime-hash-0892.txt");
+#[allow(unsafe_code)]
+fn rule_catalog_0892_runtime_hash_invalid_cannot_verify_private_local_authority() {
+    let path = std::env::temp_dir().join(format!(
+        "sorcery-eligibility-runtime-hash-0892-{}.txt",
+        std::process::id(),
+    ));
     std::fs::write(
         &path,
         "\nnot-a-hash\n sha256:not-64-hex \n# comment-like row\n",
     )
-    .expect("write invalid runtime hash file");
-    prime_runtime_authority_hash_file_for_tests(path.to_string_lossy().into_owned());
-    assert!(
-        !eligibility_policy_for_manifest(&json!({
-            "authority": {
-                "contentHash": UNKNOWN_HASH,
-                "mode": "private-local",
-            },
-        }))
-        .authority_verified
-    );
-    assert!(
-        eligibility_policy_for_manifest(&json!({
-            "authority": {
-                "contentHash": TEST_ELIGIBILITY_SCENARIO_AUTHORITY_HASH,
-                "mode": "private-local",
-            },
-        }))
-        .authority_verified
-    );
+    .expect("write untrusted hash file");
+    // SAFETY: this integration-test binary contains only this test and starts no threads.
+    unsafe {
+        std::env::set_var("SORCERY_VERIFIED_AUTHORITY_HASHES_FILE", &path);
+    }
+    let policy = eligibility_policy_for_manifest(&json!({
+        "authority": {
+            "contentHash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            "mode": "private-local",
+        },
+    }));
+    std::fs::remove_file(&path).expect("remove untrusted hash file");
+    assert!(!policy.authority_verified);
 }

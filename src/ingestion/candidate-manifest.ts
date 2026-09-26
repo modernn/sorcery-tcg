@@ -9,11 +9,19 @@ import {
 import type { PrivateCardSnapshot } from '../authority/private-cards.ts';
 import type { ResolvedTopDeckDeck } from './resolve-topdeck-deck.ts';
 
+export type CandidateManifestDiagnostic = Readonly<{
+  cardId: string;
+  reason: 'missing-card' | 'unbound-rules-text' | 'unsupported-card-facts';
+}>;
+
 export type CandidateManifestBuild = Readonly<{
   cardNames: Readonly<Record<string, string>>;
-  manifest: GameManifest;
+  diagnostics: readonly CandidateManifestDiagnostic[];
   unsupportedCardIds: readonly string[];
-}>;
+}> & (
+  | Readonly<{ supported: true; manifest: GameManifest }>
+  | Readonly<{ supported: false; manifest: null }>
+);
 
 function expandZone(rows: readonly ResolvedTopDeckDeck['atlas'][number][]): readonly string[] {
   return rows.flatMap((row) => {
@@ -33,14 +41,6 @@ export function resolvedDeckToSpec(deck: ResolvedTopDeckDeck): GameDeckSpec {
   };
 }
 
-function tryBaselineDefinition(card: PrivateCardSnapshot['cards'][number]): GameCardDefinition | null {
-  try {
-    return baselineGameDefinition(card, false);
-  } catch {
-    return null;
-  }
-}
-
 export function buildCandidateManifest(
   authority: PrivateCardSnapshot,
   deck: ResolvedTopDeckDeck,
@@ -57,22 +57,34 @@ export function buildCandidateManifest(
     ...seats.south.atlas,
     ...seats.south.spellbook,
   ]);
-  const unsupportedCardIds: string[] = [];
+  const diagnostics: CandidateManifestDiagnostic[] = [];
   const definitions: Record<string, GameCardDefinition> = {};
   const cardNames: Record<string, string> = {};
   for (const stableId of referenced) {
     const card = cardsById.get(stableId);
     if (card === undefined) {
-      unsupportedCardIds.push(stableId);
+      diagnostics.push({ cardId: stableId, reason: 'missing-card' });
       continue;
     }
     cardNames[stableId] = card.name;
-    const definition = tryBaselineDefinition(card);
-    if (definition === null) unsupportedCardIds.push(stableId);
-    else definitions[stableId] = definition;
+    // Baseline facts do not bind printed abilities. Never simulate them as blank cards.
+    if (card.rulesText.trim() !== '') {
+      diagnostics.push({ cardId: stableId, reason: 'unbound-rules-text' });
+      continue;
+    }
+    try {
+      definitions[stableId] = baselineGameDefinition(card, false);
+    } catch {
+      diagnostics.push({ cardId: stableId, reason: 'unsupported-card-facts' });
+    }
+  }
+  const unsupportedCardIds = diagnostics.map(({ cardId }) => cardId);
+  if (diagnostics.length > 0) {
+    return { cardNames, diagnostics, manifest: null, supported: false, unsupportedCardIds };
   }
   return {
     cardNames,
+    diagnostics,
     manifest: createGameManifest({
       authority: {
         contentHash: authority.authorityHash,
@@ -84,6 +96,7 @@ export function buildCandidateManifest(
       firstSeat,
       seed,
     }),
+    supported: true,
     unsupportedCardIds,
   };
 }

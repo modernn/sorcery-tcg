@@ -952,7 +952,7 @@ fn rule_catalog_1846_exorcism_banishes_every_demon_and_undead_sharing_the_target
     let demon_id = summon_at(&mut session, "north-demon", "C4");
     let undead_id = summon_at(&mut session, "north-undead", "C4");
     let banished = cast_exorcism(&mut session, "C4");
-    let banishes: Vec<_> = banished
+    let removed_ids: Vec<_> = banished
         .events
         .iter()
         .filter(|event| event.event_type == "minion-banished")
@@ -963,9 +963,9 @@ fn rule_catalog_1846_exorcism_banishes_every_demon_and_undead_sharing_the_target
                 .to_owned()
         })
         .collect();
-    assert_eq!(banishes.len(), 2);
-    assert!(banishes.contains(&demon_id));
-    assert!(banishes.contains(&undead_id));
+    assert_eq!(removed_ids.len(), 2);
+    assert!(removed_ids.contains(&demon_id));
+    assert!(removed_ids.contains(&undead_id));
     assert!(unit_absent(&state(&session), &demon_id));
     assert!(unit_absent(&state(&session), &undead_id));
     assert!(!cemetery_has(&state(&session), "north", &demon_id));

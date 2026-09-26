@@ -1,6 +1,4 @@
 import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
 import { createInterface, type Interface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
@@ -19,13 +17,8 @@ import {
 const REPOSITORY_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const MAX_OUTPUT_BYTES = 16 * 1_048_576;
 const HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
-const DEFAULT_TARGET_DIR = fileURLToPath(new URL('../../target', import.meta.url));
 
 export function sessionJsonLaunch(): Readonly<{ args: readonly string[]; command: string }> {
-  const targetDir = process.env.CARGO_TARGET_DIR ?? DEFAULT_TARGET_DIR;
-  const binaryName = process.platform === 'win32' ? 'session-json.exe' : 'session-json';
-  const binary = join(targetDir, 'release', binaryName);
-  if (existsSync(binary)) return { args: [], command: binary };
   return {
     args: [
       'run', '--release', '--locked', '--quiet', '-p', 'sorcery-engine',

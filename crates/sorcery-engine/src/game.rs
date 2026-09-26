@@ -22631,8 +22631,7 @@ impl Game {
         continuation: &LeapAttackContinuation,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
-        let ally_remains = self.ally_remains(&continuation.ally);
-        if self.position.terminal.is_some() || !ally_remains {
+        if self.position.terminal.is_some() || !self.ally_remains(&continuation.ally) {
             Self::emit_leap_magic_resolved(continuation, outcomes);
             return Ok(());
         }
@@ -22683,7 +22682,6 @@ impl Game {
                 target_instance_id: enemy.instance_id().clone(),
             })
             .collect();
-        let attacker_id = continuation.ally.instance_id().clone();
         for enemy in &enemies {
             let enemy_kind = match enemy {
                 UnitTarget::Avatar { .. } => UnitKind::Avatar,
@@ -22695,13 +22693,11 @@ impl Game {
                 enemy.seat(),
                 enemy.instance_id(),
             )?;
-            let striker_id = attacker_id.clone();
-            let target_id = enemy.instance_id().clone();
             outcomes.push("strike-damage-allocated", || {
                 json!({
                     "amount": allocated,
-                    "strikerInstanceId": striker_id,
-                    "targetInstanceId": target_id,
+                    "strikerInstanceId": continuation.ally.instance_id(),
+                    "targetInstanceId": enemy.instance_id(),
                 })
             });
         }
@@ -22717,14 +22713,22 @@ impl Game {
             region: striker_location.region,
             target_removed: false,
         };
-        let interrupted = self.resolve_fight_window(
-            &pending,
-            true,
-            &[],
-            Some(DeathriteContinuation::LeapAttack(continuation.clone())),
-            outcomes,
-        )?;
-        if !interrupted {
+        // The strike is complete. Deaths may delay Magic resolution, but must
+        // never resume the strike against enemies that survived it.
+        self.resolve_fight_window(&pending, true, &[], None, outcomes)?;
+        if let Some(pending) = &mut self.position.pending_deathrites {
+            let card_index = self
+                .rules
+                .cards
+                .iter()
+                .position(|definition| definition.id == continuation.card_id)
+                .ok_or(GameError::IllegalAction)?;
+            pending.deferred_magic_resolved = Some(DeferredMagicResolved {
+                card_id: CardId(u16::try_from(card_index).map_err(|_| GameError::IllegalAction)?),
+                instance_id: continuation.instance_id.clone(),
+                owner: continuation.owner,
+            });
+        } else {
             Self::emit_leap_magic_resolved(continuation, outcomes);
         }
         Ok(())
@@ -26065,10 +26069,26 @@ fn validate_manifest(
     for (card_id, definition) in &manifest.cards {
         facts.insert(card_id.clone(), parse_card_definition(card_id, definition)?);
     }
-    validate_deck(&manifest.decks.north, &facts)?;
-    validate_deck(&manifest.decks.south, &facts)?;
+    let referenced = referenced_manifest_cards(&manifest.decks, &facts)?;
+    if referenced.len() != manifest.cards.len()
+        || manifest
+            .cards
+            .keys()
+            .any(|card_id| !referenced.contains(card_id.as_str()))
+    {
+        return Err(invalid(
+            "cards must contain exactly the deck-referenced definitions",
+        ));
+    }
+    Ok(facts)
+}
 
-    for deck in [&manifest.decks.north, &manifest.decks.south] {
+fn referenced_manifest_cards<'a>(
+    decks: &'a Decks,
+    facts: &'a BTreeMap<String, CardFacts>,
+) -> Result<BTreeSet<&'a str>, GameError> {
+    for deck in [&decks.north, &decks.south] {
+        validate_deck(deck, facts)?;
         for card_id in &deck.spellbook {
             if matches!(facts.get(card_id), Some(CardFacts::Minion(minion)) if minion.token) {
                 return Err(invalid("spellbook references an unsupported token spell"));
@@ -26076,7 +26096,7 @@ fn validate_manifest(
         }
     }
     let mut referenced = BTreeSet::new();
-    for deck in [&manifest.decks.north, &manifest.decks.south] {
+    for deck in [&decks.north, &decks.south] {
         referenced.insert(deck.avatar.as_str());
         referenced.extend(deck.atlas.iter().map(String::as_str));
         referenced.extend(deck.spellbook.iter().map(String::as_str));
@@ -26090,17 +26110,46 @@ fn validate_manifest(
             referenced.insert(token_id);
         }
     }
-    if referenced.len() != manifest.cards.len()
-        || manifest
-            .cards
-            .keys()
-            .any(|card_id| !referenced.contains(card_id.as_str()))
-    {
-        return Err(invalid(
-            "cards must contain exactly the deck-referenced definitions",
-        ));
+    Ok(referenced)
+}
+
+/// Rebuilds a manifest with new deck compositions and a seed, preserving card facts.
+///
+/// The validated base manifest supplies the entire card pool. Unused definitions are
+/// removed, and token dependencies are retained through the ordinary manifest rules.
+/// Both games in a seat-swapped experiment start with North.
+///
+/// # Errors
+///
+/// Returns [`GameError`] for an invalid base manifest, unknown cards, illegal zones,
+/// or token dependencies that the engine cannot instantiate.
+pub fn recompose_manifest_json(
+    base_manifest_json: &str,
+    decks: &Value,
+    seed: u32,
+) -> Result<String, GameError> {
+    let mut raw: Value = crate::canonical::parse_json_without_duplicate_keys(base_manifest_json)?;
+    if crate::canonical::canonical_json(&raw)? != base_manifest_json.trim_end() {
+        return Err(invalid("game manifest JSON is not canonical"));
     }
-    Ok(facts)
+    let manifest: Manifest = serde_json::from_value(raw.clone())?;
+    let facts = validate_manifest(&raw, &manifest)?;
+    let replacement_decks: Decks = serde_json::from_value(decks.clone())?;
+    let referenced = referenced_manifest_cards(&replacement_decks, &facts)?;
+    raw["cards"]
+        .as_object_mut()
+        .ok_or_else(|| invalid("manifest cards must be an object"))?
+        .retain(|card_id, _| referenced.contains(card_id.as_str()));
+    raw["decks"] = decks.clone();
+    raw["seed"] = json!(seed);
+    raw["firstSeat"] = json!("north");
+    raw.as_object_mut()
+        .ok_or_else(|| invalid("manifest must be an object"))?
+        .remove("manifestId");
+    raw["manifestId"] = json!(identity_hash(&raw)?);
+    let recomposed: Manifest = serde_json::from_value(raw.clone())?;
+    validate_manifest(&raw, &recomposed)?;
+    Ok(crate::canonical::canonical_json(&raw)?)
 }
 
 fn create_player(

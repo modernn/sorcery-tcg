@@ -13,11 +13,15 @@ use sorcery_engine::canonical::{
     IdentityHash, canonical_json, identity_hash, parse_json_without_duplicate_keys,
 };
 use sorcery_engine::deck::{
-    CandidateDeck, CardCatalogEntry, CardCount, CardType, FormatContext, OfficialCardMapping,
-    validate_deck,
+    CandidateDeck, CardCatalogEntry, CardCount, CardType, DeckValidation, FormatContext,
+    OfficialCardMapping, validate_deck,
 };
+use sorcery_engine::game::recompose_manifest_json;
 use sorcery_engine::game_record::{
     record_synthetic_demo, replay_artifact_steps, replay_game_artifacts, write_game_artifacts,
+};
+use sorcery_engine::gauntlet::{
+    GauntletOrientation, GauntletPair, run_gauntlet, run_gauntlet_to_dir,
 };
 use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
 use sorcery_engine::schedule::{FailurePolicy, SeedBlock, run_synthetic_schedule};
@@ -26,6 +30,7 @@ use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 const SYNTHETIC_DECK_ID: &str =
     "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const MAX_BATCH_JSON_BYTES: usize = MAX_BATCH_BYTES * 2 + 1024 * 1024;
+const MAX_EXPERIMENT_JSON_BYTES: usize = 16 * 1024 * 1024;
 
 type CliResult<T> = Result<T, Box<dyn Error>>;
 
@@ -44,6 +49,8 @@ enum Command {
         artifacts_dir: Option<String>,
     },
     BatchJson,
+    ExperimentJson,
+    ExperimentExample,
     Schedule {
         workers: usize,
         seeds: Vec<u32>,
@@ -64,6 +71,55 @@ struct BatchJsonRequest {
     workers: usize,
     artifacts_dir: Option<String>,
     jobs: Vec<BatchJsonJob>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ExperimentJsonRequest {
+    schema_version: u8,
+    base_manifest: Value,
+    candidate: ExperimentDeck,
+    opponent: ExperimentDeck,
+    seeds: Vec<u32>,
+    workers: usize,
+    artifacts_dir: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExperimentDeck {
+    avatar: String,
+    atlas: ExperimentZone,
+    spellbook: ExperimentZone,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ExperimentZone {
+    Expanded(Vec<String>),
+    Counted(Vec<ExperimentCount>),
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ExperimentCount {
+    card_id: String,
+    copies: u32,
+}
+
+impl ExperimentZone {
+    fn into_counts(self) -> CliResult<Vec<CardCount>> {
+        match self {
+            Self::Expanded(cards) => counted_cards(cards),
+            Self::Counted(cards) => Ok(cards
+                .into_iter()
+                .map(|card| CardCount {
+                    card_id: card.card_id,
+                    copies: card.copies,
+                })
+                .collect()),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -159,6 +215,11 @@ fn run() -> CliResult<()> {
             let input = read_batch_json_stdin()?;
             write_canonical_json(&run_batch_json(&input)?)
         }
+        Command::ExperimentJson => {
+            let input = read_json_stdin(MAX_EXPERIMENT_JSON_BYTES)?;
+            write_canonical_json(&run_experiment_json(&input)?)
+        }
+        Command::ExperimentExample => write_canonical_json(&experiment_example()?),
         Command::Schedule {
             workers,
             seeds,
@@ -235,20 +296,38 @@ fn parse_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
             }
             Ok(Command::BatchJson)
         }
+        Some("experiment-json") => {
+            if args.next().is_some() {
+                return Err(io::Error::other("usage: sorcery-engine experiment-json < request.json").into());
+            }
+            Ok(Command::ExperimentJson)
+        }
+        Some("experiment-example") => {
+            if args.next().is_some() {
+                return Err(io::Error::other("usage: sorcery-engine experiment-example").into());
+            }
+            Ok(Command::ExperimentExample)
+        }
         _ => Err(io::Error::other(
-            "usage: sorcery-engine demo [seed] [dir] | record [seed] [dir] | batch [--out dir] [workers] [seeds...] | schedule [--out dir] [workers] [seeds...] | replay dir | replay-steps dir | batch-json",
+            "usage: sorcery-engine demo [seed] [dir] | record [seed] [dir] | batch [--out dir] [workers] [seeds...] | schedule [--out dir] [workers] [seeds...] | replay dir | replay-steps dir | batch-json | experiment-example | experiment-json",
         )
         .into()),
     }
 }
 
 fn read_batch_json_stdin() -> CliResult<Vec<u8>> {
+    read_json_stdin(MAX_BATCH_JSON_BYTES)
+}
+
+fn read_json_stdin(max_bytes: usize) -> CliResult<Vec<u8>> {
     let mut input = Vec::new();
     io::stdin()
         .lock()
-        .take(u64::try_from(MAX_BATCH_JSON_BYTES)? + 1)
+        .take(u64::try_from(max_bytes)? + 1)
         .read_to_end(&mut input)?;
-    validate_batch_json_size(input.len())?;
+    if input.len() > max_bytes {
+        return Err(io::Error::other(format!("JSON input exceeds {max_bytes} bytes")).into());
+    }
     Ok(input)
 }
 
@@ -313,6 +392,239 @@ fn run_batch_json(input: &[u8]) -> CliResult<Vec<GameBatchResult>> {
     } else {
         Ok(run_game_batch(&jobs, workers)?)
     }
+}
+
+fn experiment_example() -> CliResult<Value> {
+    let base_manifest: Value = serde_json::from_str(&synthetic_demo_manifest_json(1)?)?;
+    let manifest: ManifestDeckEnvelope = serde_json::from_value(base_manifest.clone())?;
+    let deck_value = |deck: ManifestDeck| -> CliResult<Value> {
+        Ok(json!({
+            "avatar": deck.avatar,
+            "atlas": counted_cards(deck.atlas)?,
+            "spellbook": counted_cards(deck.spellbook)?,
+        }))
+    };
+    Ok(json!({
+        "schemaVersion": 1,
+        "baseManifest": base_manifest,
+        "candidate": deck_value(manifest.decks.north)?,
+        "opponent": deck_value(manifest.decks.south)?,
+        "seeds": [1, 2],
+        "workers": 1,
+    }))
+}
+
+fn experiment_deck(
+    deck: ExperimentDeck,
+    catalog: &[CardCatalogEntry],
+) -> CliResult<DeckValidation> {
+    let validation = validate_deck(
+        CandidateDeck {
+            avatar: deck.avatar,
+            atlas: deck.atlas.into_counts()?,
+            spellbook: deck.spellbook.into_counts()?,
+        },
+        catalog,
+        FormatContext::constructed(),
+    )?;
+    if !validation.engine_supported() {
+        return Err(io::Error::other(format!(
+            "experiment deck cannot be instantiated: {:?}",
+            validation.diagnostics()
+        ))
+        .into());
+    }
+    Ok(validation)
+}
+
+fn expanded_deck(validation: &DeckValidation) -> Value {
+    let deck = validation.deck();
+    let expand = |cards: &[CardCount]| {
+        cards
+            .iter()
+            .flat_map(|card| std::iter::repeat_n(card.card_id.clone(), card.copies as usize))
+            .collect::<Vec<_>>()
+    };
+    json!({
+        "avatar": deck.avatar,
+        "atlas": expand(&deck.atlas),
+        "spellbook": expand(&deck.spellbook),
+    })
+}
+
+fn experiment_deck_report(validation: &DeckValidation, policy: &PolicySnapshot) -> Value {
+    json!({
+        "deck": validation.deck(),
+        "deckId": validation.deck_id(),
+        "formatLegal": validation.format_legal(),
+        "engineSupported": validation.engine_supported(),
+        "rankedEligible": false,
+        "policyId": policy.policy_id(),
+        "diagnostics": validation.diagnostics().iter().map(|diagnostic| {
+            format!("{diagnostic:?}")
+        }).collect::<Vec<_>>(),
+    })
+}
+
+fn parse_experiment_json(input: &[u8]) -> CliResult<ExperimentJsonRequest> {
+    if input.len() > MAX_EXPERIMENT_JSON_BYTES {
+        return Err(io::Error::other("experiment-json input exceeds 16 MiB").into());
+    }
+    let request: ExperimentJsonRequest = serde_json::from_value(
+        parse_json_without_duplicate_keys(std::str::from_utf8(input)?)?,
+    )?;
+    if request.schema_version != 1 {
+        return Err(io::Error::other("experiment-json schemaVersion must be 1").into());
+    }
+    if !(1..=MAX_BATCH_WORKERS).contains(&request.workers) {
+        return Err(io::Error::other("experiment-json workers must be 1-8").into());
+    }
+    if request.seeds.is_empty() || request.seeds.len() > MAX_BATCH_JOBS / 2 {
+        return Err(io::Error::other("experiment-json requires 1-128 seeds").into());
+    }
+    // Private manifests contain source-derived facts; this convenience command never
+    // persists them. The private authority workflow owns publication-safe artifact paths.
+    if request.artifacts_dir.is_some() && request.base_manifest["authority"]["mode"] != "synthetic"
+    {
+        return Err(io::Error::other(
+            "experiment-json artifactsDir is supported only for synthetic manifests",
+        )
+        .into());
+    }
+    Ok(request)
+}
+
+fn experiment_manifests(
+    base_manifest_json: &str,
+    candidate: &DeckValidation,
+    opponent: &DeckValidation,
+    seeds: &[u32],
+) -> CliResult<Vec<[String; 2]>> {
+    let candidate_deck = expanded_deck(candidate);
+    let opponent_deck = expanded_deck(opponent);
+    let mut manifests = Vec::with_capacity(seeds.len());
+    let mut total_bytes = 0;
+    for &seed in seeds {
+        let pair = [
+            recompose_manifest_json(
+                base_manifest_json,
+                &json!({
+                    "north": candidate_deck, "south": opponent_deck,
+                }),
+                seed,
+            )?,
+            recompose_manifest_json(
+                base_manifest_json,
+                &json!({
+                    "north": opponent_deck, "south": candidate_deck,
+                }),
+                seed,
+            )?,
+        ];
+        total_bytes += pair.iter().map(String::len).sum::<usize>();
+        if total_bytes > MAX_BATCH_BYTES {
+            return Err(io::Error::other("experiment manifests exceed 64 MiB").into());
+        }
+        manifests.push(pair);
+    }
+    Ok(manifests)
+}
+
+fn run_experiment_json(input: &[u8]) -> CliResult<Value> {
+    let request = parse_experiment_json(input)?;
+    let base_manifest_json = canonical_json(&request.base_manifest)?;
+    let manifest: ManifestDeckEnvelope = serde_json::from_value(request.base_manifest.clone())?;
+    let catalog = manifest_catalog(manifest.cards);
+    let candidate = experiment_deck(request.candidate, &catalog)?;
+    let opponent = experiment_deck(request.opponent, &catalog)?;
+    if candidate.deck_id() == opponent.deck_id() {
+        return Err(
+            io::Error::other("experiment-json requires two distinct deck compositions").into(),
+        );
+    }
+    let manifests =
+        experiment_manifests(&base_manifest_json, &candidate, &opponent, &request.seeds)?;
+    let candidate_policy = policy_for_deck(&manifests[0][0], candidate.deck_id().as_str())?;
+    let opponent_policy = policy_for_deck(&manifests[0][0], opponent.deck_id().as_str())?;
+    let pairs = manifests
+        .iter()
+        .zip(&request.seeds)
+        .map(|(pair, &seed)| GauntletPair {
+            seed,
+            orientations: [
+                (
+                    &pair[0],
+                    &candidate,
+                    &candidate_policy,
+                    &opponent,
+                    &opponent_policy,
+                ),
+                (
+                    &pair[1],
+                    &opponent,
+                    &opponent_policy,
+                    &candidate,
+                    &candidate_policy,
+                ),
+            ]
+            .map(
+                |(manifest_json, north, north_policy, south, south_policy)| GauntletOrientation {
+                    job: BatchJob {
+                        manifest_json,
+                        north_deck_id: north.deck_id(),
+                        north_policy,
+                        south_deck_id: south.deck_id(),
+                        south_policy,
+                    },
+                    north_deck_id: north.deck_id().as_str(),
+                    south_deck_id: south.deck_id().as_str(),
+                },
+            ),
+        })
+        .collect::<Vec<_>>();
+    let report = if let Some(dir) = &request.artifacts_dir {
+        run_gauntlet_to_dir(&pairs, request.workers, Path::new(dir), 0)?
+    } else {
+        run_gauntlet(&pairs, request.workers)?
+    };
+    let total_turns: u64 = report
+        .games
+        .iter()
+        .map(|game| game.result.report.turn_count)
+        .sum();
+    let all_replay_verified = report
+        .games
+        .iter()
+        .all(|game| game.result.report.replay_verified);
+    let mut result = serde_json::to_value(report)?;
+    result
+        .as_object_mut()
+        .ok_or_else(|| io::Error::other("invalid gauntlet report"))?
+        .remove("averageTurns");
+    result["schemaVersion"] = json!(1);
+    result["experimentId"] = json!(identity_hash(&json!({
+        "schemaVersion": 1,
+        "baseManifestId": request.base_manifest["manifestId"],
+        "candidateDeckId": candidate.deck_id(),
+        "opponentDeckId": opponent.deck_id(),
+        "candidatePolicyId": candidate_policy.policy_id(),
+        "opponentPolicyId": opponent_policy.policy_id(),
+        "seeds": request.seeds,
+    }))?);
+    result["candidate"] = experiment_deck_report(&candidate, &candidate_policy);
+    result["opponent"] = experiment_deck_report(&opponent, &opponent_policy);
+    result["totalTurns"] = json!(total_turns);
+    result["allReplayVerified"] = json!(all_replay_verified);
+    result["ranked"] = json!(false);
+    result["limitations"] = json!([
+        "Experimental comparison under the deterministic baseline policy; results are unranked.",
+        "Manifest facts are not independently authority-verified. Rarity and copy limits are unavailable.",
+        "Engine support is checked independently from Constructed deck legality."
+    ]);
+    if let Some(dir) = request.artifacts_dir {
+        result["artifactsDir"] = json!(dir);
+    }
+    Ok(result)
 }
 
 fn parse_batch_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
@@ -400,8 +712,14 @@ fn compact_report(record: &sorcery_engine::game_record::GameRecord) -> Determini
 
 fn manifest_deck_ids(manifest_json: &str) -> CliResult<(IdentityHash, IdentityHash)> {
     let manifest: ManifestDeckEnvelope = serde_json::from_str(manifest_json)?;
-    let catalog = manifest
-        .cards
+    let catalog = manifest_catalog(manifest.cards);
+    let north = manifest_deck_id(manifest.decks.north, &catalog)?;
+    let south = manifest_deck_id(manifest.decks.south, &catalog)?;
+    Ok((north, south))
+}
+
+fn manifest_catalog(cards: BTreeMap<String, ManifestCard>) -> Vec<CardCatalogEntry> {
+    cards
         .into_iter()
         .map(|(stable_id, card)| CardCatalogEntry {
             stable_id,
@@ -411,10 +729,7 @@ fn manifest_deck_ids(manifest_json: &str) -> CliResult<(IdentityHash, IdentityHa
             official_mapping: OfficialCardMapping::Unavailable,
             token: card.token.unwrap_or(false),
         })
-        .collect::<Vec<_>>();
-    let north = manifest_deck_id(manifest.decks.north, &catalog)?;
-    let south = manifest_deck_id(manifest.decks.south, &catalog)?;
-    Ok((north, south))
+        .collect()
 }
 
 fn manifest_deck_id(deck: ManifestDeck, catalog: &[CardCatalogEntry]) -> CliResult<IdentityHash> {

@@ -26,11 +26,15 @@ test('the public rules catalog stays linked to direct scenario proofs', () => {
     assert.match(
       rule.scenarioProof.file,
       rule.implementationStatus === 'rust-supported'
-        ? /^crates\/sorcery-engine\/(?:src\/game\.rs|tests\/[\w-]+\.rs)$/u
+        ? /^crates\/sorcery-engine\/(?:src\/game\.rs|tests\/[\w-]+\.rs|tests\/common\/[\w-]+\.inc\.rs)$/u
         : /^tests\/engine\/[\w-]+\.test\.ts$/u,
     );
     const proofUrl = new URL(`../../${rule.scenarioProof.file}`, import.meta.url);
     const proof = readFileSync(proofUrl, 'utf8').replaceAll("\\'", "'");
-    assert.equal(proof.includes(rule.scenarioProof.testName), true);
+    assert.equal(
+      proof.includes(rule.scenarioProof.testName),
+      true,
+      `${rule.ruleId}: missing proof ${rule.scenarioProof.testName}`,
+    );
   }
 });

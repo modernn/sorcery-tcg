@@ -5,16 +5,18 @@ import { parseArgs } from 'node:util';
 
 import { canonicalJson, type JsonValue } from '../authority/canonical-json.ts';
 import { loadPrivateCardSnapshot } from '../authority/private-cards.ts';
+import { resolveWithinAuthorityRoot } from '../authority/validate-bundle.ts';
 import {
   buildCandidateManifest,
   resolvedDeckToSpec,
+  type CandidateManifestDiagnostic,
 } from '../ingestion/candidate-manifest.ts';
 import {
   loadLatestTopDeckCandidateSnapshot,
   loadTopDeckCandidateSnapshot,
 } from '../ingestion/load-topdeck-snapshot.ts';
 import { selectTopDecksPerAvatar, type MetaDeckCandidate } from '../ingestion/select-meta-decks.ts';
-import { runTwoDeckGauntlet, type GauntletDeck } from '../simulator/gauntlet.ts';
+import { runTwoDeckGauntlet } from '../simulator/gauntlet.ts';
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
 const DEFAULT_SCENARIO = resolve(
@@ -45,6 +47,7 @@ export type MetaDeckGauntletReport = Readonly<{
   snapshotPath: string;
   unsupportedManifests: readonly Readonly<{
     deckId: string;
+    diagnostics: readonly CandidateManifestDiagnostic[];
     unsupportedCardIds: readonly string[];
   }>[];
 }>;
@@ -102,6 +105,10 @@ export async function runMetaDeckGauntlet(
     strict: true,
   });
 
+  const outputId = values['output-id'];
+  if (outputId !== undefined && !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u.test(outputId)) {
+    throw new TypeError('--output-id must be a confined path segment of 1-128 letters, digits, dots, underscores, or hyphens, starting with a letter or digit');
+  }
   const perAvatar = Number(values['per-avatar']);
   if (!Number.isInteger(perAvatar) || perAvatar < 1 || perAvatar > 8) {
     throw new RangeError('--per-avatar must be an integer from 1 through 8');
@@ -129,12 +136,13 @@ export async function runMetaDeckGauntlet(
     );
   }
 
-  const unsupportedManifests: Array<{ deckId: string; unsupportedCardIds: readonly string[] }> = [];
+  const unsupportedManifests: Array<MetaDeckGauntletReport['unsupportedManifests'][number]> = [];
   for (const candidate of selection.candidates) {
     const built = manifestForPair(authority, candidate, candidate, seeds[0]!);
-    if (built.unsupportedCardIds.length > 0 && candidate.deckId !== null) {
+    if (!built.supported && candidate.deckId !== null) {
       unsupportedManifests.push({
         deckId: candidate.deckId,
+        diagnostics: built.diagnostics,
         unsupportedCardIds: built.unsupportedCardIds,
       });
     }
@@ -169,7 +177,7 @@ export async function runMetaDeckGauntlet(
     if (seenPairs.has(pairKey)) continue;
     seenPairs.add(pairKey);
     const sample = manifestForPair(authority, left, right, seeds[0]!);
-    if (sample.unsupportedCardIds.length > 0) continue;
+    if (!sample.supported) continue;
     const leftId = deckLabel(left);
     const rightId = deckLabel(right);
     matchups.push({
@@ -199,17 +207,13 @@ export async function runMetaDeckGauntlet(
     unsupportedManifests,
   };
 
-  if (values['output-id'] !== undefined) {
-    const outputDir = resolve(
-      repositoryRoot,
-      '.local',
-      'authority',
-      'reports',
-      'meta-deck-gauntlet',
-    );
+  if (outputId !== undefined) {
+    const authorityRoot = resolve(repositoryRoot, '.local', 'authority');
+    const outputDir = resolve(authorityRoot, 'reports', 'meta-deck-gauntlet');
     await mkdir(outputDir, { recursive: true });
-    const outputPath = resolve(outputDir, `${values['output-id']}.json`);
-    await writeFile(outputPath, canonicalJson(report as unknown as JsonValue), { mode: 0o600 });
+    const confinedDir = await resolveWithinAuthorityRoot(authorityRoot, 'reports/meta-deck-gauntlet');
+    const outputPath = resolve(confinedDir, `${outputId}.json`);
+    await writeFile(outputPath, canonicalJson(report as unknown as JsonValue), { flag: 'wx', mode: 0o600 });
     io.stdout(canonicalJson({
       matchupCount: report.matchupCount,
       outputPath: relative(repositoryRoot, outputPath).replaceAll('\\', '/'),

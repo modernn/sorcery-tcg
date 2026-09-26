@@ -346,6 +346,11 @@ fn leap_kill_deathrite_manifest(seed: u32) -> String {
                 "otherNearbyAlliesPowerBonus": 1,
             })),
             "south-avatar": avatar(),
+            "south-warded": minion(json!({
+                "defense": 3,
+                "summonToAnySite": true,
+                "ward": true,
+            })),
             "south-enemy-a": minion(json!({
                 "deathriteDrawSite": true,
                 "defense": 1,
@@ -383,8 +388,8 @@ fn leap_kill_deathrite_manifest(seed: u32) -> String {
                     "south-enemy-b",
                     "south-enemy-a",
                     "south-enemy-b",
-                    "south-enemy-a",
-                    "south-enemy-b",
+                    "south-warded",
+                    "south-warded",
                 ],
             },
         },
@@ -400,6 +405,7 @@ struct LeapKillDeathriteSetup {
     leap_id: String,
     session: Session,
     source_id: String,
+    survivor_id: String,
 }
 
 fn try_setup_leap_kill_deathrite(encoded: &str) -> Option<LeapKillDeathriteSetup> {
@@ -453,6 +459,11 @@ fn try_setup_leap_kill_deathrite(encoded: &str) -> Option<LeapKillDeathriteSetup
             && descriptor["cardId"] == "south-enemy-b"
             && descriptor["cell"] == "C2"
     })?;
+    let survivor = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-warded"
+            && descriptor["cell"] == "C2"
+    })?;
     try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
     try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
@@ -472,17 +483,7 @@ fn try_setup_leap_kill_deathrite(encoded: &str) -> Option<LeapKillDeathriteSetup
         leap_id,
         session,
         source_id: source.0["cardInstanceId"].as_str()?.to_owned(),
-    })
-}
-
-fn pending_leap_kill(setup: &LeapKillDeathriteSetup) -> Value {
-    json!({
-        "ally": { "instanceId": setup.source_id, "kind": "minion", "seat": "north" },
-        "cardId": "north-leap",
-        "instanceId": setup.leap_id,
-        "kind": "leap-attack",
-        "owner": "north",
-        "strikeLocation": { "cell": "C2", "region": "surface" },
+        survivor_id: survivor.0["cardInstanceId"].as_str()?.to_owned(),
     })
 }
 
@@ -585,30 +586,59 @@ fn rule_catalog_0799_leap_attack_deathrite_order_branches_match_after_checkpoint
     assert_eq!(branch_hashes[0], branch_hashes[1]);
 }
 
+fn assert_initial_leap_strike(result: &Receipt, enemy_ids: &[String], survivor_id: &str) {
+    let mut struck_ids: Vec<_> = result
+        .events
+        .iter()
+        .filter(|event| event.event_type == "strike-damage-allocated")
+        .map(|event| {
+            event.payload["targetInstanceId"]
+                .as_str()
+                .expect("struck target")
+        })
+        .collect();
+    struck_ids.sort_unstable();
+    let mut expected_ids = vec![enemy_ids[0].as_str(), enemy_ids[1].as_str(), survivor_id];
+    expected_ids.sort_unstable();
+    assert_eq!(struck_ids, expected_ids, "exactly one strike per enemy");
+    assert_eq!(
+        event_types(result)
+            .iter()
+            .filter(|kind| **kind == "ward-broken")
+            .count(),
+        1
+    );
+}
+
 #[test]
-fn rule_catalog_1009_leap_attack_kill_triggers_deathrite_draw_before_strike_resumes() {
+fn rule_catalog_1009_leap_attack_kill_resolves_deathrites_without_repeating_the_strike() {
     let encoded = seed_leap_kill_deathrite(1009);
     let mut setup =
         try_setup_leap_kill_deathrite(&encoded).expect("complete Leap Attack kill Deathrite setup");
     let interrupted = cast_leap(&mut setup.session, &setup.leap_id, &setup.source_id);
-    assert_eq!(
-        event_types(&interrupted),
-        [
-            "magic-cast",
-            "unit-stepped",
-            "strike-damage-allocated",
-            "strike-damage-allocated",
-            "damage-dealt",
-            "damage-dealt",
-        ]
-    );
+    let types = event_types(&interrupted);
+    assert_eq!(&types[..2], ["magic-cast", "unit-stepped"]);
+    assert_initial_leap_strike(&interrupted, &setup.enemy_ids, &setup.survivor_id);
     let paused = state(&setup.session);
     assert_eq!(paused["phase"], "deathrite-order");
     assert_eq!(paused["decisionSeat"], "south");
+    assert!(paused["pendingDeathrites"]["continuation"].is_null());
     assert_eq!(
-        paused["pendingDeathrites"]["continuation"],
-        pending_leap_kill(&setup)
+        paused["pendingDeathrites"]["deferredOutcomes"],
+        json!([{
+            "payload": {
+                "cardId": "north-leap",
+                "instanceId": setup.leap_id,
+                "owner": "north",
+            },
+            "type": "magic-resolved",
+        }])
     );
+    let survivor = realm_unit(&paused, &setup.survivor_id).expect("warded enemy survives");
+    assert_eq!(survivor["damage"], 0);
+    assert_eq!(survivor["warded"], false);
+    let checkpoint = create_game_checkpoint(&setup.session).expect("post-strike checkpoint");
+    setup.session = resume_game_checkpoint(&checkpoint).expect("resume post-strike deaths");
     assert!(
         setup
             .enemy_ids
@@ -641,6 +671,10 @@ fn rule_catalog_1009_leap_attack_kill_triggers_deathrite_draw_before_strike_resu
     );
     assert_eq!(types.get(4), Some(&"minion-died"));
     assert_eq!(types.last(), Some(&"magic-resolved"));
+    assert!(
+        !types.contains(&"strike-damage-allocated"),
+        "the completed strike must not repeat"
+    );
     let draw_index = types
         .iter()
         .position(|event_type| *event_type == "site-drawn")
@@ -671,6 +705,10 @@ fn rule_catalog_1009_leap_attack_kill_triggers_deathrite_draw_before_strike_resu
             .iter()
             .all(|instance_id| realm_unit(&finished, instance_id).is_none())
     );
+    let survivor =
+        realm_unit(&finished, &setup.survivor_id).expect("unwarded enemy still survives");
+    assert_eq!(survivor["damage"], 0);
+    assert_eq!(survivor["warded"], false);
     assert_exact_replay(&setup.session);
 }
 

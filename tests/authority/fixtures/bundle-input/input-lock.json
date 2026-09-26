@@ -7,15 +7,15 @@
       "storageMode": "manifest-only"
     },
     {
-      "byteHash": "sha256:6ffa7a2ecb2fca12b0906770c07da949bed279bca5da8e419aa1ea2344c95f02",
+      "byteHash": "sha256:555cd72b588ea83f720f8e7e2782b183d36acd95bc73a37e7b8ff50f2128b181",
       "relativePath": "formats.json",
       "storageMode": "stored"
     },
     {
-      "byteHash": "sha256:c5a2d097f4b647350a1de09ea294a15f564f26cd860974efc4ad3859d5e1973b",
+      "byteHash": "sha256:82eaea1db56c9b58502e497e741d56153962d996c7c5f94bba665b84dc6e3c5d",
       "relativePath": "sources.json",
       "storageMode": "stored"
     }
   ],
-  "inputRootHash": "sha256:6d3b659be4ec2e7808bc13e044527f141b38e312e26b228bbbb2033434e664b7"
+  "inputRootHash": "sha256:2da933db364edea8c4ac47af53f1d79540029bf882d15200b91768d1c73e7e39"
 }

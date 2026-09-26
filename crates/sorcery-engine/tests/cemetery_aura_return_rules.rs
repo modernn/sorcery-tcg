@@ -865,7 +865,7 @@ fn try_two_cemetery_auras_on_session(session: &mut Session) -> Option<[String; 2
     let first = try_destroy_own_aura(session, &[])?;
     let mut second = None;
     for _ in 0..4 {
-        if let Some(id) = try_destroy_own_aura(session, &[first.clone()]) {
+        if let Some(id) = try_destroy_own_aura(session, std::slice::from_ref(&first)) {
             second = Some(id);
             break;
         }

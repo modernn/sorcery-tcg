@@ -341,22 +341,22 @@ struct KillableCombatSetup {
     session: Session,
 }
 
-fn try_killable_combat_setup(encoded: &str) -> Option<KillableCombatSetup> {
+fn killable_combat_setup(encoded: &str) -> KillableCombatSetup {
     let mut session = opening_main_with(encoded);
     let ally_id = summon_north_ally(&mut session);
     let enemy_id = south_summons_tough_at_c4(&mut session);
-    Some(KillableCombatSetup {
+    KillableCombatSetup {
         ally_id,
         enemy_id,
         session,
-    })
+    }
 }
 
 fn killable_combat_setup_with_grant(start: u32) -> KillableCombatSetup {
     (start..start + 2048)
         .map(grant_manifest_with_seed)
         .find_map(|candidate| {
-            let setup = try_killable_combat_setup(&candidate)?;
+            let setup = killable_combat_setup(&candidate);
             grant_ally_ids(&setup.session)
                 .contains(&setup.ally_id)
                 .then_some(setup)
@@ -374,7 +374,7 @@ fn seed_with_two_grants_in_hand_after_setup(start: u32) -> String {
             {
                 return None;
             }
-            let setup = try_killable_combat_setup(&encoded)?;
+            let setup = killable_combat_setup(&encoded);
             (grant_spells_in_hand(&state(&setup.session)) >= 2).then_some(encoded)
         })
         .expect("bounded seed with two Grant spells in hand after combat setup")
@@ -391,7 +391,7 @@ fn try_new_ally_double_grant_prefix(encoded: &str) -> Option<NewAllyDoubleGrantS
         mut session,
         ally_id,
         enemy_id,
-    } = try_killable_combat_setup(encoded)?;
+    } = killable_combat_setup(encoded);
     let snap = state(&session);
     if grant_spells_in_hand(&snap) < 1 || allies_in_hand(&snap) < 1 {
         return None;
@@ -1220,7 +1220,7 @@ fn rule_catalog_1804_second_grant_stacks_sources_without_doubling_twice() {
         mut session,
         ally_id,
         enemy_id,
-    } = try_killable_combat_setup(&encoded).expect("combat setup");
+    } = killable_combat_setup(&encoded);
     let (first, _) = grant_double(&mut session, &ally_id);
     let (second, _) = grant_double(&mut session, &ally_id);
     assert_eq!(

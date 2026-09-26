@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
-use sorcery_engine::game::{Game, GameEndReason, GameOutcome, IssuedAction};
+use sorcery_engine::game::{Game, GameEndReason, GameOutcome};
 use sorcery_engine::session::{Session, StepResult};
 use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
@@ -546,7 +546,7 @@ fn north_opening_main_from_manifest(encoded: &str) -> Session {
     session
 }
 
-fn site_play_manifest(seed: u32, avatar_card: Value, site_card: Value) -> String {
+fn site_play_manifest(seed: u32, avatar_card: &Value, site_card: &Value) -> String {
     finish_manifest(json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "site-play-create-rubble", "seed": seed }))
@@ -1095,7 +1095,7 @@ fn rule_catalog_1536_non_geomancer_earth_site_play_omits_create_rubble_at() {
 #[test]
 fn rule_catalog_1543_geomancer_earth_site_play_includes_create_rubble_at() {
     let mut session =
-        north_second_main_from_manifest(&site_play_manifest(1543, geomancer_avatar(), site()));
+        north_second_main_from_manifest(&site_play_manifest(1543, &geomancer_avatar(), &site()));
     let (second, receipt) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site"
             && descriptor["cell"] == "C3"
@@ -1123,7 +1123,7 @@ fn rule_catalog_1543_geomancer_earth_site_play_includes_create_rubble_at() {
 #[test]
 fn rule_catalog_1544_non_geomancer_water_site_play_omits_create_rubble_at() {
     let mut session =
-        north_second_main_from_manifest(&site_play_manifest(1544, avatar(false), water_site()));
+        north_second_main_from_manifest(&site_play_manifest(1544, &avatar(false), &water_site()));
     let (second, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
     });
@@ -1143,8 +1143,8 @@ fn rule_catalog_1544_non_geomancer_water_site_play_omits_create_rubble_at() {
 fn rule_catalog_1553_geomancer_water_second_main_play_omits_create_rubble_at() {
     let mut session = north_second_main_from_manifest(&site_play_manifest(
         1553,
-        geomancer_avatar(),
-        water_site(),
+        &geomancer_avatar(),
+        &water_site(),
     ));
     let (second, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
@@ -1164,7 +1164,7 @@ fn rule_catalog_1553_geomancer_water_second_main_play_omits_create_rubble_at() {
 #[test]
 fn rule_catalog_1554_geomancer_first_earth_play_includes_create_rubble_at() {
     let mut session =
-        north_opening_main_from_manifest(&site_play_manifest(1554, geomancer_avatar(), site()));
+        north_opening_main_from_manifest(&site_play_manifest(1554, &geomancer_avatar(), &site()));
     let (first, receipt) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor.get("createRubbleAt").is_some()
     });
@@ -1190,7 +1190,7 @@ fn rule_catalog_1554_geomancer_first_earth_play_includes_create_rubble_at() {
 #[test]
 fn rule_catalog_1555_non_geomancer_first_earth_play_omits_create_rubble_at() {
     let mut session =
-        north_opening_main_from_manifest(&site_play_manifest(1555, avatar(false), site()));
+        north_opening_main_from_manifest(&site_play_manifest(1555, &avatar(false), &site()));
     let (first, _) = accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
     assert!(first.get("createRubbleAt").is_none());
     let first_play = session
@@ -1206,7 +1206,7 @@ fn rule_catalog_1555_non_geomancer_first_earth_play_omits_create_rubble_at() {
 #[test]
 fn rule_catalog_1558_non_geomancer_water_first_play_omits_create_rubble_at() {
     let mut session =
-        north_opening_main_from_manifest(&site_play_manifest(1558, avatar(false), water_site()));
+        north_opening_main_from_manifest(&site_play_manifest(1558, &avatar(false), &water_site()));
     let (first, _) = accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
     assert!(first.get("createRubbleAt").is_none());
     let first_play = session
@@ -1223,8 +1223,8 @@ fn rule_catalog_1558_non_geomancer_water_first_play_omits_create_rubble_at() {
 fn rule_catalog_1563_geomancer_first_water_play_omits_create_rubble_at() {
     let mut session = north_opening_main_from_manifest(&site_play_manifest(
         1563,
-        geomancer_avatar(),
-        water_site(),
+        &geomancer_avatar(),
+        &water_site(),
     ));
     let (first, _) = accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
     assert!(first.get("createRubbleAt").is_none());

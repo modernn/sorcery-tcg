@@ -28,7 +28,14 @@
     "authority:verify-private": "node --test --test-concurrency=1 tests/private-authority/*.test.ts",
     "lint": "eslint .",
     "test": "node --test --test-concurrency=1 tests/authority/*.test.ts tests/engine/*.test.ts tests/ingestion/*.test.ts",
-    "verify": "pnpm typecheck && pnpm lint && pnpm test"
+    "verify": "pnpm typecheck && pnpm lint && pnpm test",
+    "game:engine": "cargo run --release --locked --quiet -p sorcery-engine --bin sorcery-engine --",
+    "game:experiment-example": "cargo run --release --locked --quiet -p sorcery-engine --bin sorcery-engine -- experiment-example",
+    "game:experiment": "cargo run --release --locked --quiet -p sorcery-engine --bin sorcery-engine -- experiment-json",
+    "game:session": "cargo run --release --locked --quiet -p sorcery-engine --bin session-json",
+    "verify:rust": "cargo fmt --all -- --check && cargo check --workspace --all-targets --all-features --locked -j 2 && cargo clippy --workspace --all-targets --all-features --locked -j 2 -- -D warnings && cargo test --workspace --all-features --locked -j 2 -- --test-threads=2",
+    "verify:all": "pnpm verify:rust && pnpm verify",
+    "game:experiment-private": "node src/commands/create-private-experiment.ts"
   },
   "dependencies": {
     "zod": "4.4.3"
