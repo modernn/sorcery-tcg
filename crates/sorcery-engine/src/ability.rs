@@ -51,6 +51,40 @@ impl AbilityProgram {
                     }
                 }
                 Effect::DrawCard => {}
+                Effect::SummonToken {
+                    token,
+                    count,
+                    destination,
+                } => {
+                    if token.is_empty() || token.len() > 256 {
+                        return Err(format!("{path}.token must be a card reference"));
+                    }
+                    if !(1..=32).contains(count) {
+                        return Err(format!("{path}.count must be 1-32"));
+                    }
+                    match destination {
+                        TokenDestination::Chosen if previous_choice.is_none() => {
+                            return Err(format!(
+                                "{path}.destination chosen requires a preceding choose-unit"
+                            ));
+                        }
+                        TokenDestination::Target
+                            if !matches!(self.selection, Some(SelectionSpec::Unit { .. })) =>
+                        {
+                            return Err(format!(
+                                "{path}.destination target requires unit selection"
+                            ));
+                        }
+                        TokenDestination::Location
+                            if !matches!(self.selection, Some(SelectionSpec::Location { .. })) =>
+                        {
+                            return Err(format!(
+                                "{path}.destination location requires location selection"
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
                 Effect::ChooseUnit(spec) => {
                     validate_relation(spec.relation)?;
                     previous_choice = Some(*spec);
@@ -122,6 +156,14 @@ impl AbilityProgram {
             }
         }
         Ok(())
+    }
+
+    /// Card definitions required by this program, including multiple token kinds.
+    pub fn token_references(&self) -> impl Iterator<Item = &str> {
+        self.effects.iter().filter_map(|effect| match effect {
+            Effect::SummonToken { token, .. } => Some(token.as_str()),
+            _ => None,
+        })
     }
 }
 
@@ -375,10 +417,33 @@ pub enum EffectDuration {
     UntilYourNextTurn,
 }
 
-/// One executable operation in an ordered ability program.
+/// A location supplied by the source, a unit binding, or a declared location.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TokenDestination {
+    /// The live realm source's location.
+    Source,
+    /// The ordinarily chosen unit's location.
+    Chosen,
+    /// The declared target unit's location.
+    Target,
+    /// The declared target location.
+    Location,
+}
+
+/// One executable operation in an ordered ability program.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "op", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Effect {
+    /// Creates a simultaneous group of tokens at a bound location.
+    SummonToken {
+        /// Referenced token minion definition.
+        token: String,
+        /// Number of tokens entering together.
+        count: u8,
+        /// Location binding used for the entry.
+        destination: TokenDestination,
+    },
     /// Deals damage to a recipient cohort.
     Damage {
         /// The cohort receiving damage.

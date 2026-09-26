@@ -94,7 +94,11 @@ fn frog_token() -> Value {
 fn token_gift() -> Value {
     json!({
         "cardType": "magic",
-        "summonTokenToAlliedMinionThenDrawSpell": "north-frog",
+        "effectProgram": { "effects": [
+            { "op": "choose-unit", "kind": "minion", "relation": "anywhere", "alliedOnly": true },
+            { "op": "summon-token", "token": "north-frog", "count": 1, "destination": "chosen" },
+            { "op": "draw", "zone": "spellbook", "count": 1 }
+        ] },
         "manaCost": 0,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
@@ -850,15 +854,17 @@ fn rule_catalog_0988_token_summon_grant_then_empty_spellbook_is_a_deck_out() {
         .as_str()
         .expect("ally instance identity")
         .to_owned();
-    let (cast, granted) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-gift"
-            && descriptor["ally"]["instanceId"] == ally_id
+    let (_cast, cast_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-gift"
+    });
+    assert_eq!(event_types(&cast_receipt), ["magic-cast"]);
+    let (choice, granted) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "choose-ability" && descriptor["target"]["instanceId"] == ally_id
     });
     assert_eq!(
         event_types(&granted),
         [
-            "magic-cast",
+            "ability-choice-committed",
             "minion-summoned",
             "magic-resolved",
             "game-ended"
@@ -887,7 +893,7 @@ fn rule_catalog_0988_token_summon_grant_then_empty_spellbook_is_a_deck_out() {
     assert_eq!(granted.events[1].payload["token"], true);
     assert_eq!(
         granted.events[1].payload["sourceInstanceId"],
-        cast["cardInstanceId"]
+        choice["sourceInstanceId"]
     );
     let after = state(&session);
     let token = unit(&after, &token_id);

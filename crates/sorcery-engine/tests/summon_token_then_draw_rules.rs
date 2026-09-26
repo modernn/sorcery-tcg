@@ -53,8 +53,12 @@ fn frog_token() -> Value {
 fn gift() -> Value {
     json!({
         "cardType": "magic",
+        "effectProgram": { "effects": [
+            { "op": "choose-unit", "kind": "minion", "relation": "anywhere", "alliedOnly": true },
+            { "op": "summon-token", "token": "north-frog", "count": 1, "destination": "chosen" },
+            { "op": "draw", "zone": "spellbook", "count": 1 }
+        ] },
         "manaCost": 0,
-        "summonTokenToAlliedMinionThenDrawSpell": "north-frog",
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -218,16 +222,14 @@ fn avatar_instance_id(snapshot: &Value, seat: &str) -> String {
         .to_owned()
 }
 
-fn gift_ally_ids(session: &Session) -> Vec<String> {
+fn gift_choice_ids(session: &Session) -> Vec<String> {
     session
         .legal_actions()
         .expect("gift actions")
         .into_iter()
-        .filter(|action| {
-            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-gift"
-        })
+        .filter(|action| action.descriptor["kind"] == "choose-ability")
         .filter_map(|action| {
-            action.descriptor["ally"]["instanceId"]
+            action.descriptor["target"]["instanceId"]
                 .as_str()
                 .map(ToOwned::to_owned)
         })
@@ -308,20 +310,22 @@ fn rule_catalog_0543_token_then_draw_summons_on_an_allied_minion() {
         .as_str()
         .expect("drawn identity")
         .to_owned();
-    let offered = gift_ally_ids(&session);
+    let (_, cast_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-gift"
+    });
+    assert_eq!(event_types(&cast_receipt), ["magic-cast"]);
+    let offered = gift_choice_ids(&session);
     assert!(offered.contains(&ally_id));
     assert!(!offered.contains(&north_avatar));
     assert!(!offered.contains(&enemy_id));
 
-    let (cast, granted) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-gift"
-            && descriptor["ally"]["instanceId"] == ally_id
+    let (choice, granted) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "choose-ability" && descriptor["target"]["instanceId"] == ally_id
     });
     assert_eq!(
         event_types(&granted),
         [
-            "magic-cast",
+            "ability-choice-committed",
             "minion-summoned",
             "spell-drawn",
             "magic-resolved"
@@ -332,7 +336,7 @@ fn rule_catalog_0543_token_then_draw_summons_on_an_allied_minion() {
     assert_eq!(granted.events[1].payload["token"], true);
     assert_eq!(
         granted.events[1].payload["sourceInstanceId"],
-        cast["cardInstanceId"]
+        choice["sourceInstanceId"]
     );
     let token_id = granted.events[1].payload["instanceId"]
         .as_str()
@@ -378,13 +382,10 @@ fn rule_catalog_0544_token_then_draw_still_draws_without_an_allied_minion() {
         .as_str()
         .expect("drawn identity")
         .to_owned();
-    assert_eq!(gift_ally_ids(&session), [] as [String; 0]);
+    assert!(gift_choice_ids(&session).is_empty());
 
     let (_, granted) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-gift"
-            && descriptor["ally"].is_null()
-            && descriptor["target"].is_null()
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-gift"
     });
     assert_eq!(
         event_types(&granted),
@@ -467,11 +468,13 @@ fn pass_full_round(session: &mut Session) {
     let _enemy = south_plays_c1(session);
 }
 
-fn cast_gift_on(session: &mut Session, ally_id: &str) -> (Receipt, Option<String>) {
+fn cast_gift_on(session: &mut Session, ally_id: &str) -> (Value, Receipt, Option<String>) {
+    let (cast, cast_receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-gift"
+    });
+    assert_eq!(event_types(&cast_receipt), ["magic-cast"]);
     let (_, receipt) = accept_where(session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-gift"
-            && descriptor["ally"]["instanceId"] == ally_id
+        descriptor["kind"] == "choose-ability" && descriptor["target"]["instanceId"] == ally_id
     });
     let token_id = receipt
         .events
@@ -479,7 +482,7 @@ fn cast_gift_on(session: &mut Session, ally_id: &str) -> (Receipt, Option<String
         .find(|event| event.event_type == "minion-summoned")
         .and_then(|event| event.payload["instanceId"].as_str())
         .map(ToOwned::to_owned);
-    (receipt, token_id)
+    (cast, receipt, token_id)
 }
 
 fn token_ids_at_cell(snapshot: &Value, cell: &str) -> Vec<String> {
@@ -592,7 +595,7 @@ fn rule_catalog_1693_summoned_token_co_locates_with_host_ally_at_cast() {
         .as_str()
         .expect("ally cell")
         .to_owned();
-    let (_, token_id) = cast_gift_on(&mut session, &ally_id);
+    let (_, _, token_id) = cast_gift_on(&mut session, &ally_id);
     let token_id = token_id.expect("token summoned");
     let after = state(&session);
     let token = unit(&after, &token_id);
@@ -605,13 +608,13 @@ fn rule_catalog_1693_summoned_token_co_locates_with_host_ally_at_cast() {
 #[test]
 fn rule_catalog_1694_second_gift_summons_a_second_token_at_the_host_cell() {
     let (mut session, ally_id) = host_setup_with_two_gifts(1694);
-    let (_, first_token) = cast_gift_on(&mut session, &ally_id);
+    let (_, _, first_token) = cast_gift_on(&mut session, &ally_id);
     let first_token = first_token.expect("first token");
     let host_cell = unit(&state(&session), &ally_id)["location"]
         .as_str()
         .expect("host cell")
         .to_owned();
-    let (_, second_token) = cast_gift_on(&mut session, &ally_id);
+    let (_, _, second_token) = cast_gift_on(&mut session, &ally_id);
     let second_token = second_token.expect("second token");
     assert_ne!(first_token, second_token);
     let tokens = token_ids_at_cell(&state(&session), &host_cell);
@@ -624,7 +627,7 @@ fn rule_catalog_1694_second_gift_summons_a_second_token_at_the_host_cell() {
 #[test]
 fn rule_catalog_1695_summoned_token_has_summoning_sickness_and_cannot_move() {
     let (mut session, ally_id) = host_setup(1695);
-    let (_, token_id) = cast_gift_on(&mut session, &ally_id);
+    let (_, _, token_id) = cast_gift_on(&mut session, &ally_id);
     let token_id = token_id.expect("token summoned");
     assert_eq!(unit(&state(&session), &token_id)["summoningSickness"], true);
     assert!(!unit_has_move(&session, &token_id));
@@ -634,7 +637,7 @@ fn rule_catalog_1695_summoned_token_has_summoning_sickness_and_cannot_move() {
 #[test]
 fn rule_catalog_1696_summoned_token_stays_at_host_cell_after_turns_pass() {
     let (mut session, ally_id) = host_setup(1696);
-    let (_, token_id) = cast_gift_on(&mut session, &ally_id);
+    let (_, _, token_id) = cast_gift_on(&mut session, &ally_id);
     let token_id = token_id.expect("token summoned");
     let host_cell = unit(&state(&session), &ally_id)["location"]
         .as_str()
@@ -652,7 +655,7 @@ fn rule_catalog_1697_gift_summons_token_at_host_new_cell_after_ally_moves() {
         .find_map(host_setup_for_moved_ally)
         .expect("bounded seed reaching moved host setup");
     assert_eq!(unit(&state(&session), &ally_id)["location"], "C3");
-    let (_, token_id) = cast_gift_on(&mut session, &ally_id);
+    let (_, _, token_id) = cast_gift_on(&mut session, &ally_id);
     let token_id = token_id.expect("token summoned");
     assert_eq!(unit(&state(&session), &token_id)["location"], "C3");
     assert_eq!(token_ids_at_cell(&state(&session), "C4").len(), 0);
@@ -664,7 +667,7 @@ fn rule_catalog_1698_gift_places_token_only_on_the_chosen_host_cell() {
     let (mut session, home_id, away_id) = host_setup_with_two_allies(1698);
     assert_eq!(unit(&state(&session), &home_id)["location"], "C4");
     assert_eq!(unit(&state(&session), &away_id)["location"], "C3");
-    let (_, token_id) = cast_gift_on(&mut session, &away_id);
+    let (_, _, token_id) = cast_gift_on(&mut session, &away_id);
     let token_id = token_id.expect("token summoned");
     assert_eq!(unit(&state(&session), &token_id)["location"], "C3");
     assert_eq!(token_ids_at_cell(&state(&session), "C3"), vec![token_id]);
@@ -776,9 +779,6 @@ fn try_pending_deathrite_with_allied_minion(
     if !north_has_gift_and_rain(&state(&session)) {
         return None;
     }
-    if !gift_ally_ids(&session).contains(&ally_id) {
-        return None;
-    }
     try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
     })?;
@@ -830,7 +830,7 @@ fn rule_catalog_1068_summon_token_then_draw_withheld_during_pending_deathrite_or
             .iter()
             .all(|action| action.descriptor["kind"] != "cast-magic")
     );
-    assert!(gift_ally_ids(session).is_empty());
+    assert!(gift_choice_ids(session).is_empty());
 
     let order_sources: Vec<_> = session
         .legal_actions()
@@ -855,19 +855,20 @@ fn rule_catalog_1068_summon_token_then_draw_withheld_during_pending_deathrite_or
     assert_eq!(resumed["decisionSeat"], "north");
     assert!(resumed["pendingDeathrites"].is_null());
     assert!(unit(&resumed, &ally_id).is_object());
-    let offered = gift_ally_ids(session);
+    let (_cast, cast_receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-gift"
+    });
+    assert_eq!(event_types(&cast_receipt), ["magic-cast"]);
+    let offered = gift_choice_ids(session);
     assert!(offered.contains(&ally_id));
     assert!(offered.iter().all(|id| id == &ally_id));
-
-    let (cast, granted) = accept_where(session, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-gift"
-            && descriptor["ally"]["instanceId"] == ally_id
+    let (choice, granted) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "choose-ability" && descriptor["target"]["instanceId"] == ally_id
     });
     assert_eq!(
         event_types(&granted),
         [
-            "magic-cast",
+            "ability-choice-committed",
             "minion-summoned",
             "spell-drawn",
             "magic-resolved"
@@ -878,7 +879,7 @@ fn rule_catalog_1068_summon_token_then_draw_withheld_during_pending_deathrite_or
     assert_eq!(granted.events[1].payload["token"], true);
     assert_eq!(
         granted.events[1].payload["sourceInstanceId"],
-        cast["cardInstanceId"]
+        choice["sourceInstanceId"]
     );
     let token_id = granted.events[1].payload["instanceId"]
         .as_str()

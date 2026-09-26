@@ -63,6 +63,12 @@ type EffectProgramEffect =
   | Readonly<{ op: 'untap'; recipients: EffectProgramRecipients }>
   | Readonly<{ count: number; op: 'draw'; zone: DeckZone }>
   | Readonly<{
+    count: number;
+    destination: 'source' | 'chosen' | 'target' | 'location';
+    op: 'summon-token';
+    token: string;
+  }>
+  | Readonly<{
     alliedOnly?: boolean;
     excludeSource?: boolean;
     op: 'choose-unit';
@@ -84,6 +90,33 @@ type EffectProgram = Readonly<{
   optionalSelection?: boolean;
   selection?: EffectProgramSelection | null;
 }>;
+
+/** Returns direct token references; callers follow the returned IDs transitively. */
+export function tokenDependencies(card: GameCardDefinition): readonly string[] {
+  const dependencies = new Set<string>();
+  if (card.cardType === 'magic') {
+    if (card.summonTokenToAlliedMinionThenDrawSpell !== undefined) {
+      dependencies.add(card.summonTokenToAlliedMinionThenDrawSpell);
+    }
+    if (card.summonTokenToEachControlledSiteBorderingEnemySite !== undefined) {
+      dependencies.add(card.summonTokenToEachControlledSiteBorderingEnemySite);
+    }
+    if (card.effectProgram !== undefined) {
+      for (const effect of card.effectProgram.effects) {
+        if (effect.op === 'summon-token') dependencies.add(effect.token);
+      }
+    }
+  }
+  if (card.cardType === 'site' && card.genesisPayOneManaToSummonToken !== undefined) {
+    dependencies.add(card.genesisPayOneManaToSummonToken);
+  }
+  if (card.cardType === 'minion' && card.genesisProgram !== undefined) {
+    for (const effect of card.genesisProgram.effects) {
+      if (effect.op === 'summon-token') dependencies.add(effect.token);
+    }
+  }
+  return [...dependencies].sort();
+}
 
 export type SiteCountQuery = Readonly<{
   controller?: 'any' | 'controlled' | 'enemy';
@@ -2914,18 +2947,14 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
   }));
   for (const cardId of referencedCardIds) {
     const definition = input.cards[cardId];
-    const tokenCardId = definition?.cardType === 'magic'
-      ? definition.summonTokenToAlliedMinionThenDrawSpell
-        ?? definition.summonTokenToEachControlledSiteBorderingEnemySite
-      : definition?.cardType === 'site'
-        ? definition.genesisPayOneManaToSummonToken
-        : undefined;
-    if (tokenCardId === undefined) continue;
-    const token = input.cards[tokenCardId];
-    if (token?.cardType !== 'minion' || token.token !== true) {
-      throw new RangeError(`cards.${cardId} token effect must reference a token minion`);
+    if (definition === undefined) continue;
+    for (const tokenCardId of tokenDependencies(definition)) {
+      const token = input.cards[tokenCardId];
+      if (token?.cardType !== 'minion' || token.token !== true) {
+        throw new RangeError(`cards.${cardId} token effect must reference a token minion`);
+      }
+      referencedCardIds.add(tokenCardId);
     }
-    referencedCardIds.add(tokenCardId);
   }
   if (cardEntries.length !== referencedCardIds.size
     || cardEntries.some(([cardId]) => !referencedCardIds.has(cardId))) {

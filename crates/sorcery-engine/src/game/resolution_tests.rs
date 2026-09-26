@@ -94,8 +94,12 @@ fn manifest(seed: u32) -> String {
 }
 
 fn fixture(terminal: bool) -> (Game, String) {
-    let mut game = Game::from_manifest_json(&manifest(if terminal { 902 } else { 901 }))
+    let game = Game::from_manifest_json(&manifest(if terminal { 902 } else { 901 }))
         .expect("resolution fixture");
+    setup_fixture(game, terminal)
+}
+
+fn setup_fixture(mut game: Game, terminal: bool) -> (Game, String) {
     game.position.phase = Phase::Main;
     game.position.active_seat = Seat::North;
     game.position.decision_seat = Seat::North;
@@ -151,6 +155,26 @@ fn cast_action(game: &Game, magic_id: &str) -> IssuedAction {
         .expect("token Magic action")
 }
 
+fn cast_and_choose_host(game: &mut Game, magic_id: &str) -> Vec<(String, Value)> {
+    let action = cast_action(game, magic_id);
+    let (mut events, _) = game
+        .apply_action_recorded(&action)
+        .expect("cast token Magic");
+    assert_eq!(game.position.phase, Phase::AbilityChoice);
+    assert_eq!(token_count(game), 0);
+    let choice = game
+        .legal_actions()
+        .expect("host choices")
+        .into_iter()
+        .find(|action| matches!(action.descriptor, ActionDescriptor::ChooseAbility { .. }))
+        .expect("ordinary allied minion choice");
+    let (chosen_events, _) = game
+        .apply_action_recorded(&choice)
+        .expect("summon at chosen host");
+    events.extend(chosen_events);
+    events
+}
+
 fn order_action(game: &Game) -> IssuedAction {
     let actions = game.legal_actions().expect("Deathrite actions");
     assert_eq!(
@@ -190,10 +214,7 @@ fn cemetery_count(game: &Game, magic_id: &str) -> usize {
 #[test]
 fn token_magic_holds_draw_and_completion_behind_ordered_genesis_deathrites() {
     let (mut game, magic_id) = fixture(false);
-    let action = cast_action(&game, &magic_id);
-    let (initial_events, _) = game
-        .apply_action_recorded(&action)
-        .expect("token Magic pauses for Genesis Deathrites");
+    let initial_events = cast_and_choose_host(&mut game, &magic_id);
     assert_eq!(game.position.phase, Phase::TriggerOrder);
     assert_eq!(token_count(&game), 1);
     assert_eq!(cemetery_count(&game, &magic_id), 0);
@@ -205,8 +226,8 @@ fn token_magic_holds_draw_and_completion_behind_ordered_genesis_deathrites() {
     let continuation = game.authoritative_state()["pendingDeathrites"]["continuation"].clone();
     assert_eq!(continuation["kind"], "sequence");
     assert_eq!(continuation["steps"][0]["kind"], "effect");
-    assert_eq!(continuation["steps"][1]["kind"], "draw");
-    assert_eq!(continuation["steps"][2]["kind"], "magic-resolved");
+    assert_eq!(continuation["steps"][1]["kind"], "effect");
+    assert_eq!(continuation["steps"].as_array().unwrap().len(), 2);
 
     let order = order_action(&game);
     let mut replay = game.clone();
@@ -255,17 +276,14 @@ fn token_magic_holds_draw_and_completion_behind_ordered_genesis_deathrites() {
 #[test]
 fn terminal_token_genesis_skips_draw_and_later_resolution_but_retires_magic_once() {
     let (mut game, magic_id) = fixture(true);
-    let action = cast_action(&game, &magic_id);
-    let (initial_events, _) = game
-        .apply_action_recorded(&action)
-        .expect("token Genesis pauses before its draw");
+    let initial_events = cast_and_choose_host(&mut game, &magic_id);
     assert_eq!(game.position.phase, Phase::TriggerOrder);
     assert_eq!(token_count(&game), 1);
     let continuation = game.authoritative_state()["pendingDeathrites"]["continuation"].clone();
     assert_eq!(continuation["kind"], "sequence");
     assert_eq!(continuation["steps"][0]["kind"], "effect");
-    assert_eq!(continuation["steps"][1]["kind"], "draw");
-    assert_eq!(continuation["steps"][2]["kind"], "magic-resolved");
+    assert_eq!(continuation["steps"][1]["kind"], "effect");
+    assert_eq!(continuation["steps"].as_array().unwrap().len(), 2);
     assert!(!initial_events.iter().any(|(kind, _)| kind == "spell-drawn"));
 
     let order = order_action(&game);
@@ -295,7 +313,10 @@ fn token_entry(game: &Game, token_id: &str, ordinal: usize) -> super::TokenEntry
                 Seat::North,
                 token_id,
                 &source,
-                Cell::parse("C3").unwrap(),
+                super::Location {
+                    cell: Cell::parse("C3").unwrap(),
+                    region: Region::Surface,
+                },
                 ordinal,
                 game.position.state_version,
             )
@@ -379,4 +400,262 @@ fn simultaneous_genesis_resumes_after_nested_deathrite_ordering() {
             .iter()
             .any(|unit| unit.card.instance_id == survivor)
     );
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one entry sequence across the four realm regions"
+)]
+fn ordinary_token_choice_enters_regions_then_settles_before_genesis_and_parent_draw() {
+    for (region, survives) in [
+        (Region::Surface, true),
+        (Region::Underwater, true),
+        (Region::Underground, false),
+        (Region::Void, false),
+    ] {
+        let encoded = selfplay_manifest_with(908, |manifest| {
+            manifest["cards"]["north-spell-1"] = json!({
+                "cardType": "magic", "manaCost": 0,
+                "thresholds": {"air": 0, "earth": 0, "fire": 0, "water": 0},
+                "effectProgram": {"effects": [
+                    {"op": "choose-unit", "kind": "minion", "relation": "anywhere", "alliedOnly": true},
+                    {"op": "summon-token", "token": "region-token", "count": 2, "destination": "chosen"},
+                    {"op": "draw", "zone": "spellbook", "count": 1}
+                ]}
+            });
+            manifest["cards"]["region-token"] = json!({
+                "cardType": "minion", "attack": 0, "defense": 0, "manaCost": 0,
+                "thresholds": {"air": 0, "earth": 0, "fire": 0, "water": 0},
+                "token": true, "submerge": true, "deathriteDrawSite": true,
+                "genesisProgram": {"effects": [{"op": "draw", "zone": "spellbook", "count": 1}]}
+            });
+            for id in ["south-spell-1", "south-spell-2"] {
+                manifest["cards"][id]["submerge"] = json!(true);
+                manifest["cards"][id]["burrowing"] = json!(true);
+                manifest["cards"][id]["voidwalk"] = json!(true);
+            }
+            if region == Region::Underwater {
+                manifest["cards"]["north-site-1"]["elements"] = json!(["water"]);
+            }
+        });
+        let (mut game, magic_id) =
+            setup_fixture(Game::from_manifest_json(&encoded).unwrap(), false);
+        game.position.units.truncate(1);
+        game.position.units[0].region = region;
+        game.position.units[0].warded = true;
+        game.position.units[0].stealthed = true;
+        if region == Region::Void {
+            game.position.sites[Cell::parse("C3").unwrap().index()] = None;
+        }
+        let before_draw = game.position.players[0].hand_spellbook.len();
+        let mut events = cast_and_choose_host(&mut game, &magic_id);
+        assert!(
+            game.position.units[0].warded,
+            "ordinary choice consumes no Ward"
+        );
+        assert!(
+            game.position.units[0].stealthed,
+            "ordinary choice preserves Stealth"
+        );
+        let mut branch = game.clone();
+        while game.position.phase == Phase::TriggerOrder {
+            let action = game
+                .legal_actions()
+                .unwrap()
+                .into_iter()
+                .find(|action| matches!(action.descriptor, ActionDescriptor::OrderTriggers { .. }))
+                .unwrap();
+            let (actual, _) = game.apply_action_recorded(&action).unwrap();
+            let (replayed, _) = branch.apply_action_recorded(&action).unwrap();
+            assert_eq!(actual, replayed);
+            assert_eq!(game.position, branch.position);
+            events.extend(actual);
+        }
+        assert_eq!(game.position.phase, Phase::Main);
+        assert_eq!(
+            token_count(&game),
+            if survives { 2 } else { 0 },
+            "{region:?}"
+        );
+        // Casting removes the Magic; its draw restores it. Only surviving token Genesis adds two.
+        assert_eq!(
+            game.position.players[0].hand_spellbook.len(),
+            before_draw + if survives { 2 } else { 0 }
+        );
+        let summons: Vec<_> = events
+            .iter()
+            .enumerate()
+            .filter(|(_, (kind, value))| kind == "minion-summoned" && value["token"] == true)
+            .collect();
+        assert_eq!(summons.len(), 2);
+        let parent_draw = events
+            .iter()
+            .position(|(kind, value)| {
+                kind == "spell-drawn" && value["sourceInstanceId"] == magic_id
+            })
+            .unwrap();
+        assert!(summons[1].0 < parent_draw);
+        if !survives {
+            let removal = if region == Region::Void {
+                "minion-banished"
+            } else {
+                "minion-died"
+            };
+            assert_eq!(events.iter().filter(|(kind, _)| kind == removal).count(), 2);
+            assert!(
+                events
+                    .iter()
+                    .rposition(|(kind, _)| kind == removal)
+                    .unwrap()
+                    < parent_draw
+            );
+        }
+        assert_eq!(cemetery_count(&game, &magic_id), 1);
+    }
+}
+
+#[test]
+fn authored_genesis_summons_nested_groups_with_distinct_identities() {
+    let encoded = selfplay_manifest_with(909, |manifest| {
+        manifest["cards"]["north-spell-1"] = json!({
+            "cardType": "minion", "attack": 1, "defense": 1, "manaCost": 0,
+            "thresholds": {"air": 0, "earth": 0, "fire": 0, "water": 0},
+            "genesisProgram": {"effects": [
+                {"op": "summon-token", "token": "branch-token", "count": 2, "destination": "source"},
+                {"op": "summon-token", "token": "branch-token", "count": 1, "destination": "source"}
+            ]}
+        });
+        manifest["cards"]["leaf-token"] = json!({
+            "cardType": "minion", "attack": 1, "defense": 1, "manaCost": 0, "token": true,
+            "thresholds": {"air": 0, "earth": 0, "fire": 0, "water": 0}
+        });
+        manifest["cards"]["branch-token"] = manifest["cards"]["leaf-token"].clone();
+        manifest["cards"]["branch-token"]["genesisProgram"] = json!({"effects": [
+            {"op": "summon-token", "token": "leaf-token", "count": 2, "destination": "source"}
+        ]});
+    });
+    let (mut game, _) = setup_fixture(Game::from_manifest_json(&encoded).unwrap(), false);
+    game.position.units.clear();
+    let action = game
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .find(|action| matches!(action.descriptor, ActionDescriptor::SummonMinion { .. }))
+        .unwrap();
+    let (mut events, _) = game.apply_action_recorded(&action).unwrap();
+    let mut branch = game.clone();
+    while game.position.phase == Phase::TriggerOrder {
+        let action = game.legal_actions().unwrap().into_iter().next().unwrap();
+        let (actual, _) = game.apply_action_recorded(&action).unwrap();
+        let (replayed, _) = branch.apply_action_recorded(&action).unwrap();
+        assert_eq!(actual, replayed);
+        events.extend(actual);
+    }
+    assert_eq!(game.position.phase, Phase::Main);
+    assert_eq!(game.position, branch.position);
+    assert_eq!(token_count(&game), 9);
+    let ids: std::collections::BTreeSet<_> = game
+        .position
+        .units
+        .iter()
+        .map(|unit| &unit.card.instance_id)
+        .collect();
+    assert_eq!(
+        ids.len(),
+        10,
+        "repeated groups and nested token sources have distinct identities"
+    );
+    let first_leaf = events
+        .iter()
+        .position(|(kind, value)| kind == "minion-summoned" && value["cardId"] == "leaf-token")
+        .unwrap();
+    assert_eq!(
+        events[..first_leaf]
+            .iter()
+            .filter(|(kind, value)| kind == "minion-summoned" && value["cardId"] == "branch-token")
+            .count(),
+        2,
+        "the first group enters completely before either Genesis resolves"
+    );
+}
+
+#[test]
+fn token_destinations_respect_declared_protection_and_entry_barriers_then_draw() {
+    for destination in ["target", "location"] {
+        for (warded, blocked) in [(false, false), (true, false), (false, true)] {
+            let encoded = selfplay_manifest_with(910, |manifest| {
+                manifest["cards"]["north-spell-1"] = json!({
+                    "cardType": "magic", "manaCost": 0,
+                    "thresholds": {"air": 0, "earth": 0, "fire": 0, "water": 0},
+                    "effectProgram": {
+                        "selection": {"kind": if destination == "target" { "unit" } else { "location" }, "relation": "anywhere"},
+                        "effects": [
+                            {"op": "summon-token", "token": "bound-token", "count": 1, "destination": destination},
+                            {"op": "draw", "zone": "spellbook", "count": 1}
+                        ]
+                    }
+                });
+                manifest["cards"]["bound-token"] = json!({
+                    "cardType": "minion", "attack": 3, "defense": 3, "manaCost": 0, "token": true,
+                    "thresholds": {"air": 0, "earth": 0, "fire": 0, "water": 0}
+                });
+                if blocked {
+                    manifest["cards"]["north-site-1"]["preventsUnitsWithPowerAtLeastFromEntering"] =
+                        json!(3);
+                }
+            });
+            let (mut game, magic_id) =
+                setup_fixture(Game::from_manifest_json(&encoded).unwrap(), false);
+            game.position.units.truncate(1);
+            game.position.units[0].controller = Seat::South;
+            game.position.units[0].warded = warded;
+            let host_id = game.position.units[0].card.instance_id.clone();
+            let cell = Cell::parse("C3").unwrap();
+            let site = game.position.sites[cell.index()].as_mut().unwrap();
+            site.controller = Seat::South;
+            site.warded = warded;
+            let hand_before = game.position.players[0].hand_spellbook.len();
+            let action = game
+                .legal_actions()
+                .unwrap()
+                .into_iter()
+                .find(|action| match &action.descriptor {
+                    ActionDescriptor::CastMagic {
+                        target,
+                        target_location,
+                        ..
+                    } => {
+                        if destination == "target" {
+                            target
+                                .as_ref()
+                                .is_some_and(|target| target.instance_id() == &host_id)
+                        } else {
+                            target_location.is_some_and(|location| location.cell == cell)
+                        }
+                    }
+                    _ => false,
+                })
+                .expect("declared destination remains legal even when entry will fail");
+            let mut branch = game.clone();
+            let (events, _) = game.apply_action_recorded(&action).unwrap();
+            let (replayed, _) = branch.apply_action_recorded(&action).unwrap();
+            assert_eq!(events, replayed);
+            assert_eq!(game.position, branch.position);
+            assert_eq!(token_count(&game), usize::from(!warded && !blocked));
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|(kind, _)| kind == "ward-broken")
+                    .count(),
+                usize::from(warded)
+            );
+            assert_eq!(
+                game.position.players[0].hand_spellbook.len(),
+                hand_before,
+                "independent draw continues"
+            );
+            assert_eq!(cemetery_count(&game, &magic_id), 1);
+        }
+    }
 }

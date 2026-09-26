@@ -77,3 +77,27 @@ Full Rust gates and `pnpm verify` must pass before accepting a cycle. Paralleliz
 independent games with native workers; preserve input-order output and manifest/seed
 identity. Measure release throughput across worker counts before choosing a run's
 worker budget. Swap capacity does not establish an efficient rollout budget.
+
+
+## Composed token entry
+
+`SummonToken` is an ordered effect shared by Magic and authored minion Genesis.
+Its data identifies a token definition, a simultaneous count, and a source,
+ordinarily chosen unit, declared unit target, or declared location destination.
+The existing summon-and-draw input lowers to ordinary choice, token entry, then
+Draw; it has no separate runtime continuation.
+
+Entry uses the common terrain restriction, regional survival, Genesis, Deathrite,
+and continuation helpers. Every member of a simultaneous group enters before its
+Genesis resolves. Regional death or banishment settles before those triggers, and
+interruptions finish before the next parent operation. A failed destination does
+not cancel an independent later draw. Token dependencies are collected transitively
+when preparing and admitting manifests, including several token types in one program.
+
+Explicit implementation limits remain: at most 32 tokens per operation, no cyclic
+token dependencies, at most 64 definitions on a dependency path, and at most 4,096
+realm minions during token entry. These are admission/runtime support bounds, not
+Sorcery rules. A unit spanning multiple locations still needs an ordinary location
+choice; token placement there reports unsupported rather than guessing a location.
+Ordinary site/location choice and site-cohort summoning remain separate unfinished
+selector work. This engine slice alone does not certify additional real cards.

@@ -854,12 +854,6 @@ enum ResolutionContinuation {
     SiteGenesis(SiteGenesisContinuation),
     SiteGenesisTail(SiteGenesisTail),
     TokenEntries(Vec<TokenEntryContinuation>),
-    Draw {
-        seat: Seat,
-        source_instance_id: IdentityHash,
-        zone: DeckZone,
-        count: u8,
-    },
     MagicResolved {
         resolution: DeferredMagicResolved,
         held_card: Option<CardInstance>,
@@ -1369,17 +1363,24 @@ const fn card_kind(facts: &CardFacts) -> CardKind {
     }
 }
 
-fn token_reference(facts: &CardFacts) -> Option<&str> {
+fn token_references(facts: &CardFacts) -> Vec<&str> {
     match facts {
-        CardFacts::Site(site) => site.genesis_pay_one_mana_to_summon_token.as_deref(),
+        CardFacts::Site(site) => site
+            .genesis_pay_one_mana_to_summon_token
+            .as_deref()
+            .into_iter()
+            .collect(),
         CardFacts::Magic(magic) => match &magic.effect {
-            MagicEffect::SummonTokenToAlliedMinionThenDrawSpell(card_id)
-            | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(card_id) => {
-                Some(card_id)
-            }
-            _ => None,
+            MagicEffect::SummonTokenToAlliedMinionThenDrawSpell(id)
+            | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(id) => vec![id],
+            MagicEffect::Program(program) => program.token_references().collect(),
+            _ => Vec::new(),
         },
-        _ => None,
+        CardFacts::Minion(minion) => minion
+            .genesis_program
+            .as_ref()
+            .map_or_else(Vec::new, |program| program.token_references().collect()),
+        _ => Vec::new(),
     }
 }
 
@@ -3672,25 +3673,6 @@ impl Game {
                             ally.kind(),
                             &ally.instance_id().as_str()[..15]
                         )
-                    } else if matches!(
-                        facts.effect,
-                        MagicEffect::SummonTokenToAlliedMinionThenDrawSpell(_)
-                    ) {
-                        if let ActionDescriptor::CastMagic {
-                            ally: Some(ally), ..
-                        } = &descriptor
-                        {
-                            format!(
-                                "Cast {} to summon a token to {} {} and draw…",
-                                definition.id,
-                                ally.kind(),
-                                &ally.instance_id().as_str()[..15]
-                            )
-                        } else {
-                            descriptor
-                                .state_independent_label()
-                                .ok_or_else(|| invalid("cast-magic action requires a label"))?
-                        }
                     } else if matches!(
                         facts.effect,
                         MagicEffect::GrantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell
@@ -7031,20 +7013,6 @@ impl Game {
                     ..MagicChoice::default()
                 })
                 .collect(),
-            MagicEffect::SummonTokenToAlliedMinionThenDrawSpell(token_card_id) => {
-                let hosts = self.allied_minion_token_hosts(seat, token_card_id)?;
-                if hosts.is_empty() {
-                    vec![MagicChoice::default()]
-                } else {
-                    hosts
-                        .into_iter()
-                        .map(|ally| MagicChoice {
-                            ally: Some(ally),
-                            ..MagicChoice::default()
-                        })
-                        .collect()
-                }
-            }
             MagicEffect::GrantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell => {
                 let choices = self
                     .controlled_allies(seat)
@@ -7476,6 +7444,7 @@ impl Game {
                 targets
             }
             MagicEffect::Program(_)
+            | MagicEffect::SummonTokenToAlliedMinionThenDrawSpell(_)
             | MagicEffect::GrantStealthToTargetMinion
             | MagicEffect::GrantStealthToAlliedMinionsThenDrawSpell
             | MagicEffect::GrantChargeToAllyThisTurn
@@ -7920,26 +7889,6 @@ impl Game {
             }
         }
         Ok(choices)
-    }
-
-    fn allied_minion_token_hosts(
-        &self,
-        seat: Seat,
-        token_card_id: &str,
-    ) -> Result<Vec<UnitTarget>, GameError> {
-        let mut hosts = Vec::new();
-        for unit in &self.position.units {
-            if unit.controller != seat || unit.region != Region::Surface {
-                continue;
-            }
-            if self.token_may_enter_cell(seat, token_card_id, unit.location)? {
-                hosts.push(UnitTarget::Minion {
-                    instance_id: unit.card.instance_id.clone(),
-                    seat,
-                });
-            }
-        }
-        Ok(hosts)
     }
 
     fn aboveground_unit_targets(&self) -> Vec<UnitTarget> {
@@ -8640,12 +8589,12 @@ impl Game {
     }
 
     fn token_minion_facts(&self, token_card_id: &str) -> Result<&MinionFacts, GameError> {
-        let definition = self
+        let index = self
             .rules
             .cards
-            .iter()
-            .find(|definition| definition.id == token_card_id)
-            .ok_or_else(|| invalid("token effect lacks its referenced token minion definition"))?;
+            .binary_search_by(|definition| definition.id.as_str().cmp(token_card_id))
+            .map_err(|_| invalid("token effect lacks its referenced token minion definition"))?;
+        let definition = &self.rules.cards[index];
         match &definition.facts {
             CardFacts::Minion(facts) if facts.token => Ok(facts),
             _ => Err(invalid(
@@ -8689,6 +8638,34 @@ impl Game {
             cell,
             self.prospective_minion_entry_power(seat, facts, std::slice::from_ref(&cell)),
         ))
+    }
+
+    fn token_may_enter_location(
+        &self,
+        seat: Seat,
+        token_card_id: &str,
+        location: Location,
+    ) -> Result<bool, GameError> {
+        let facts = self.token_minion_facts(token_card_id)?;
+        let area = Self::token_anchor_footprint(facts, location.cell);
+        if facts.occupies_square_area_two && area.is_none() {
+            return Ok(false);
+        }
+        let cells = area
+            .as_ref()
+            .map_or(std::slice::from_ref(&location.cell), |cells| {
+                cells.as_slice()
+            });
+        if !cells
+            .iter()
+            .all(|cell| self.location_exists_in_region(*cell, location.region))
+        {
+            return Ok(false);
+        }
+        // A direct summon is not casting. Survival in the destination region is
+        // settled after entry, rather than filtering out tokens without the keyword.
+        Ok(location.region != Region::Surface
+            || self.token_may_enter_cell(seat, token_card_id, location.cell)?)
     }
 
     fn token_may_enter_played_site(
@@ -13726,16 +13703,6 @@ impl Game {
                 restore();
                 self.finish_site_genesis_tail(continuation, outcomes)
             }
-            ResolutionContinuation::Draw {
-                seat,
-                source_instance_id,
-                zone,
-                count,
-            } => {
-                restore();
-                self.apply_genesis_draws(seat, &source_instance_id, zone, count, outcomes);
-                Ok(())
-            }
             ResolutionContinuation::MagicResolved {
                 resolution,
                 held_card,
@@ -14321,7 +14288,10 @@ impl Game {
                 seat,
                 token_card_id,
                 card_instance_id,
-                cell,
+                Location {
+                    cell,
+                    region: Region::Surface,
+                },
                 0,
                 origin_state_version,
             )?;
@@ -14483,7 +14453,10 @@ impl Game {
                         .as_deref()
                         .ok_or(GameError::IllegalAction)?,
                     &card_instance_id,
-                    cell,
+                    Location {
+                        cell,
+                        region: Region::Surface,
+                    },
                     0,
                     origin_state_version,
                 )?,
@@ -14667,17 +14640,17 @@ impl Game {
         owner: Seat,
         token_card_id: &str,
         source_instance_id: &IdentityHash,
-        cell: Cell,
+        location: Location,
         ordinal: usize,
         origin_state_version: u64,
     ) -> Result<UnitPosition, GameError> {
-        let (index, definition) = self
+        let cell = location.cell;
+        let index = self
             .rules
             .cards
-            .iter()
-            .enumerate()
-            .find(|(_, definition)| definition.id == token_card_id)
-            .ok_or_else(|| invalid("token effect lacks its referenced token minion definition"))?;
+            .binary_search_by(|definition| definition.id.as_str().cmp(token_card_id))
+            .map_err(|_| invalid("token effect lacks its referenced token minion definition"))?;
+        let definition = &self.rules.cards[index];
         let CardFacts::Minion(facts) = &definition.facts else {
             return Err(invalid(
                 "token effect lacks its referenced token minion definition",
@@ -14696,8 +14669,10 @@ impl Game {
             Some(area) => self.prospective_minion_entry_power(owner, facts, area.as_slice()),
             None => self.prospective_minion_entry_power(owner, facts, std::slice::from_ref(&cell)),
         };
-        if occupied_cells.is_some_and(|area| !self.square_allows_power_entry(area, entry_power))
-            || occupied_cells.is_none() && self.site_prevents_power_entry(cell, entry_power)
+        if location.region == Region::Surface
+            && (occupied_cells
+                .is_some_and(|area| !self.square_allows_power_entry(area, entry_power))
+                || occupied_cells.is_none() && self.site_prevents_power_entry(cell, entry_power))
         {
             return Err(GameError::IllegalAction);
         }
@@ -14732,7 +14707,7 @@ impl Game {
             location: cell,
             occupied_cells,
             planar_gate_voidwalk: false,
-            region: Region::Surface,
+            region: location.region,
             stealthed: facts.stealth,
             summoning_sickness: true,
             tapped: false,
@@ -14776,6 +14751,7 @@ impl Game {
         let card_instance_id = token.card.instance_id.clone();
         let token_owner = token.card.owner;
         let cell = token.location;
+        let region = token.region;
         let occupied_cells = token.occupied_cells;
         let lance_count = token.carried_lance_count;
         let CardFacts::Minion(_) = &self.rules.cards[usize::from(card_id.0)].facts else {
@@ -14796,6 +14772,9 @@ impl Game {
                 "sourceInstanceId": source_instance_id,
                 "token": true,
             });
+            if region != Region::Surface {
+                payload["region"] = json!(region);
+            }
             if let Some(cells) = occupied_cells {
                 payload["occupiedCells"] = json!(cells);
             }
@@ -15802,7 +15781,10 @@ impl Game {
                     seat,
                     token_card_id,
                     &pending.source_instance_id,
-                    pending.cell,
+                    Location {
+                        cell: pending.cell,
+                        region: Region::Surface,
+                    },
                     0,
                     self.position.state_version,
                 )
@@ -19692,44 +19674,15 @@ impl Game {
                         seat,
                         token_card_id,
                         card_instance_id,
-                        cell,
+                        Location {
+                            cell,
+                            region: Region::Surface,
+                        },
                         ordinal,
                         self.position.state_version,
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?,
-            MagicEffect::SummonTokenToAlliedMinionThenDrawSpell(token_card_id) => {
-                match ally.as_ref() {
-                    Some(UnitTarget::Minion {
-                        instance_id,
-                        seat: ally_seat,
-                    }) => {
-                        let unit = self
-                            .position
-                            .units
-                            .iter()
-                            .find(|unit| {
-                                unit.card.instance_id == *instance_id
-                                    && unit.controller == *ally_seat
-                            })
-                            .ok_or(GameError::IllegalAction)?;
-                        if unit.region != Region::Surface {
-                            return Err(GameError::IllegalAction);
-                        }
-                        let cell = unit.location;
-                        vec![self.create_token_unit(
-                            seat,
-                            token_card_id,
-                            card_instance_id,
-                            cell,
-                            0,
-                            self.position.state_version,
-                        )?]
-                    }
-                    None => Vec::new(),
-                    Some(_) => return Err(GameError::IllegalAction),
-                }
-            }
             _ => Vec::new(),
         };
         let duel = if effect == MagicEffect::FightAllyWithAdjacentEnemy {
@@ -19856,7 +19809,6 @@ impl Game {
             || matches!(
                 effect,
                 MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_)
-                    | MagicEffect::SummonTokenToAlliedMinionThenDrawSpell(_)
             ) {
             Some(card)
         } else {
@@ -20618,8 +20570,7 @@ impl Game {
                     self.begin_fight(combatants, outcomes)?;
                 }
             }
-            MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_)
-            | MagicEffect::SummonTokenToAlliedMinionThenDrawSpell(_) => {
+            MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => {
                 let entries = token_units
                     .into_iter()
                     .map(|token| TokenEntryContinuation {
@@ -20630,17 +20581,6 @@ impl Game {
                     })
                     .collect();
                 let mut steps = vec![ResolutionContinuation::TokenEntries(entries)];
-                if matches!(
-                    effect,
-                    MagicEffect::SummonTokenToAlliedMinionThenDrawSpell(_)
-                ) {
-                    steps.push(ResolutionContinuation::Draw {
-                        seat,
-                        source_instance_id: card_instance_id.clone(),
-                        zone: DeckZone::Spellbook,
-                        count: 1,
-                    });
-                }
                 steps.push(ResolutionContinuation::MagicResolved {
                     resolution: DeferredMagicResolved {
                         card_id: compact_card_id,
@@ -21550,6 +21490,7 @@ impl Game {
             }
             // Compiled entries have already transferred ownership to the common runner.
             MagicEffect::Program(_)
+            | MagicEffect::SummonTokenToAlliedMinionThenDrawSpell(_)
             | MagicEffect::GrantStealthToTargetMinion
             | MagicEffect::GrantStealthToAlliedMinionsThenDrawSpell
             | MagicEffect::GrantChargeToAllyThisTurn
@@ -24288,15 +24229,6 @@ impl Game {
                 "seat": continuation.seat,
                 "abilitiesLost": continuation.abilities_lost,
             }),
-            ResolutionContinuation::Draw {
-                seat,
-                source_instance_id,
-                zone,
-                count,
-            } => json!({
-                "kind": "draw", "seat": seat, "sourceInstanceId": source_instance_id,
-                "zone": zone.as_str(), "count": count,
-            }),
             ResolutionContinuation::MagicResolved {
                 resolution,
                 held_card,
@@ -24864,22 +24796,52 @@ fn referenced_manifest_cards<'a>(
             }
         }
     }
-    let mut referenced = BTreeSet::new();
+    let mut depths = BTreeMap::<&str, usize>::new();
+    let mut visiting = BTreeSet::new();
+    let mut pending = Vec::new();
     for deck in [&decks.north, &decks.south] {
-        referenced.insert(deck.avatar.as_str());
-        referenced.extend(deck.atlas.iter().map(String::as_str));
-        referenced.extend(deck.spellbook.iter().map(String::as_str));
+        pending.push((deck.avatar.as_str(), false));
+        pending.extend(
+            deck.atlas
+                .iter()
+                .chain(&deck.spellbook)
+                .map(|id| (id.as_str(), false)),
+        );
     }
-    let token_sources: Vec<_> = referenced.iter().copied().collect();
-    for card_id in token_sources {
-        if let Some(token_id) = token_reference(&facts[card_id]) {
-            if !matches!(facts.get(token_id), Some(CardFacts::Minion(minion)) if minion.token) {
-                return Err(invalid("token effect must reference a token minion"));
+    while let Some((card_id, finished)) = pending.pop() {
+        if finished {
+            visiting.remove(card_id);
+            let depth = token_references(&facts[card_id])
+                .into_iter()
+                .map(|id| depths[id])
+                .max()
+                .unwrap_or(0)
+                + 1;
+            if depth > 64 {
+                return Err(invalid(
+                    "token dependency chains longer than 64 are unsupported",
+                ));
             }
-            referenced.insert(token_id);
+            depths.insert(card_id, depth);
+        } else if !depths.contains_key(card_id) {
+            if !visiting.insert(card_id) {
+                return Err(invalid("recursive token dependencies are unsupported"));
+            }
+            if visiting.len() > 64 {
+                return Err(invalid(
+                    "token dependency chains longer than 64 are unsupported",
+                ));
+            }
+            pending.push((card_id, true));
+            for token_id in token_references(&facts[card_id]) {
+                if !matches!(facts.get(token_id), Some(CardFacts::Minion(minion)) if minion.token) {
+                    return Err(invalid("token effect must reference a token minion"));
+                }
+                pending.push((token_id, false));
+            }
         }
     }
-    Ok(referenced)
+    Ok(depths.into_keys().collect())
 }
 
 /// Rebuilds a manifest with new deck compositions and a seed, preserving card facts.

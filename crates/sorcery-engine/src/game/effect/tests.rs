@@ -149,7 +149,10 @@ fn install(game: &mut Game, effects: Vec<Effect>) -> CardId {
             }),
             UnitSet::Query(_) | UnitSet::Chosen => None,
         },
-        Effect::Draw { .. } | Effect::DrawCard | Effect::ChooseUnit(_) => None,
+        Effect::Draw { .. }
+        | Effect::DrawCard
+        | Effect::ChooseUnit(_)
+        | Effect::SummonToken { .. } => None,
     });
     Arc::get_mut(&mut game.rules)
         .expect("fixture rules are uniquely owned")

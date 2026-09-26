@@ -6,6 +6,7 @@ use super::{
     Location, OutcomeLog, Region, ResolutionContinuation, Seat, UnitDamageSource, UnitKind,
     UnitQuery, UnitTarget, Value, json, seat_index,
 };
+use crate::ability::TokenDestination;
 
 #[cfg(test)]
 mod tests;
@@ -154,14 +155,14 @@ impl Game {
         &self,
         card_id: CardId,
         entry: AbilityEntry,
-    ) -> Option<&AbilityProgram> {
+    ) -> Option<&std::sync::Arc<AbilityProgram>> {
         let abilities = &self.rules.cards[usize::from(card_id.0)].abilities;
         match entry {
             AbilityEntry::Magic => &abilities.magic,
             AbilityEntry::Genesis => &abilities.genesis,
             AbilityEntry::Activated => &abilities.activated,
         }
-        .as_deref()
+        .as_ref()
     }
 
     fn referenced_unit(&self, reference: &RealmReference) -> Option<(UnitKind, Seat)> {
@@ -549,18 +550,62 @@ impl Game {
             }
             self.start_effect_frame(&mut frame, outcomes);
         }
+        // Hold immutable code outside the mutable game borrow; string operands are never
+        // cloned per operation or per token.
+        let program = std::sync::Arc::clone(
+            self.compiled_ability(frame.card_id, frame.entry)
+                .ok_or(GameError::IllegalAction)?,
+        );
         while self.position.terminal.is_none() {
-            let effect = self
-                .compiled_ability(frame.card_id, frame.entry)
-                .ok_or(GameError::IllegalAction)?
-                .effects
-                .get(frame.cursor)
-                .copied();
+            let effect = program.effects.get(frame.cursor);
             let Some(effect) = effect else {
                 break;
             };
             frame.cursor += 1;
-            match effect {
+            match *effect {
+                Effect::SummonToken {
+                    ref token,
+                    count,
+                    destination,
+                } => {
+                    if let Some(location) = self.token_effect_location(&frame, destination)?
+                        && self.token_may_enter_location(
+                            frame.source.controller,
+                            token,
+                            location,
+                        )?
+                    {
+                        let entries = (0..usize::from(count))
+                            .map(|ordinal| {
+                                Ok(super::TokenEntryContinuation {
+                                    seat: frame.source.controller,
+                                    token: self.create_token_unit(
+                                        frame.source.controller,
+                                        token,
+                                        &frame.source.instance_id,
+                                        location,
+                                        (frame.cursor - 1) * 32 + ordinal,
+                                        self.position.state_version,
+                                    )?,
+                                    source_instance_id: frame.source.instance_id.clone(),
+                                    mana_paid: 0,
+                                })
+                            })
+                            .collect::<Result<Vec<_>, GameError>>()?;
+                        self.finish_token_entries(entries, outcomes)?;
+                        if self.position.terminal.is_some()
+                            || self.position.pending_deathrites.is_some()
+                            || self.position.pending_trigger_order.is_some()
+                            || self.position.pending_ability_choice.is_some()
+                        {
+                            return self.continue_resolution(
+                                ResolutionContinuation::Effect(Box::new(frame)),
+                                outcomes,
+                            );
+                        }
+                        // Synchronous entry needs no boxed continuation or recursive restart.
+                    }
+                }
                 Effect::ChooseUnit(spec) => {
                     return self.begin_ability_unit_choice(frame, spec, outcomes);
                 }
@@ -670,6 +715,48 @@ impl Game {
         }
         self.finish_effect_frame(frame, outcomes);
         Ok(())
+    }
+
+    fn token_effect_location(
+        &self,
+        frame: &EffectFrame,
+        destination: TokenDestination,
+    ) -> Result<Option<Location>, GameError> {
+        let (region, cells) = match destination {
+            TokenDestination::Source => self.effect_anchor(&frame.source)?,
+            TokenDestination::Chosen | TokenDestination::Target => {
+                let reference = if destination == TokenDestination::Chosen {
+                    frame.chosen.as_ref()
+                } else {
+                    frame
+                        .target
+                        .as_ref()
+                        .filter(|binding| binding.state == BindingState::Active)
+                        .map(|binding| &binding.reference)
+                };
+                let Some(reference) = reference.filter(|r| self.realm_reference_exists(r)) else {
+                    return Ok(None);
+                };
+                self.referenced_geometry(reference)?
+            }
+            TokenDestination::Location => {
+                return Ok(frame
+                    .location
+                    .as_ref()
+                    .filter(|binding| binding.state == BindingState::Active)
+                    .map(|binding| binding.location));
+            }
+        };
+        if cells.len() != 1 {
+            return Err(GameError::UnsupportedMechanic(
+                "token destination on a multiple-location unit requires a location choice"
+                    .to_owned(),
+            ));
+        }
+        Ok(Some(Location {
+            cell: cells[0],
+            region,
+        }))
     }
 
     pub(super) fn finish_effect_frame(

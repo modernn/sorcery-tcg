@@ -60,6 +60,11 @@ impl Game {
         entries: Vec<TokenEntryContinuation>,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        if self.position.units.len().saturating_add(entries.len()) > 4096 {
+            return Err(GameError::UnsupportedMechanic(
+                "token entry exceeds the supported realm unit capacity".to_owned(),
+            ));
+        }
         let sources = entries
             .iter()
             .map(|entry| {
@@ -79,6 +84,7 @@ impl Game {
                 triggers.push(trigger);
             }
         }
+        self.settle_region_occupancy(outcomes)?;
         self.begin_genesis_triggers(triggers, outcomes)?;
         Ok(())
     }

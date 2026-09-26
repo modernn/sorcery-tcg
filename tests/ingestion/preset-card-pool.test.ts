@@ -8,7 +8,7 @@ import { canonicalJson, type JsonValue } from '../../src/authority/canonical-jso
 import type { PrivateCardSnapshot } from '../../src/authority/private-cards.ts';
 import { identityHash } from '../../src/authority/hash.ts';
 import type { PrivateStarterPreset } from '../../src/commands/run-private-game-check.ts';
-import { createGameManifest, type GameCardDefinition } from '../../src/engine/game.ts';
+import { createGameManifest, tokenDependencies, type GameCardDefinition } from '../../src/engine/game.ts';
 import { RustSessionClient } from '../../src/engine/rust-engine.ts';
 import { buildPresetCardPool, prepareBoundExperiment, presetCardCatalog } from '../../src/ingestion/preset-card-pool.ts';
 import { loadReviewedCardBindings, mergeReviewedCardBindings } from '../../src/ingestion/reviewed-card-bindings.ts';
@@ -190,6 +190,65 @@ test('cross-preset compositions preserve facts and token dependencies and are ad
   } finally {
     await client.close();
   }
+});
+
+test('programmed token dependencies retain the full transitive pool closure', async () => {
+  const programmedSpell: GameCardDefinition = {
+    cardType: 'magic', manaCost: 0, thresholds,
+    effectProgram: { effects: [
+      { op: 'summon-token', token: 'token', count: 1, destination: 'source' },
+      { op: 'summon-token', token: 'token2', count: 1, destination: 'source' },
+    ] },
+  };
+  const tokenFact = facts.token as Extract<GameCardDefinition, { cardType: 'minion' }>;
+  const tokenWithGenesis: GameCardDefinition = {
+    ...tokenFact,
+    genesisProgram: { effects: [{ op: 'summon-token', token: 'token3', count: 1, destination: 'source' }] },
+  };
+  const nestedFacts: Record<string, GameCardDefinition> = {
+    avatar: facts.avatar!, site: facts.site!, a: facts.a!, b: facts.b!, programmedSpell, token: tokenWithGenesis,
+    token2: { ...tokenFact, attack: 2 }, token3: { ...tokenFact, attack: 3 },
+  };
+  const extraCards = ['programmedSpell', 'token2', 'token3'].map((stableId) => {
+    const definition = nestedFacts[stableId]!;
+    return { stableId, name: `Synthetic ${stableId}`, cardType: definition.cardType,
+      rulesText: '', attack: 'attack' in definition ? definition.attack : null,
+      defense: 'defense' in definition ? definition.defense : null,
+      manaCost: 'manaCost' in definition ? definition.manaCost : null,
+      life: null, elements: [], rarity: 'ordinary' as const, thresholds, subtypes: [],
+      printingSlugs: [], officialSourceId: null };
+  });
+  const nestedAuthority = { ...authority, cards: [...authority.cards, ...extraCards] };
+  const nestedDeck = { avatar: 'avatar', atlas: ['site', 'site', 'site'], spellbook: ['programmedSpell', 'a', 'b'] };
+  const nestedPreset: PrivateStarterPreset = {
+    id: 'air-starter', label: 'nested-program', cardNames: {}, usesOnlyOrdinaryOrExceptionalCards: true,
+    manifest: createGameManifest({
+      authority: { mode: 'private-local', contentHash: authority.authorityHash, revisionId: authority.revisionId },
+      cards: Object.fromEntries(Object.keys(nestedFacts).map((id) => [id, nestedFacts[id]!])),
+      decks: { north: nestedDeck, south: nestedDeck }, firstSeat: 'north', seed: 1,
+    }),
+  };
+  const nestedPool = buildPresetCardPool(nestedAuthority, [nestedPreset]);
+  assert.deepEqual(tokenDependencies(programmedSpell), ['token', 'token2']);
+  const nestedInput = { ...input, candidate: nestedDeck, opponent: { ...nestedDeck, spellbook: ['a', 'b', 'b'] } };
+  const prepared = prepareBoundExperiment(nestedInput, nestedAuthority, nestedPool);
+  assert.deepEqual(Object.keys(prepared.baseManifest.cards),
+    ['a', 'avatar', 'b', 'programmedSpell', 'site', 'token', 'token2', 'token3']);
+  const client = await RustSessionClient.start();
+  try {
+    const result = await client.newSession(canonicalJson(prepared.baseManifest as unknown as JsonValue));
+    assert.equal(result.manifestId, prepared.baseManifest.manifestId);
+    assert.equal(await client.verifyReplay(), true);
+  } finally {
+    await client.close();
+  }
+  const pruned = prepareBoundExperiment({ ...nestedInput, candidate: nestedInput.opponent }, nestedAuthority, nestedPool);
+  assert.deepEqual(Object.keys(pruned.baseManifest.cards), ['a', 'avatar', 'b', 'site']);
+  const missing = new Map(nestedPool); missing.delete('token3');
+  assert.throws(() => prepareBoundExperiment(nestedInput, nestedAuthority, missing), /token dependency/);
+  const nonToken = new Map(nestedPool);
+  nonToken.set('token3', { definition: facts.a as Extract<GameCardDefinition, { cardType: 'minion' }>, presetIds: [] });
+  assert.throws(() => prepareBoundExperiment(nestedInput, nestedAuthority, nonToken), /token minion/);
 });
 
 test('deck-only input rejects unbound cards, rule overrides, invalid zones and excessive requests', () => {

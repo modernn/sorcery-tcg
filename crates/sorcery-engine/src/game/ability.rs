@@ -6,7 +6,7 @@ pub(super) use crate::ability::{
     AbilityProgram, ControllerRelation, Effect, SelectionSpec, SpatialRelation, UnitArea,
     UnitChoiceSpec, UnitCohort, UnitSet,
 };
-use crate::ability::{EffectDuration, TemporaryModifierKind};
+use crate::ability::{EffectDuration, TemporaryModifierKind, TokenDestination};
 use crate::action::DeckZone;
 use crate::facts::{ArtifactEffect, CardFacts, MagicEffect, MinionFacts};
 
@@ -123,6 +123,26 @@ fn ally_grant(
 fn compile_magic(facts: &crate::facts::MagicFacts) -> Option<Arc<AbilityProgram>> {
     let effect = match &facts.effect {
         MagicEffect::Program(program) => return Some(Arc::clone(program)),
+        MagicEffect::SummonTokenToAlliedMinionThenDrawSpell(token) => {
+            return Some(ability([
+                Effect::ChooseUnit(UnitChoiceSpec {
+                    kind: Some(super::UnitKind::Minion),
+                    relation: SpatialRelation::Anywhere,
+                    allied_only: true,
+                    exclude_source: false,
+                    optional: false,
+                }),
+                Effect::SummonToken {
+                    token: token.clone(),
+                    count: 1,
+                    destination: TokenDestination::Chosen,
+                },
+                Effect::Draw {
+                    zone: DeckZone::Spellbook,
+                    count: 1,
+                },
+            ]));
+        }
         MagicEffect::GrantChargeToAllyThisTurn => {
             return Some(ally_grant(TemporaryModifierKind::Charge, 1, None, false));
         }

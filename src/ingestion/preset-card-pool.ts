@@ -3,7 +3,13 @@ import { z } from 'zod';
 import { canonicalJson, type JsonValue } from '../authority/canonical-json.ts';
 import { identityHash } from '../authority/hash.ts';
 import type { PrivateCardSnapshot } from '../authority/private-cards.ts';
-import { createGameManifest, type GameCardDefinition, type GameDeckSpec, type GameManifest } from '../engine/game.ts';
+import {
+  createGameManifest,
+  tokenDependencies,
+  type GameCardDefinition,
+  type GameDeckSpec,
+  type GameManifest,
+} from '../engine/game.ts';
 
 export type PresetCardBinding = Readonly<{
   definition: GameCardDefinition;
@@ -102,10 +108,7 @@ export function prepareBoundExperiment(
   // Include engine token dependencies, including tokens outside the selected deck zones.
   for (const id of referenced) {
     const facts = pool.get(id)!.definition;
-    const tokenId = facts.cardType === 'magic'
-      ? facts.summonTokenToAlliedMinionThenDrawSpell ?? facts.summonTokenToEachControlledSiteBorderingEnemySite
-      : facts.cardType === 'site' ? facts.genesisPayOneManaToSummonToken : undefined;
-    if (tokenId) {
+    for (const tokenId of tokenDependencies(facts)) {
       if (!pool.has(tokenId)) throw new Error(`unsupported token dependency: ${tokenId}`);
       referenced.add(tokenId);
     }
