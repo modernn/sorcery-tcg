@@ -39,7 +39,7 @@ fn demon() -> Value {
         "attack": 1,
         "cardType": "minion",
         "defense": 3,
-        "demon": true,
+        "subtypes": ["Demon"],
         "manaCost": 0,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
@@ -52,7 +52,7 @@ fn undead() -> Value {
         "defense": 3,
         "manaCost": 0,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-        "undead": true,
+        "subtypes": ["Undead"],
     })
 }
 

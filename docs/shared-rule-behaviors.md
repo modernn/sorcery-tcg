@@ -101,3 +101,17 @@ Sorcery rules. A unit spanning multiple locations still needs an ordinary locati
 choice; token placement there reports unsupported rather than guessing a location.
 Ordinary site/location choice and site-cohort summoning remain separate unfinished
 selector work. This engine slice alone does not certify additional real cards.
+
+Token definitions preserve an absent printed mana cost as explicit `null`, distinct
+from a printed zero. Only token minions may have that absence; tokens cannot enter
+the spellbook or be cast as ordinary minions. Effect entry pays zero without changing
+the printed characteristic. Optional complete minion `elements` and `subtypes` lists
+preserve elemental identity independently of casting thresholds. The existing Demon,
+Mortal, and Undead predicates derive from explicit subtypes at admission; contradictory
+legacy flags are rejected. Omitted lists remain unspecified for older bindings.
+
+When retained normalized data omits a characteristic, reviewed private bindings may
+add an element or subtype with a source hash and locator. These supplements cannot
+remove retained traits or change printed costs, stats, thresholds, or rarity. The
+references record the review's provenance; they do not automatically verify the
+referenced text or grant ranked eligibility. Authority snapshots remain unchanged.

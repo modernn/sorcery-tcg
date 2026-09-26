@@ -31662,3 +31662,106 @@ test('RULE-03 Craterize discards a site, destroys its target, and applies the pr
   const gameManifest = createGameManifest(input);
   assert.deepEqual(gameManifest.cards[craterizeId], cards[craterizeId]);
 });
+
+test('token minions preserve an absent printed mana cost without accepting missing or non-token null', () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const absentToken: Extract<GameCardDefinition, { cardType: 'minion' }> = {
+    attack: 1, cardType: 'minion', defense: 1, elements: ['water'], manaCost: null,
+    subtypes: ['Beast'], thresholds, token: true,
+  };
+  const decks: GameDeckSpec = {
+    atlas: ['printed-cost-site', 'printed-cost-site', 'printed-cost-site'],
+    avatar: 'printed-cost-avatar',
+    spellbook: ['printed-cost-spell', 'printed-cost-spell', 'printed-cost-spell'],
+  };
+  const baseCards: Record<string, GameCardDefinition> = {
+    'printed-cost-avatar': {
+      attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20,
+    },
+    'printed-cost-site': { cardType: 'site', elements: ['earth'] },
+    'printed-cost-spell': {
+      cardType: 'magic', manaCost: 1, summonTokenToAlliedMinionThenDrawSpell: 'printed-cost-token',
+      thresholds,
+    },
+    'printed-cost-token': {
+      ...absentToken,
+    },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-printed-cost-v1',
+    },
+    cards: baseCards,
+    decks: { north: decks, south: decks },
+    firstSeat: 'north' as const,
+    seed: 17,
+  };
+  const absentCostManifest = createGameManifest(input);
+  const absentTokenManifestCard = absentCostManifest.cards['printed-cost-token'];
+  assert.equal(absentTokenManifestCard?.cardType, 'minion');
+  assert.equal(absentTokenManifestCard?.cardType === 'minion' ? absentTokenManifestCard.manaCost : undefined, null);
+  assert.deepEqual(absentTokenManifestCard?.cardType === 'minion' ? absentTokenManifestCard.elements : undefined, ['water']);
+  assert.deepEqual(absentTokenManifestCard?.cardType === 'minion' ? absentTokenManifestCard.subtypes : undefined, ['Beast']);
+
+  const zeroCostManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...baseCards,
+      'printed-cost-token': { ...absentToken, manaCost: 0 },
+    },
+  });
+  const zeroTokenManifestCard = zeroCostManifest.cards['printed-cost-token'];
+  assert.equal(zeroTokenManifestCard?.cardType === 'minion' ? zeroTokenManifestCard.manaCost : undefined, 0);
+
+  const emptyMetadataManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...baseCards,
+      'printed-cost-token': { ...absentToken, elements: [], subtypes: [], manaCost: 0 },
+    },
+  });
+  const emptyMetadataCard = emptyMetadataManifest.cards['printed-cost-token'];
+  assert.deepEqual(emptyMetadataCard?.cardType === 'minion' ? emptyMetadataCard.elements : undefined, []);
+  assert.deepEqual(emptyMetadataCard?.cardType === 'minion' ? emptyMetadataCard.subtypes : undefined, []);
+
+  const bareToken = { ...absentToken } as unknown as Record<string, unknown>;
+  delete bareToken.elements;
+  delete bareToken.subtypes;
+  const bareManifest = createGameManifest({
+    ...input,
+    cards: { ...baseCards, 'printed-cost-token': bareToken as GameCardDefinition },
+  });
+  const bareCard = bareManifest.cards['printed-cost-token'];
+  assert.equal(bareCard?.cardType === 'minion' && 'elements' in bareCard, false);
+  assert.equal(bareCard?.cardType === 'minion' && 'subtypes' in bareCard, false);
+
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: { ...baseCards, 'printed-cost-token': { ...absentToken, mortal: true } },
+  }), /mortal must agree with subtypes/);
+
+  for (const subtype of ['\uFEFFBeast', 'Beast\uFEFF']) {
+    assert.throws(() => createGameManifest({
+      ...input,
+      cards: { ...baseCards, 'printed-cost-token': { ...absentToken, subtypes: [subtype] } },
+    }), /subtypes must contain trimmed strings/);
+  }
+
+  const missingCostToken = { ...absentToken } as unknown as Record<string, unknown>;
+  delete missingCostToken.manaCost;
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: { ...baseCards, 'printed-cost-token': missingCostToken as GameCardDefinition },
+  }), /manaCost must be defined/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...baseCards,
+      'printed-cost-token': {
+        ...absentToken, manaCost: null, token: undefined,
+      } as unknown as GameCardDefinition,
+    },
+  }), /manaCost may be null only for token minions/);
+});

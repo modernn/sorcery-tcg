@@ -362,7 +362,7 @@ fn rule_catalog_0035_controlled_mortal_power_should_follow_current_control_and_s
     let cards = json!({
         "north-avatar": avatar(),
         "north-mesmerism": magic(("gainControlOfTargetNearbyMinion", json!(true))),
-        "north-mortal": minion(json!({ "defense": 2, "mortal": true })),
+        "north-mortal": minion(json!({ "defense": 2, "subtypes": ["Mortal"] })),
         "north-rain": magic(("damageEachAbovegroundMinion", json!(1))),
         "north-site": site(),
         "south-avatar": avatar(),

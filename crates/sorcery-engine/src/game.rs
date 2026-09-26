@@ -572,7 +572,7 @@ fn payload_damage_amount(card: &CardDefinition) -> Result<u16, GameError> {
         CardFacts::Artifact(facts) => facts.mana_cost,
         CardFacts::Aura(facts) => facts.mana_cost,
         CardFacts::Magic(facts) => facts.mana_cost,
-        CardFacts::Minion(facts) => facts.mana_cost,
+        CardFacts::Minion(facts) => facts.mana_cost.ok_or(GameError::IllegalAction)?,
         CardFacts::Site(_) => 0,
         CardFacts::Avatar(_) => return Err(GameError::IllegalAction),
     };
@@ -1630,6 +1630,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         deathrite_mill_spells: _,
         defense: _,
         demon: _,
+        elements: _,
         dies_at_end_of_controller_turn: _,
         does_not_untap_during_controllers_start_phase: _,
         enemies_must_attack_this_if_able: _,
@@ -1677,6 +1678,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         strikes_first_while_attacking: _,
         strikes_first_while_defending: _,
         submerge: _,
+        subtypes: _,
         summon_to_any_site: _,
         tap_for_mana: _,
         tap_to_damage_each_unit_at_adjacent_location: _,
@@ -9590,6 +9592,9 @@ impl Game {
     }
 
     fn summon_destinations(&self, seat: Seat, minion: &MinionFacts) -> Vec<SummonDestination> {
+        let Some(printed_cost) = minion.mana_cost.filter(|_| !minion.token) else {
+            return Vec::new();
+        };
         let summon_cell = |cell: Cell, enforce_outer_column_on_cell: bool| {
             if enforce_outer_column_on_cell
                 && minion.must_be_cast_to_outer_column
@@ -9620,7 +9625,7 @@ impl Game {
                     && site_facts.ordinary_minion_mana_discount
                     && !self.site_abilities_lost(cell),
             );
-            Some(minion.mana_cost.saturating_sub(discount))
+            Some(printed_cost.saturating_sub(discount))
         };
         if minion.occupies_square_area_two {
             Self::minion_square_areas(minion)
@@ -9649,7 +9654,7 @@ impl Game {
                         .unwrap_or_default()
                 })
                 .collect::<Vec<_>>();
-            destinations.extend(self.void_summon_destinations(minion, minion.mana_cost, false));
+            destinations.extend(self.void_summon_destinations(minion, printed_cost, false));
             destinations
         }
     }
@@ -9734,10 +9739,17 @@ impl Game {
         if !minion.voidwalk || (!anywhere && restricted_elsewhere) {
             return Vec::new();
         }
+        let mana_cost = if anywhere {
+            0
+        } else if let Some(cost) = minion.mana_cost.filter(|_| !minion.token) {
+            cost
+        } else {
+            return Vec::new();
+        };
         vec![SummonDestination {
             cell: cells[0],
             cells: Some(cells),
-            mana_cost: if anywhere { 0 } else { minion.mana_cost },
+            mana_cost,
             region: Some(LowerRegion::Void),
         }]
     }

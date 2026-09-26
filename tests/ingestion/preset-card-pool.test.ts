@@ -84,6 +84,46 @@ test('reviewed local bindings require exact source identity, complete review and
     new Map([...pool, ['unbound', { definition: facts.b!, presetIds: [] }]])), /conflicting/);
 });
 
+test('reviewed token bindings retain an explicit absent printed mana cost through pool closure', () => {
+  const sourceToken = facts.token!;
+  if (sourceToken.cardType !== 'minion') throw new Error('synthetic token fixture must be a minion');
+  const token: Extract<GameCardDefinition, { cardType: 'minion' }> = { ...sourceToken, manaCost: null, ordinary: true };
+  const cards: Record<string, GameCardDefinition> = { ...facts, token };
+  const decks = { avatar: 'avatar', atlas: ['site', 'site', 'site'], spellbook: ['spell', 'a', 'a'] };
+  const manifest = createGameManifest({
+    authority: { mode: 'private-local', contentHash: authority.authorityHash, revisionId: authority.revisionId },
+    cards: { avatar: cards.avatar!, site: cards.site!, a: cards.a!, spell: cards.spell!, token },
+    decks: { north: decks, south: decks }, firstSeat: 'north', seed: 7,
+  });
+  const source = authority.cards.find((card) => card.stableId === 'token')!;
+  const nullTokenAuthority: PrivateCardSnapshot = {
+    ...authority,
+    cards: authority.cards.map((card) => card.stableId === 'token'
+      ? { ...card, manaCost: null }
+      : card),
+  };
+  const pool = buildPresetCardPool(nullTokenAuthority, [{
+    id: 'air-starter',
+    manifest,
+  }]);
+  const pooledToken = pool.get('token')?.definition;
+  assert.equal(pooledToken?.cardType, 'minion');
+  assert.equal(pooledToken?.cardType === 'minion' ? pooledToken.manaCost : undefined, null);
+  const row = {
+    cardId: 'token',
+    sourceCardHash: identityHash({ ...source, manaCost: null } as unknown as JsonValue),
+    facts: token,
+    review: { entireRulesText: true, proofs: ['synthetic token absent-cost review'] },
+  };
+  const merged = mergeReviewedCardBindings({
+    schemaVersion: 1, authorityHash: nullTokenAuthority.authorityHash,
+    revisionId: nullTokenAuthority.revisionId, cards: [row],
+  }, nullTokenAuthority, pool);
+  const mergedToken = merged.get('token')?.definition;
+  assert.equal(mergedToken?.cardType, 'minion');
+  assert.equal(mergedToken?.cardType === 'minion' ? mergedToken.manaCost : undefined, null);
+});
+
 test('reviewed bindings replace matching preset facts only with an explicit prior hash', () => {
   const source = authority.cards.find((card) => card.stableId === 'unbound')!;
   const previous = { ...facts.a!, ordinary: true as const };

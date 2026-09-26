@@ -6383,7 +6383,9 @@ function openingPair(
     for (const minion of player.hand.spellbook) {
       if (preferredCardId && minion.cardId !== preferredCardId) continue;
       const definition = session.state.cards[minion.cardId];
-      if (definition?.cardType !== 'minion' || definition.manaCost > maximumMana) continue;
+      if (definition?.cardType !== 'minion'
+        || definition.manaCost === null
+        || definition.manaCost > maximumMana) continue;
       if ((['air', 'earth', 'fire', 'water'] as const)
         .every((element) => affinity[element] >= definition.thresholds[element])) {
         return { minionInstanceId: minion.instanceId, siteInstanceId: site.instanceId };
@@ -6442,6 +6444,7 @@ function earthOpponentOpening(session: GameSession): Readonly<{
         const definition = session.state.cards[card.cardId];
         return definition?.cardType === 'minion'
           && definition.attack >= 2
+          && definition.manaCost !== null
           && definition.manaCost <= 2
           && (['air', 'earth', 'fire', 'water'] as const)
             .every((element) => affinity[element] >= definition.thresholds[element]);
@@ -6711,6 +6714,7 @@ function findEarthDuelOpening(
         const definition = session.state.cards[card.cardId];
         return definition?.cardType === 'minion'
           && definition.defense <= 3
+          && definition.manaCost !== null
           && definition.manaCost <= 2
           && (['air', 'earth', 'fire', 'water'] as const)
             .every((element) => affinity[element] >= definition.thresholds[element]);
@@ -7066,6 +7070,7 @@ function findEarthBurrowingOpening(
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'minion'
         && definition.burrowing !== true
+        && definition.manaCost !== null
         && definition.manaCost <= 3
         && (['air', 'earth', 'fire', 'water'] as const)
           .every((element) => affinity[element] >= definition.thresholds[element]);
@@ -9932,6 +9937,7 @@ function findAirVoidwalkOpening(
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'minion'
         && definition.voidwalk !== true
+        && definition.manaCost !== null
         && definition.manaCost <= 2
         && definition.thresholds.air <= 2
         && definition.thresholds.earth === 0
@@ -10726,6 +10732,7 @@ function findAirSummoningOpening(
     return cardId !== input.movementMinion.stableId
       && cardId !== input.roamingMinion.stableId
       && definition?.cardType === 'minion'
+      && definition.manaCost !== null
       && definition.manaCost <= 5
       && (['air', 'earth', 'fire', 'water'] as const)
         .every((element) => affinity[element] >= definition.thresholds[element]);
@@ -10793,6 +10800,7 @@ function findFireOpening(
     const attacker = session.state.players.south.hand.spellbook.find(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'minion'
+        && definition.manaCost !== null
         && definition.manaCost <= 1
         && (['air', 'earth', 'fire', 'water'] as const)
           .every((element) => affinity[element] >= definition.thresholds[element]);
@@ -10939,6 +10947,7 @@ function findWaterOpening(
         const definition = session.state.cards[cardId];
         return definition?.cardType === 'minion'
           && definition.submerge !== true
+          && definition.manaCost !== null
           && definition.manaCost <= 3
           && definition.thresholds.air === 0
           && definition.thresholds.earth === 0
@@ -10958,6 +10967,7 @@ function findWaterOpening(
     const attacker = session.state.players.south.hand.spellbook.find((card) => {
       const definition = session.state.cards[card.cardId];
       return definition?.cardType === 'minion'
+        && definition.manaCost !== null
         && definition.manaCost <= 1
         && definition.attack >= 2
         && definition.defense <= 2
@@ -11029,6 +11039,7 @@ function findWaterSubmergeFreezeOpening(
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'minion'
         && definition.submerge !== true
+        && definition.manaCost !== null
         && definition.manaCost <= 3
         && definition.thresholds.air === 0
         && definition.thresholds.earth === 0

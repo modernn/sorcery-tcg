@@ -428,6 +428,8 @@ pub struct MinionFacts {
     pub deathrite_mill_sites: bool,
     pub deathrite_mill_spells: bool,
     pub defense: u8,
+    /// Printed elemental identity, independent of casting thresholds; absent means unspecified.
+    pub elements: Option<ElementSet>,
     pub demon: bool,
     pub dies_at_end_of_controller_turn: bool,
     pub does_not_untap_during_controllers_start_phase: bool,
@@ -451,7 +453,8 @@ pub struct MinionFacts {
     pub lance_count: Option<u8>,
     pub landbound: bool,
     pub lethal: bool,
-    pub mana_cost: u64,
+    /// Printed cost; explicit absence is admitted only for noncastable tokens.
+    pub mana_cost: Option<u64>,
     pub may_ranged_strike_once_during_basic_movement: bool,
     pub may_step_after_ranged_strike: bool,
     pub mortal: bool,
@@ -476,6 +479,8 @@ pub struct MinionFacts {
     pub strikes_first_while_attacking: bool,
     pub strikes_first_while_defending: bool,
     pub submerge: bool,
+    /// Complete printed subtypes when supplied, otherwise legacy predicates remain partial.
+    pub subtypes: Option<Box<[String]>>,
     pub summon_to_any_site: bool,
     pub tap_for_mana: Option<u8>,
     pub tap_to_damage_each_unit_at_adjacent_location: bool,
@@ -740,6 +745,72 @@ fn parse_elements(object: &Map<String, Value>, path: &str) -> Result<ElementSet,
     Ok(set)
 }
 
+/// Full subtype data is optional for legacy bindings, but explicit lists are canonical.
+fn parse_subtypes(
+    object: &Map<String, Value>,
+    path: &str,
+) -> Result<Option<Box<[String]>>, FactError> {
+    let Some(value) = object.get("subtypes") else {
+        return Ok(None);
+    };
+    let field = format!("{path}.subtypes");
+    let values = value
+        .as_array()
+        .filter(|values| values.len() <= 16)
+        .ok_or_else(|| FactError::new(&field, "must be an array of at most 16 subtypes"))?;
+    let mut names = Vec::<String>::with_capacity(values.len());
+    for value in values {
+        let name = value
+            .as_str()
+            .filter(|name| {
+                !name.is_empty()
+                    && name.len() <= 64
+                    && name.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}') == *name
+                    && !name.chars().any(char::is_control)
+            })
+            .ok_or_else(|| {
+                FactError::new(
+                    &field,
+                    "must contain nonempty subtype names of at most 64 bytes",
+                )
+            })?;
+        if names
+            .last()
+            .is_some_and(|previous| previous.as_str() >= name)
+        {
+            return Err(FactError::new(
+                &field,
+                "must contain unique subtypes in sorted order",
+            ));
+        }
+        names.push(name.to_owned());
+    }
+    Ok(Some(names.into_boxed_slice()))
+}
+
+fn subtype_predicate(
+    object: &Map<String, Value>,
+    subtypes: Option<&[String]>,
+    flag: &str,
+    name: &str,
+    path: &str,
+) -> Result<bool, FactError> {
+    let legacy = true_only(object, flag, path)?;
+    let Some(subtypes) = subtypes else {
+        return Ok(legacy);
+    };
+    let present = subtypes
+        .binary_search_by(|candidate| candidate.as_str().cmp(name))
+        .is_ok();
+    if object.contains_key(flag) && legacy != present {
+        return Err(FactError::new(
+            format!("{path}.{flag}"),
+            "must agree with explicit subtypes",
+        ));
+    }
+    Ok(present)
+}
+
 fn parse_reference(
     object: &Map<String, Value>,
     field: &str,
@@ -970,6 +1041,7 @@ const MINION_FIELDS: &[&str] = &[
     "deathriteMillSites",
     "deathriteMillSpells",
     "defense",
+    "elements",
     "demon",
     "diesAtEndOfControllerTurn",
     "doesNotUntapDuringControllersStartPhase",
@@ -1024,6 +1096,7 @@ const MINION_FIELDS: &[&str] = &[
     "strikesFirstWhileAttacking",
     "strikesFirstWhileDefending",
     "submerge",
+    "subtypes",
     "summonToAnySite",
     "takesLessDamage",
     "tapForMana",
@@ -1934,6 +2007,14 @@ fn parse_provides(object: &Map<String, Value>, path: &str) -> Result<Option<Elem
 )]
 fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, FactError> {
     reject_unknown(object, MINION_FIELDS, path)?;
+    let elements = object
+        .contains_key("elements")
+        .then(|| parse_elements(object, path))
+        .transpose()?;
+    let subtypes = parse_subtypes(object, path)?;
+    let demon = subtype_predicate(object, subtypes.as_deref(), "demon", "Demon", path)?;
+    let mortal = subtype_predicate(object, subtypes.as_deref(), "mortal", "Mortal", path)?;
+    let undead = subtype_predicate(object, subtypes.as_deref(), "undead", "Undead", path)?;
     let genesis_program = if let Some(value) = object.get("genesisProgram") {
         if object
             .keys()
@@ -2207,7 +2288,8 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
             MAX_COMBAT_STAT,
             path,
         )?),
-        demon: true_only(object, "demon", path)?,
+        demon,
+        elements,
         dies_at_end_of_controller_turn: true_only(object, "diesAtEndOfControllerTurn", path)?,
         does_not_untap_during_controllers_start_phase: true_only(
             object,
@@ -2234,10 +2316,18 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         lance_count: optional_bounded_integer(object, "lanceCount", 1, 3, path)?.map(compact_u8),
         landbound,
         lethal: optional_bool(object, "lethal", path)?,
-        mana_cost: required_nonnegative_integer(object, "manaCost", MAX_SAFE_INTEGER, path)?,
+        mana_cost: match object.get("manaCost") {
+            Some(Value::Null) if token => None,
+            _ => Some(required_nonnegative_integer(
+                object,
+                "manaCost",
+                MAX_SAFE_INTEGER,
+                path,
+            )?),
+        },
         may_ranged_strike_once_during_basic_movement,
         may_step_after_ranged_strike,
-        mortal: true_only(object, "mortal", path)?,
+        mortal,
         movement_bonus: optional_bounded_integer(object, "movementBonus", 1, 3, path)?
             .map(compact_u8),
         movement_restriction,
@@ -2278,6 +2368,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         strikes_first_while_attacking: optional_bool(object, "strikesFirstWhileAttacking", path)?,
         strikes_first_while_defending: optional_bool(object, "strikesFirstWhileDefending", path)?,
         submerge,
+        subtypes,
         summon_to_any_site,
         tap_for_mana: optional_bounded_integer(object, "tapForMana", 1, MAX_COMBAT_STAT, path)?
             .map(compact_u8),
@@ -2290,7 +2381,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         tap_to_shoot_projectile_damage,
         thresholds: parse_thresholds(object, path)?,
         token,
-        undead: true_only(object, "undead", path)?,
+        undead,
         untaps_at_end_of_controller_turn: true_only(object, "untapsAtEndOfControllerTurn", path)?,
         voidwalk,
         waterbound,

@@ -599,7 +599,9 @@ export type GameCardDefinition =
     lanceCount?: 1 | 2 | 3;
     landbound?: boolean;
     lethal?: boolean;
-    manaCost: number;
+    manaCost: number | null;
+    elements?: readonly GameElement[];
+    subtypes?: readonly string[];
     atEndOfControllerTurnControllerGainsLife?: number;
     atEndOfControllerTurnControllerLosesLife?: number;
     atEndOfControllerTurnDamageEachOtherUnitHere?: number;
@@ -1488,7 +1490,7 @@ const SUPPORTED_CARD_FIELDS = {
     genesisDisableSelfUntilDamaged genesisDrawSite genesisDrawSpells genesisEachPlayerControlledByPreviousPlayerNextTurn genesisGainControlOfTappedMinionsHereUntilThisLeaves genesisHealController
     genesisLoseControllerLife genesisMayDamageTargetAdjacentUnit genesisProgram genesisStrikeEachEnemyHere genesisUntapAdjacentAllies
     gainsPowerRangedAndSpellcasterAtopTower gainsStealthAtEndOfTurn
-    gainsStealthAtEndOfTurnIfNoEnemiesNearby immobile lanceCount landbound lethal
+    gainsStealthAtEndOfTurnIfNoEnemiesNearby immobile lanceCount landbound lethal elements subtypes
     manaCost mayRangedStrikeOnceDuringBasicMovement mayStepAfterRangedStrike demon mortal undead movementBonus
     movesOnlyForward movesOnlySideways mustAttackAUnitIfAble
     mustBeCastBurrowed mustBeCastSubmerged mustBeCastToOuterColumn mustBeCastToWaterSite
@@ -1576,6 +1578,43 @@ function rejectUnknownThresholds(
 ): void {
   const unknown = Object.keys(thresholds).find((field) => !elements.includes(field as GameElement));
   if (unknown) throw new RangeError(`${path}.thresholds.${unknown} is unsupported`);
+}
+
+function validateMinionMetadata(
+  card: Extract<GameCardDefinition, { cardType: 'minion' }>,
+  path: string,
+  elements: readonly GameElement[],
+): void {
+  const minionElements = card.elements;
+  if (minionElements !== undefined
+    && (!Array.isArray(minionElements)
+      || minionElements.some((element) => !elements.includes(element))
+      || new Set(minionElements).size !== minionElements.length
+      || minionElements.some((element, index) => elements.indexOf(element) <= elements.indexOf(minionElements[index - 1]!)))) {
+    throw new RangeError(`${path}.elements must contain unique elements in canonical order`);
+  }
+  const subtypes = card.subtypes;
+  if (subtypes === undefined) return;
+  if (!Array.isArray(subtypes) || subtypes.length > 16) {
+    throw new RangeError(`${path}.subtypes must contain at most 16 strings`);
+  }
+  if (subtypes.some((subtype) => typeof subtype !== 'string'
+    || subtype.length === 0
+    || subtype !== subtype.trim()
+    || Array.from(subtype).length > 64
+    || Buffer.byteLength(subtype, 'utf8') > 64
+    || /\p{Cc}/u.test(subtype))) {
+    throw new RangeError(`${path}.subtypes must contain trimmed strings of 1-64 characters/bytes without controls`);
+  }
+  if (subtypes.some((subtype, index) => index > 0
+    && Buffer.compare(Buffer.from(subtypes[index - 1]!, 'utf8'), Buffer.from(subtype, 'utf8')) >= 0)) {
+    throw new RangeError(`${path}.subtypes must be unique and sorted`);
+  }
+  for (const [field, subtype] of [['demon', 'Demon'], ['mortal', 'Mortal'], ['undead', 'Undead']] as const) {
+    if (card[field] === true && !subtypes.includes(subtype)) {
+      throw new RangeError(`${path}.${field} must agree with subtypes`);
+    }
+  }
 }
 
 export function validateCardDefinition(card: GameCardDefinition, path: string): void {
@@ -2882,12 +2921,23 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
   if (card.provides !== undefined && !elements.includes(card.provides)) {
     throw new RangeError(`${path}.provides must be a supported element`);
   }
-  for (const field of ['attack', 'defense', 'manaCost'] as const) {
+  validateMinionMetadata(card, path, elements);
+  for (const field of ['attack', 'defense'] as const) {
     if (!Number.isSafeInteger(card[field])
       || card[field] < 0
       || ((field === 'attack' || field === 'defense') && card[field] > MAX_COMBAT_STAT)) {
       throw new RangeError(`${path}.${field} must be a supported nonnegative safe integer`);
     }
+  }
+  if (!Object.prototype.hasOwnProperty.call(card, 'manaCost')) {
+    throw new RangeError(`${path}.manaCost must be defined`);
+  }
+  if (card.manaCost === null) {
+    if (card.token !== true) {
+      throw new RangeError(`${path}.manaCost may be null only for token minions`);
+    }
+  } else if (!Number.isSafeInteger(card.manaCost) || card.manaCost < 0) {
+    throw new RangeError(`${path}.manaCost must be a supported nonnegative safe integer or null for token minions`);
   }
   rejectUnknownThresholds(card.thresholds, path, elements);
   for (const element of elements) {
@@ -3437,6 +3487,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.diesAtEndOfControllerTurn === true
               ? { diesAtEndOfControllerTurn: true as const }
               : {}),
+            ...(card.elements !== undefined ? { elements: [...card.elements] } : {}),
             ...(card.discardRandomCardInsteadOfMana === true
               ? { discardRandomCardInsteadOfMana: true as const }
               : {}),
@@ -3526,6 +3577,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.siteProvidesNoThreshold === true
               ? { siteProvidesNoThreshold: true as const }
               : {}),
+            ...(card.subtypes !== undefined ? { subtypes: [...card.subtypes] } : {}),
             ...(card.spellcaster === true ? { spellcaster: true } : {}),
             ...(card.stealth === true ? { stealth: true } : {}),
             ...(card.strikesFirstWhileAttacking === true ? { strikesFirstWhileAttacking: true } : {}),
