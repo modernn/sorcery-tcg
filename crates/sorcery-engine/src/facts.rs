@@ -1498,23 +1498,17 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
             ));
         }
         if program.effects.iter().any(|effect| {
-            matches!(
-                effect,
-                crate::ability::Effect::Damage {
-                    recipients: crate::ability::UnitSet::OtherUnitsHere,
-                    ..
-                } | crate::ability::Effect::Untap {
-                    recipients: crate::ability::UnitSet::OtherUnitsHere
-                } | crate::ability::Effect::Grant {
-                    recipients: crate::ability::UnitSet::OtherUnitsHere,
-                    ..
-                }
-            )
+            let recipients = match effect {
+                crate::ability::Effect::Damage { recipients, .. }
+                | crate::ability::Effect::Untap { recipients }
+                | crate::ability::Effect::GiveStealth { recipients }
+                | crate::ability::Effect::Grant { recipients, .. } => Some(recipients),
+                _ => None,
+            };
+            matches!(recipients, Some(crate::ability::UnitSet::Query(cohort)) if cohort.exclude_source)
         }) {
-            return Err(FactError::new(
-                format!("{path}.effectProgram"),
-                "other-units-here requires a realm unit source",
-            ));
+            return Err(FactError::new(format!("{path}.effectProgram"),
+                "excludeSource requires a realm unit source"));
         }
         Some(std::sync::Arc::new(program))
     } else {

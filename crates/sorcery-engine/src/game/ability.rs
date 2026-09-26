@@ -3,7 +3,8 @@
 use std::sync::Arc;
 
 pub(super) use crate::ability::{
-    AbilityProgram, Effect, SelectionSpec, SpatialRelation, UnitChoiceSpec, UnitSet,
+    AbilityProgram, ControllerRelation, Effect, SelectionSpec, SpatialRelation, UnitArea,
+    UnitChoiceSpec, UnitCohort, UnitSet,
 };
 use crate::ability::{EffectDuration, TemporaryModifierKind};
 use crate::action::DeckZone;
@@ -116,6 +117,8 @@ fn ally_grant(
     })
 }
 
+// Keep the finite legacy-to-program lowering together; new bindings author programs directly.
+#[allow(clippy::too_many_lines)]
 fn compile_magic(facts: &crate::facts::MagicFacts) -> Option<Arc<AbilityProgram>> {
     let effect = match &facts.effect {
         MagicEffect::Program(program) => return Some(Arc::clone(program)),
@@ -175,6 +178,33 @@ fn compile_magic(facts: &crate::facts::MagicFacts) -> Option<Arc<AbilityProgram>
                 ability_with_selection(selection, [damage])
             });
         }
+        MagicEffect::GrantStealthToTargetMinion => {
+            return Some(ability_with_selection(
+                Some(SelectionSpec::Unit {
+                    kind: Some(super::UnitKind::Minion),
+                    relation: SpatialRelation::Anywhere,
+                }),
+                [Effect::GiveStealth {
+                    recipients: UnitSet::Target,
+                }],
+            ));
+        }
+        MagicEffect::GrantStealthToAlliedMinionsThenDrawSpell => {
+            return Some(ability([
+                Effect::GiveStealth {
+                    recipients: UnitSet::Query(UnitCohort {
+                        area: UnitArea::Realm { region: None },
+                        kind: Some(super::UnitKind::Minion),
+                        controller: ControllerRelation::Allied,
+                        exclude_source: false,
+                    }),
+                },
+                Effect::Draw {
+                    zone: DeckZone::Spellbook,
+                    count: 1,
+                },
+            ]));
+        }
         MagicEffect::UntapTargetMinion => {
             return Some(ability_with_selection(
                 Some(SelectionSpec::Unit {
@@ -195,11 +225,23 @@ fn compile_magic(facts: &crate::facts::MagicFacts) -> Option<Arc<AbilityProgram>
             count: *count,
         },
         MagicEffect::DamageEachAbovegroundMinionOne => Effect::Damage {
-            recipients: UnitSet::SurfaceMinions,
+            recipients: UnitSet::Query(UnitCohort {
+                area: UnitArea::Realm {
+                    region: Some(super::Region::Surface),
+                },
+                kind: Some(super::UnitKind::Minion),
+                controller: ControllerRelation::Any,
+                exclude_source: false,
+            }),
             amount: 1,
         },
         MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(amount) => Effect::Damage {
-            recipients: UnitSet::Location,
+            recipients: UnitSet::Query(UnitCohort {
+                area: UnitArea::Location,
+                kind: None,
+                controller: ControllerRelation::Any,
+                exclude_source: false,
+            }),
             amount: u16::from(*amount),
         },
         _ => return None,
@@ -220,7 +262,12 @@ fn compile_minion_activation(facts: &MinionFacts) -> Option<Arc<AbilityProgram>>
                 relation: SpatialRelation::Adjacent,
             }),
             [Effect::Damage {
-                recipients: UnitSet::Location,
+                recipients: UnitSet::Query(UnitCohort {
+                    area: UnitArea::Location,
+                    kind: None,
+                    controller: ControllerRelation::Any,
+                    exclude_source: false,
+                }),
                 amount: 2,
             }],
         )
@@ -259,7 +306,12 @@ fn compile_genesis(facts: &MinionFacts) -> Option<Arc<AbilityProgram>> {
     }
     if facts.genesis_damage_each_other_unit_here {
         return Some(ability([Effect::Damage {
-            recipients: UnitSet::OtherUnitsHere,
+            recipients: UnitSet::Query(UnitCohort {
+                area: UnitArea::Source,
+                kind: None,
+                controller: ControllerRelation::Any,
+                exclude_source: true,
+            }),
             amount: 1,
         }]));
     }

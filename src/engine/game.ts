@@ -43,7 +43,16 @@ type EffectProgramLocationSelection = Readonly<{
   relation: EffectProgramRelation;
 }>;
 type EffectProgramSelection = EffectProgramUnitSelection | EffectProgramLocationSelection;
-type EffectProgramRecipients = 'target' | 'chosen' | 'location' | 'other-units-here' | 'surface-minions';
+type EffectProgramUnitArea = 'source' | 'location' | Readonly<{
+  realm: Readonly<{ region?: GameRegion | null }>;
+}>;
+type EffectProgramUnitCohort = Readonly<{
+  area: EffectProgramUnitArea;
+  kind?: 'avatar' | 'minion' | null;
+  controller?: 'any' | 'allied' | 'enemy';
+  excludeSource?: boolean;
+}>;
+type EffectProgramRecipients = 'target' | 'chosen' | Readonly<{ query: EffectProgramUnitCohort }>;
 type EffectDuration = 'this-turn' | 'until-your-next-turn';
 type EffectProgramModifier =
   | 'airborne' | 'charge' | 'first-strike' | 'lethal' | 'next-strike-double'
@@ -66,6 +75,7 @@ type EffectProgramEffect =
     recipients: EffectProgramRecipients;
     duration: EffectDuration;
   }>
+  | Readonly<{ op: 'give-stealth'; recipients: EffectProgramRecipients }>
   | Readonly<{ op: 'draw-card' }>;
 type EffectProgram = Readonly<{
   effects: readonly EffectProgramEffect[];

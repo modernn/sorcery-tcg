@@ -56,6 +56,19 @@ function input(effectProgram: NonNullable<Extract<GameCardDefinition, { cardType
 
 test('ordered effect programs preserve selection, operations, and nested relation copies', () => {
   const measured = { measured: 2 };
+  const cohort: { query: {
+    area: 'source';
+    controller: 'allied';
+    excludeSource: boolean;
+    kind: 'avatar' | 'minion';
+  } } = {
+    query: {
+      area: 'source',
+      controller: 'allied',
+      excludeSource: true,
+      kind: 'minion',
+    },
+  };
   const effects = [
     {
       alliedOnly: true,
@@ -71,6 +84,7 @@ test('ordered effect programs preserve selection, operations, and nested relatio
       op: 'grant' as const,
       recipients: 'chosen' as const,
     },
+    { op: 'give-stealth' as const, recipients: cohort },
     { op: 'draw-card' as const },
   ];
   const effectProgram = {
@@ -80,6 +94,8 @@ test('ordered effect programs preserve selection, operations, and nested relatio
   };
   const manifest = createGameManifest(input(effectProgram));
   measured.measured = 99;
+  cohort.query.excludeSource = false;
+  cohort.query.kind = 'avatar';
   effects.push({ op: 'draw-card' });
 
   const stored = manifest.cards['north-spell-1'];
@@ -90,8 +106,19 @@ test('ordered effect programs preserve selection, operations, and nested relatio
     relation: { measured: 2 },
     unitKind: 'minion',
   });
-  assert.equal(stored.effectProgram.effects.length, 3);
+  assert.equal(stored.effectProgram.effects.length, 4);
   assert.deepEqual(stored.effectProgram.effects[1], effects[1]);
+  assert.deepEqual(stored.effectProgram.effects[2], {
+    op: 'give-stealth',
+    recipients: {
+      query: {
+        area: 'source',
+        controller: 'allied',
+        excludeSource: true,
+        kind: 'minion',
+      },
+    },
+  });
   assert.deepEqual(Object.keys(stored).sort(), ['cardType', 'effectProgram', 'manaCost', 'thresholds']);
 });
 

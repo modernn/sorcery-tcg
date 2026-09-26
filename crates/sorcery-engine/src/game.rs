@@ -7005,7 +7005,6 @@ impl Game {
             MagicEffect::HealController(_)
             | MagicEffect::DrawSiteThenMayPlayLandSite
             | MagicEffect::DrawSiteThenMayPlayWaterSite
-            | MagicEffect::GrantStealthToAlliedMinionsThenDrawSpell
             | MagicEffect::SummonRandomMinionFromAnyCemetery
             | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => {
                 vec![MagicChoice::default()]
@@ -7280,7 +7279,6 @@ impl Game {
             | MagicEffect::ReturnTargetMinionToOwnerHand
             | MagicEffect::TapTargetMinion
             | MagicEffect::GrantAirborneToTargetMinion
-            | MagicEffect::GrantStealthToTargetMinion
             | MagicEffect::GrantWardToTargetMinion
             | MagicEffect::HealTargetMinion(_) => {
                 self.targeted_magic_choices(seat, caster_instance_id, false, true)?
@@ -7477,6 +7475,8 @@ impl Game {
                 targets
             }
             MagicEffect::Program(_)
+            | MagicEffect::GrantStealthToTargetMinion
+            | MagicEffect::GrantStealthToAlliedMinionsThenDrawSpell
             | MagicEffect::GrantChargeToAllyThisTurn
             | MagicEffect::GrantFirstStrikeToAllyThisTurn
             | MagicEffect::GrantMovementOneToAllyThisTurnThenDrawSpell
@@ -20000,35 +20000,6 @@ impl Game {
                     })
                 });
             }
-            MagicEffect::GrantStealthToTargetMinion => {
-                let Some(UnitTarget::Minion {
-                    instance_id,
-                    seat: target_seat,
-                }) = target
-                else {
-                    return Err(GameError::IllegalAction);
-                };
-                self.apply_grant_stealth_minion(
-                    instance_id,
-                    *target_seat,
-                    card_instance_id,
-                    outcomes,
-                )?;
-            }
-            MagicEffect::GrantStealthToAlliedMinionsThenDrawSpell => {
-                let mut allies = self
-                    .position
-                    .units
-                    .iter()
-                    .filter(|unit| unit.controller == seat)
-                    .map(|unit| unit.card.instance_id.clone())
-                    .collect::<Vec<_>>();
-                allies.sort_unstable();
-                for instance_id in &allies {
-                    self.apply_grant_stealth_minion(instance_id, seat, card_instance_id, outcomes)?;
-                }
-                self.apply_genesis_draws(seat, card_instance_id, DeckZone::Spellbook, 1, outcomes);
-            }
             MagicEffect::GrantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell => {
                 if let Some(ally) = ally.as_ref() {
                     let UnitTarget::Minion {
@@ -21578,6 +21549,8 @@ impl Game {
             }
             // Compiled entries have already transferred ownership to the common runner.
             MagicEffect::Program(_)
+            | MagicEffect::GrantStealthToTargetMinion
+            | MagicEffect::GrantStealthToAlliedMinionsThenDrawSpell
             | MagicEffect::GrantChargeToAllyThisTurn
             | MagicEffect::GrantFirstStrikeToAllyThisTurn
             | MagicEffect::GrantMovementOneToAllyThisTurnThenDrawSpell

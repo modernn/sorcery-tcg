@@ -410,6 +410,36 @@ declaration and must not be approximated by independent `draw-card` instructions
 Authored Silence and next-strike replacements remain rejected. Airborne, Lethal, and
 Ranged grants require minion-only recipients.
 
+Effect recipients are a declared `target`, an ordinary `chosen` unit, or a bounded
+`query`. Queries compose area, unit kind, controller relation, and source exclusion:
+
+```json
+{
+  "op": "give-stealth",
+  "recipients": {
+    "query": {
+      "area": {"realm": {}},
+      "kind": "minion",
+      "controller": "allied"
+    }
+  }
+}
+```
+
+The area can be the source footprint and region (`source`), a declared `location`,
+or the entire `realm` with an optional region restriction. Controller relations use
+the effect's source controller. Query recipients use the same spatial enumeration
+as the engine's other unit queries, include large units once, and resolve in canonical
+identity order. Source exclusion checks the original realm incarnation. Untargeted
+queries include Stealth and Warded units; the chosen effect determines how protection
+applies. Declared targets retain their separate targeting checks.
+
+`give-stealth` requires minions and uses the existing Stealth lifecycle, including its
+normal consumption rules, rather than adding a timed modifier. The legacy targeted
+Stealth and allied-minions-Stealth-plus-draw inputs now compile into this operation.
+Old authored area shortcuts (`location`, `other-units-here`, `surface-minions`) must
+be expressed as queries; historical manifests still require their original build.
+
 Each `grant` specifies `duration: "this-turn"` or `duration: "until-your-next-turn"`.
 The latter records the source controller at resolution, independently of the recipient
 or the later location of the source card. Shared modifier storage retains separate

@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use super::super::ability::{AbilityProgram, Effect, SelectionSpec, SpatialRelation, UnitSet};
+use super::super::ability::{
+    AbilityProgram, ControllerRelation, Effect, SelectionSpec, SpatialRelation, UnitArea,
+    UnitCohort, UnitSet,
+};
 use super::super::{
     ActionDescriptor, CardId, CardInstance, CardSource, Cell, Game, GameError, OutcomeLog, Phase,
     Region, Seat, SummonPlacement, UnitDamageSource, UnitPosition, UnitTarget, seat_index,
@@ -12,6 +15,19 @@ use crate::action::DeckZone;
 use crate::board::Location;
 use crate::canonical::identity_hash;
 use crate::synthetic::selfplay_manifest_with;
+
+const OTHER_UNITS_HERE: UnitSet = UnitSet::Query(UnitCohort {
+    area: UnitArea::Source,
+    kind: None,
+    controller: ControllerRelation::Any,
+    exclude_source: true,
+});
+const AT_LOCATION: UnitSet = UnitSet::Query(UnitCohort {
+    area: UnitArea::Location,
+    kind: None,
+    controller: ControllerRelation::Any,
+    exclude_source: false,
+});
 
 fn fixture_game() -> Game {
     let manifest = selfplay_manifest_with(401, |manifest| {
@@ -117,15 +133,19 @@ fn install(game: &mut Game, effects: Vec<Effect>) -> CardId {
     let selection = effects.iter().find_map(|effect| match effect {
         Effect::Damage { recipients, .. }
         | Effect::Untap { recipients }
-        | Effect::Grant { recipients, .. } => match recipients {
+        | Effect::Grant { recipients, .. }
+        | Effect::GiveStealth { recipients } => match recipients {
             UnitSet::Target => Some(SelectionSpec::Unit {
                 kind: None,
                 relation: SpatialRelation::Anywhere,
             }),
-            UnitSet::Location => Some(SelectionSpec::Location {
+            UnitSet::Query(UnitCohort {
+                area: UnitArea::Location,
+                ..
+            }) => Some(SelectionSpec::Location {
                 relation: SpatialRelation::Anywhere,
             }),
-            UnitSet::OtherUnitsHere | UnitSet::SurfaceMinions | UnitSet::Chosen => None,
+            UnitSet::Query(_) | UnitSet::Chosen => None,
         },
         Effect::Draw { .. } | Effect::DrawCard | Effect::ChooseUnit(_) => None,
     });
@@ -749,7 +769,7 @@ fn damage_cohort_orders_deathrites_then_resumes_draw_and_magic_cleanup() {
         &mut game,
         vec![
             Effect::Damage {
-                recipients: UnitSet::OtherUnitsHere,
+                recipients: OTHER_UNITS_HERE,
                 amount: 1,
             },
             Effect::Draw {
@@ -938,7 +958,7 @@ fn other_units_query_includes_a_new_incarnation_of_the_old_source() {
     let magic = install(
         &mut game,
         vec![Effect::Damage {
-            recipients: UnitSet::OtherUnitsHere,
+            recipients: OTHER_UNITS_HERE,
             amount: 1,
         }],
     );
@@ -947,14 +967,12 @@ fn other_units_query_includes_a_new_incarnation_of_the_old_source() {
         .unwrap();
     game.start_effect_frame(&mut frame, &mut OutcomeLog::Ignore);
     assert!(
-        game.effect_recipients(&frame, UnitSet::OtherUnitsHere)
+        game.effect_recipients(&frame, OTHER_UNITS_HERE)
             .unwrap()
             .is_empty()
     );
     game.position.units[0].card.enter_realm().unwrap();
-    let recipients = game
-        .effect_recipients(&frame, UnitSet::OtherUnitsHere)
-        .unwrap();
+    let recipients = game.effect_recipients(&frame, OTHER_UNITS_HERE).unwrap();
     assert_eq!(recipients.len(), 1);
     assert_eq!(recipients[0].0, instance_id);
 }
@@ -1249,7 +1267,7 @@ fn site_ward_protects_the_target_location_but_preserves_an_independent_draw() {
         &mut game,
         vec![
             Effect::Damage {
-                recipients: UnitSet::Location,
+                recipients: AT_LOCATION,
                 amount: 1,
             },
             Effect::Draw {
@@ -1623,4 +1641,115 @@ fn empty_second_choice_does_not_reuse_first_chosen_unit() {
     assert!(modifiers.has(TemporaryModifierKind::Movement));
     assert!(!modifiers.has(TemporaryModifierKind::Power));
     assert!(game.position.pending_ability_choice.is_none());
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn authored_cohorts_share_controller_region_footprint_and_source_filters() {
+    let mut game = fixture_game();
+    let ally = minion(&game, "south-spell-3", Seat::North, "cohort-ally", false);
+    let mut lower = minion(&game, "south-spell-3", Seat::North, "cohort-lower", false);
+    lower.region = Region::Underwater;
+    let mut void = minion(&game, "south-spell-3", Seat::North, "cohort-void", false);
+    void.region = Region::Void;
+    let mut remote = minion(&game, "south-spell-3", Seat::North, "cohort-remote", false);
+    remote.location = Cell::parse("A1").unwrap();
+    let mut enemy = minion(&game, "south-spell-3", Seat::South, "cohort-large", false);
+    enemy.occupied_cells = Some(["C3", "C4", "D3", "D4"].map(|c| Cell::parse(c).unwrap()));
+    enemy.warded = true;
+    enemy.stealthed = true;
+    let ids = [&ally, &lower, &void, &remote, &enemy].map(|u| u.card.instance_id.clone());
+    game.position.players[0].avatar.location = Cell::parse("C3").unwrap();
+    let avatar_id = game.position.players[0].avatar.card.instance_id.clone();
+    let mut effect_source = source_for_unit(
+        &ally,
+        Seat::North,
+        0,
+        Some(RealmReference::from_card(&ally.card)),
+    );
+    effect_source.cells.push(Cell::parse("C4").unwrap());
+    game.position.units = vec![enemy, lower, remote, ally, void];
+    let all_allies = UnitSet::Query(UnitCohort {
+        area: UnitArea::Realm { region: None },
+        kind: Some(super::super::UnitKind::Minion),
+        controller: ControllerRelation::Allied,
+        exclude_source: false,
+    });
+    let magic = install(
+        &mut game,
+        vec![Effect::GiveStealth {
+            recipients: all_allies,
+        }],
+    );
+    let frame = game
+        .effect_frame(magic, AbilityEntry::Magic, effect_source, None, None, None)
+        .unwrap();
+    let cases = [
+        (all_allies, ids[..4].to_vec()),
+        (
+            UnitSet::Query(UnitCohort {
+                area: UnitArea::Source,
+                kind: None,
+                controller: ControllerRelation::Any,
+                exclude_source: true,
+            }),
+            vec![avatar_id, ids[4].clone()],
+        ),
+        (
+            UnitSet::Query(UnitCohort {
+                area: UnitArea::Source,
+                kind: Some(super::super::UnitKind::Minion),
+                controller: ControllerRelation::Enemy,
+                exclude_source: false,
+            }),
+            vec![ids[4].clone()],
+        ),
+        (
+            UnitSet::Query(UnitCohort {
+                area: UnitArea::Realm {
+                    region: Some(Region::Surface),
+                },
+                kind: Some(super::super::UnitKind::Minion),
+                controller: ControllerRelation::Any,
+                exclude_source: false,
+            }),
+            vec![ids[0].clone(), ids[3].clone(), ids[4].clone()],
+        ),
+    ];
+    for (set, mut expected) in cases {
+        expected.sort_unstable();
+        assert_eq!(
+            game.effect_recipients(&frame, set)
+                .unwrap()
+                .into_iter()
+                .map(|r| r.0)
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+    let mut events = Vec::new();
+    game.run_effect_frame(frame, &mut OutcomeLog::Record(&mut events))
+        .unwrap();
+    assert!(game.position.units.iter().all(|u| u.stealthed));
+    assert!(
+        game.position
+            .units
+            .iter()
+            .find(|u| u.controller == Seat::South)
+            .unwrap()
+            .warded
+    );
+    let mut emitted = events
+        .iter()
+        .filter(|(kind, _)| kind == "minion-stealthed")
+        .map(|(_, payload)| payload["instanceId"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    let mut expected = ids[..4]
+        .iter()
+        .map(|id| id.as_str().to_owned())
+        .collect::<Vec<_>>();
+    expected.sort_unstable();
+    assert_eq!(emitted, expected);
+    emitted.dedup();
+    assert_eq!(emitted.len(), 4);
 }

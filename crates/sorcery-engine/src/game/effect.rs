@@ -399,33 +399,44 @@ impl Game {
                     Vec::new()
                 })
             }
-            UnitSet::Location => {
-                let binding = frame.location.as_ref().ok_or(GameError::IllegalAction)?;
-                Ok(if binding.state == BindingState::Active {
-                    self.units_at_location(binding.location)
-                } else {
-                    Vec::new()
-                })
+            UnitSet::Query(cohort) => {
+                let (region, cells) = match cohort.area {
+                    super::ability::UnitArea::Realm { region } => (region, None),
+                    super::ability::UnitArea::Source => (
+                        Some(frame.source.region),
+                        Some(frame.source.cells.as_slice()),
+                    ),
+                    super::ability::UnitArea::Location => {
+                        let binding = frame.location.as_ref().ok_or(GameError::IllegalAction)?;
+                        if binding.state != BindingState::Active {
+                            return Ok(Vec::new());
+                        }
+                        (
+                            Some(binding.location.region),
+                            Some(std::slice::from_ref(&binding.location.cell)),
+                        )
+                    }
+                };
+                let controller = match cohort.controller {
+                    super::ability::ControllerRelation::Any => None,
+                    super::ability::ControllerRelation::Allied => Some(frame.source.controller),
+                    super::ability::ControllerRelation::Enemy => {
+                        Some(super::other_seat(frame.source.controller))
+                    }
+                };
+                Ok(self.query_units(UnitQuery {
+                    region,
+                    cells,
+                    kind: cohort.kind,
+                    controller,
+                    exclude: cohort
+                        .exclude_source
+                        .then_some(frame.source.realm.as_ref())
+                        .flatten()
+                        .filter(|reference| self.realm_reference_exists(reference))
+                        .map(|reference| &reference.instance_id),
+                }))
             }
-            UnitSet::OtherUnitsHere => Ok(self.query_units(UnitQuery {
-                region: Some(frame.source.region),
-                cells: Some(&frame.source.cells),
-                kind: None,
-                controller: None,
-                exclude: frame
-                    .source
-                    .realm
-                    .as_ref()
-                    .filter(|reference| self.realm_reference_exists(reference))
-                    .map(|reference| &reference.instance_id),
-            })),
-            UnitSet::SurfaceMinions => Ok(self.query_units(UnitQuery {
-                region: Some(Region::Surface),
-                cells: None,
-                kind: Some(UnitKind::Minion),
-                controller: None,
-                exclude: None,
-            })),
         }
     }
 
@@ -560,6 +571,19 @@ impl Game {
                                 outcomes,
                             )?,
                         }
+                    }
+                }
+                Effect::GiveStealth { recipients } => {
+                    for (id, kind, seat) in self.effect_recipients(&frame, recipients)? {
+                        if kind != UnitKind::Minion {
+                            return Err(GameError::IllegalAction);
+                        }
+                        self.apply_grant_stealth_minion(
+                            &id,
+                            seat,
+                            &frame.source.instance_id,
+                            outcomes,
+                        )?;
                     }
                 }
                 Effect::DrawCard => {

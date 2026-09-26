@@ -71,6 +71,14 @@ impl AbilityProgram {
                         &path,
                     )?;
                 }
+                Effect::GiveStealth { recipients } => {
+                    self.validate_recipients(*recipients, previous_choice, &path)?;
+                    if !minion_only(*recipients, self.selection, previous_choice) {
+                        return Err(format!(
+                            "{path}.recipients requires a minion-only recipient"
+                        ));
+                    }
+                }
             }
         }
         Ok(())
@@ -88,19 +96,21 @@ impl AbilityProgram {
                     return Err(format!("{path}.recipients target requires unit selection"));
                 }
             }
-            UnitSet::Location => {
-                if !matches!(self.selection, Some(SelectionSpec::Location { .. })) {
-                    return Err(format!(
-                        "{path}.recipients location requires location selection"
-                    ));
-                }
-            }
             UnitSet::Chosen if previous_choice.is_none() => {
                 return Err(format!(
                     "{path}.recipients chosen requires a preceding choose-unit"
                 ));
             }
-            UnitSet::Chosen | UnitSet::OtherUnitsHere | UnitSet::SurfaceMinions => {}
+            UnitSet::Chosen => {}
+            UnitSet::Query(cohort) => {
+                if matches!(cohort.area, UnitArea::Location)
+                    && !matches!(self.selection, Some(SelectionSpec::Location { .. }))
+                {
+                    return Err(format!(
+                        "{path}.recipients query location requires location selection"
+                    ));
+                }
+            }
         }
         Ok(())
     }
@@ -152,7 +162,6 @@ fn minion_only(
     previous_choice: Option<UnitChoiceSpec>,
 ) -> bool {
     match recipients {
-        UnitSet::SurfaceMinions => true,
         UnitSet::Chosen => {
             previous_choice.is_some_and(|choice| choice.kind == Some(UnitKind::Minion))
         }
@@ -163,7 +172,7 @@ fn minion_only(
                 ..
             })
         ),
-        UnitSet::Location | UnitSet::OtherUnitsHere => false,
+        UnitSet::Query(cohort) => cohort.kind == Some(UnitKind::Minion),
     }
 }
 
@@ -259,20 +268,62 @@ pub enum SpatialRelation {
     Measured(u8),
 }
 
+/// The area from which a query derives its units.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum UnitArea {
+    /// The source unit's location, footprint, and region.
+    Source,
+    /// The active declared location.
+    Location,
+    /// The whole realm, optionally restricted to one region.
+    Realm {
+        /// The region to include, or every region when absent.
+        #[serde(default)]
+        region: Option<crate::board::Region>,
+    },
+}
+
+/// A controller relation used by a unit query.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ControllerRelation {
+    /// Either controller.
+    #[default]
+    Any,
+    /// The source controller's units.
+    Allied,
+    /// Units controlled by the opposing seat.
+    Enemy,
+}
+
+/// A bounded query describing a recipient cohort.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UnitCohort {
+    /// The area from which units are selected.
+    pub area: UnitArea,
+    /// Restricts the query to a unit kind, when present.
+    #[serde(default)]
+    pub kind: Option<UnitKind>,
+    /// Restricts the query by controller.
+    #[serde(default)]
+    pub controller: ControllerRelation,
+    /// Excludes the source unit from the result.
+    #[serde(default)]
+    pub exclude_source: bool,
+}
+
 /// A recipient cohort for an effect.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum UnitSet {
     /// The declared unit target.
     Target,
     /// The unit selected by a preceding ordinary choice.
     Chosen,
-    /// Every unit at the declared location.
-    Location,
-    /// Every other unit at the source location.
-    OtherUnitsHere,
-    /// Every surface minion in the realm.
-    SurfaceMinions,
+    /// Units matching a bounded query.
+    Query(UnitCohort),
 }
 
 /// Temporary keyword modifiers that an authored program may grant.
@@ -347,6 +398,11 @@ pub enum Effect {
     },
     /// Draws one card from either deck according to runtime rules.
     DrawCard,
+    /// Grants stealth to a minion recipient cohort.
+    GiveStealth {
+        /// The cohort receiving stealth.
+        recipients: UnitSet,
+    },
 }
 
 #[cfg(test)]
@@ -377,7 +433,15 @@ mod tests {
     #[test]
     fn grant_requires_an_explicit_supported_duration() {
         let grant = serde_json::json!({
-            "op": "grant", "recipients": "surface-minions", "modifier": "power", "amount": 1,
+            "op": "grant",
+            "recipients": {"query": {
+                "area": {"realm": {"region": null}},
+                "kind": "minion",
+                "controller": "any",
+                "excludeSource": false,
+            }},
+            "modifier": "power",
+            "amount": 1,
         });
         assert!(serde_json::from_value::<Effect>(grant.clone()).is_err());
         for duration in ["this-turn", "until-your-next-turn"] {
@@ -505,7 +569,12 @@ mod tests {
             selection: None,
             optional_selection: false,
             effects: vec![Effect::Grant {
-                recipients: UnitSet::SurfaceMinions,
+                recipients: UnitSet::Query(UnitCohort {
+                    area: UnitArea::Realm { region: None },
+                    kind: Some(UnitKind::Minion),
+                    controller: ControllerRelation::Any,
+                    exclude_source: false,
+                }),
                 modifier: TemporaryModifierKind::Silence,
                 amount: 1,
                 duration: EffectDuration::ThisTurn,
@@ -518,5 +587,101 @@ mod tests {
                 .unwrap_err()
                 .contains("silence is unsupported")
         );
+    }
+
+    #[test]
+    fn cohorts_round_trip_and_reject_unknown_or_invalid_scopes() {
+        let value = serde_json::json!({
+            "query": {
+                "area": {"realm": {"region": "underwater"}},
+                "kind": "minion",
+                "controller": "enemy",
+                "excludeSource": true,
+            }
+        });
+        let set: UnitSet = serde_json::from_value(value.clone()).expect("valid cohort");
+        assert_eq!(serde_json::to_value(set).expect("serialize cohort"), value);
+
+        let unknown = serde_json::json!({
+            "query": {"area": "source", "unexpected": true}
+        });
+        assert!(serde_json::from_value::<UnitSet>(unknown).is_err());
+
+        let bad_scope = serde_json::json!({
+            "query": {"area": "bogus"}
+        });
+        assert!(serde_json::from_value::<UnitSet>(bad_scope).is_err());
+    }
+
+    #[test]
+    fn location_cohorts_require_location_selection() {
+        let location = UnitSet::Query(UnitCohort {
+            area: UnitArea::Location,
+            kind: None,
+            controller: ControllerRelation::Any,
+            exclude_source: false,
+        });
+        let program = AbilityProgram {
+            selection: None,
+            optional_selection: false,
+            effects: vec![Effect::Untap {
+                recipients: location,
+            }]
+            .into_boxed_slice(),
+        };
+        assert!(
+            program
+                .validate()
+                .unwrap_err()
+                .contains("location selection")
+        );
+
+        let realm = UnitSet::Query(UnitCohort {
+            area: UnitArea::Realm { region: None },
+            kind: None,
+            controller: ControllerRelation::Any,
+            exclude_source: false,
+        });
+        let valid = AbilityProgram {
+            selection: None,
+            optional_selection: false,
+            effects: vec![Effect::Untap { recipients: realm }].into_boxed_slice(),
+        };
+        valid
+            .validate()
+            .expect("realm query needs no declared location");
+    }
+
+    #[test]
+    fn stealth_requires_minion_only_recipients() {
+        let avatar = AbilityProgram {
+            selection: Some(SelectionSpec::Unit {
+                kind: Some(UnitKind::Avatar),
+                relation: SpatialRelation::Anywhere,
+            }),
+            optional_selection: false,
+            effects: vec![Effect::GiveStealth {
+                recipients: UnitSet::Target,
+            }]
+            .into_boxed_slice(),
+        };
+        assert!(avatar.validate().unwrap_err().contains("minion-only"));
+
+        let minion = AbilityProgram {
+            selection: None,
+            optional_selection: false,
+            effects: vec![Effect::GiveStealth {
+                recipients: UnitSet::Query(UnitCohort {
+                    area: UnitArea::Realm { region: None },
+                    kind: Some(UnitKind::Minion),
+                    controller: ControllerRelation::Allied,
+                    exclude_source: true,
+                }),
+            }]
+            .into_boxed_slice(),
+        };
+        minion
+            .validate()
+            .expect("minion cohort can receive stealth");
     }
 }
