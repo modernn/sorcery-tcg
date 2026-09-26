@@ -58,6 +58,26 @@ const input = {
   opponent: { avatar: 'avatar', atlas: ['site', 'site', 'site'], spellbook: ['b', 'b', 'b'] },
 };
 
+test('preset ingestion rejects changed printed scalars and null-to-zero token costs', () => {
+  const base = presets[0]!;
+  for (const [cardId, changed, field] of [
+    ['a', { ...facts.a!, attack: 9 }, 'attack'],
+    ['a', { ...facts.a!, manaCost: 7 }, 'manaCost'],
+    ['a', { ...facts.a!, thresholds: { ...thresholds, earth: 1 } }, 'thresholds'],
+    ['avatar', { ...facts.avatar!, life: 99 }, 'life'],
+    ['site', { ...facts.site!, elements: ['water'] }, 'elements'],
+  ] as const) {
+    const changedPreset = { ...base, manifest: { ...base.manifest,
+      cards: { ...base.manifest.cards, [cardId]: changed as GameCardDefinition } } };
+    assert.throws(() => buildPresetCardPool(authority, [changedPreset]),
+      new RegExp(`preset binding differs from source ${field}`));
+  }
+  const absentTokenAuthority = { ...authority, cards: authority.cards.map((card) =>
+    card.stableId === 'token' ? { ...card, manaCost: null } : card) };
+  assert.throws(() => buildPresetCardPool(absentTokenAuthority, [base]),
+    /preset binding differs from source manaCost: token/);
+});
+
 test('reviewed local bindings require exact source identity, complete review and matching printed stats', () => {
   const pool = buildPresetCardPool(authority, presets);
   const source = authority.cards.find((card) => card.stableId === 'unbound')!;

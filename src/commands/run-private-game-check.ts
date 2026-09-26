@@ -4987,7 +4987,7 @@ function gameDefinition(
       immobile,
       lethal,
       ...(lanceCount ? { lanceCount } : {}),
-      manaCost: card.manaCost ?? 0,
+      manaCost: card.manaCost,
       ...(mayStepAfterRangedStrike ? { mayStepAfterRangedStrike: true as const } : {}),
       ...(mayRangedStrikeOnceDuringBasicMovement
         ? { mayRangedStrikeOnceDuringBasicMovement: true as const }
@@ -14825,7 +14825,7 @@ function runEarthBorderMilitia(
     && tokenDefinition.token === true
     && tokenDefinition.attack === 1
     && tokenDefinition.defense === 1
-    && tokenDefinition.manaCost === 0
+    && tokenDefinition.manaCost === input.footSoldier.manaCost
     && (['north', 'south'] as const).every((seat) => session.state.players[seat].cemetery
       .every(({ cardId }) => cardId !== input.footSoldier.stableId));
 
@@ -14940,7 +14940,7 @@ async function runEarthHumbleVillage(
     && tokenDefinition.token === true
     && tokenDefinition.attack === 1
     && tokenDefinition.defense === 1
-    && tokenDefinition.manaCost === 0
+    && tokenDefinition.manaCost === input.footSoldier.manaCost
     && opening.manifest.decks.north.atlas.every((cardId) =>
       cardId !== input.footSoldier.stableId)
     && opening.manifest.decks.north.spellbook.every((cardId) =>

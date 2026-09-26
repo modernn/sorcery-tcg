@@ -6,7 +6,7 @@ import type { PrivateCardSnapshot } from '../authority/private-cards.ts';
 import { AuthorityValidationError } from '../authority/schemas.ts';
 import { readBoundedWithinAuthorityRoot } from '../authority/validate-bundle.ts';
 import { validateCardDefinition, type GameCardDefinition } from '../engine/game.ts';
-import type { PresetCardBinding } from './preset-card-pool.ts';
+import { assertPrintedCardFacts, type PresetCardBinding } from './preset-card-pool.ts';
 
 const hash = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
 const characteristicSupplement = z.strictObject({
@@ -58,16 +58,7 @@ export function mergeReviewedCardBindings(
     seen.add(row.cardId);
     const definition = row.facts as GameCardDefinition;
     validateCardDefinition(definition, `reviewed.${row.cardId}`);
-    const fields = ['cardType', ...(source.cardType === 'site' ? ['elements']
-      : source.cardType === 'avatar' ? ['attack', 'defense', 'life']
-        : source.cardType === 'minion' ? ['attack', 'defense', 'manaCost', 'thresholds']
-          : ['manaCost', 'thresholds'])];
-    for (const key of fields) {
-      if (canonicalJson(row.facts[key] as JsonValue)
-        !== canonicalJson(source[key as keyof typeof source] as JsonValue)) {
-        throw new Error(`reviewed binding differs from source ${key}: ${row.cardId}`);
-      }
-    }
+    assertPrintedCardFacts(source, definition, 'reviewed binding');
     if ((source.cardType === 'minion' || source.cardType === 'site')
       && (row.facts.ordinary === true) !== (source.rarity === 'ordinary')) {
       throw new Error(`reviewed binding differs from source ordinary: ${row.cardId}`);

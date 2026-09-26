@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { canonicalJson, type JsonValue } from '../authority/canonical-json.ts';
 import { identityHash } from '../authority/hash.ts';
 import type { PrivateCardSnapshot } from '../authority/private-cards.ts';
+import type { NormalizedCard } from '../authority/schemas.ts';
 import {
   createGameManifest,
   tokenDependencies,
@@ -16,13 +17,32 @@ export type PresetCardBinding = Readonly<{
   presetIds: readonly string[];
 }>;
 
+/** Both ingestion paths preserve printed base characteristics, including absent cost. */
+export function assertPrintedCardFacts(
+  source: NormalizedCard,
+  definition: GameCardDefinition,
+  context: string,
+): void {
+  const fields = ['cardType', ...(source.cardType === 'site' ? ['elements']
+    : source.cardType === 'avatar' ? ['attack', 'defense', 'life']
+      : source.cardType === 'minion' ? ['attack', 'defense', 'manaCost', 'thresholds']
+        : ['manaCost', 'thresholds'])];
+  const facts = definition as unknown as Record<string, JsonValue>;
+  for (const key of fields) {
+    if (facts[key] === undefined || canonicalJson(facts[key])
+      !== canonicalJson(source[key as keyof NormalizedCard] as JsonValue)) {
+      throw new Error(`${context} differs from source ${key}: ${source.stableId}`);
+    }
+  }
+}
+
 /** Existing source-checked manifests supply facts; no printed-text inference or new rules. */
 export function buildPresetCardPool(
   authority: PrivateCardSnapshot,
   presets: readonly Readonly<{ id: string; manifest: GameManifest }>[],
 ): ReadonlyMap<string, PresetCardBinding> {
   const pool = new Map<string, PresetCardBinding>();
-  const known = new Set(authority.cards.map(({ stableId }) => stableId));
+  const known = new Map(authority.cards.map((card) => [card.stableId, card]));
   for (const preset of presets) {
     const binding = preset.manifest.authority;
     if (binding.mode !== 'private-local' || binding.contentHash !== authority.authorityHash
@@ -30,11 +50,13 @@ export function buildPresetCardPool(
       throw new Error('preset card pool authority binding does not match');
     }
     for (const [cardId, definition] of Object.entries(preset.manifest.cards)) {
-      if (!known.has(cardId)) throw new Error(`preset card is absent from authority: ${cardId}`);
+      const source = known.get(cardId);
+      if (!source) throw new Error(`preset card is absent from authority: ${cardId}`);
       const existing = pool.get(cardId);
       if (existing && canonicalJson(existing.definition as JsonValue) !== canonicalJson(definition as JsonValue)) {
         throw new Error(`conflicting preset facts for card: ${cardId}`);
       }
+      assertPrintedCardFacts(source, definition, 'preset binding');
       pool.set(cardId, {
         definition,
         presetIds: [...new Set([...(existing?.presetIds ?? []), preset.id])].sort(),
