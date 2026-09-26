@@ -160,3 +160,68 @@ test('effect programs require a supported grant duration', () => {
     /grant-this-turn is obsolete/,
   );
 });
+
+test('location choices preserve their own destination independently of unit choices', () => {
+  const relation = { measured: 2 };
+  const candidate = input({ effects: [
+    { op: 'choose-location', relation },
+    { op: 'choose-unit', relation: 'anywhere', kind: 'minion' },
+    { op: 'summon-token', destination: 'chosen-location', count: 7, token: 'token' },
+    { op: 'draw', count: 1, zone: 'spellbook' },
+  ] });
+  const manifest = createGameManifest({ ...candidate, cards: { ...candidate.cards,
+    token: { attack: 1, cardType: 'minion', defense: 1, manaCost: null, token: true,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 } },
+  } });
+  relation.measured = 99;
+  const stored = manifest.cards['north-spell-1'];
+  assert.equal(stored?.cardType, 'magic');
+  if (stored?.cardType !== 'magic') throw new Error('magic fixture missing');
+  assert.deepEqual(stored.effectProgram?.effects[0], { op: 'choose-location', relation: { measured: 2 } });
+  assert.deepEqual(stored.effectProgram?.effects.slice(1),
+    (candidate.cards['north-spell-1'] as Extract<GameCardDefinition, { cardType: 'magic' }>).effectProgram?.effects.slice(1));
+});
+
+test('location choices require a valid relation and cannot be optional', () => {
+  for (const relation of [undefined, null, 'here', 2, {}, { measured: 0 }, { measured: -1 },
+    { measured: 1.5 }, { measured: 256 }, { measured: 2, extra: true }]) {
+    assert.throws(() => createGameManifest(input({ effects: [
+      { op: 'choose-location', relation },
+    ] } as never)), /effects\[0\].relation is unsupported/);
+  }
+  assert.throws(() => createGameManifest(input({ effects: [
+    { op: 'choose-location', relation: 'anywhere', optional: true },
+  ] } as never)), /optional is unsupported/);
+});
+
+test('chosen-location token destinations require an earlier location choice', () => {
+  const summon = { op: 'summon-token', token: 'token', count: 7, destination: 'chosen-location' } as const;
+  for (const effectProgram of [
+    { effects: [summon] },
+    { effects: [summon, { op: 'choose-location', relation: 'anywhere' }] },
+    { effects: [{ op: 'choose-unit', relation: 'anywhere' }, summon] },
+    { selection: { kind: 'location', relation: 'anywhere' }, effects: [summon] },
+  ]) {
+    assert.throws(() => createGameManifest(input(effectProgram as never)), /requires a preceding choose-location/);
+  }
+});
+
+test('seven-token location programs from the deck manifest boundary are admitted by Rust', async () => {
+  const candidate = input({ effects: [
+    { op: 'choose-location', relation: 'nearby' },
+    { op: 'summon-token', token: 'token', count: 7, destination: 'chosen-location' },
+    { op: 'draw', count: 1, zone: 'spellbook' },
+  ] });
+  const manifest = createGameManifest({ ...candidate, cards: { ...candidate.cards,
+    token: { attack: 1, cardType: 'minion', defense: 1, manaCost: null, token: true,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 } },
+  } });
+  const client = await RustSessionClient.start();
+  try {
+    await client.newSession(canonicalJson(manifest));
+    assert.ok((await client.legalActions('north')).length > 0);
+    assert.equal(await client.verifyReplay(), true);
+  } finally {
+    await client.close();
+  }
+});

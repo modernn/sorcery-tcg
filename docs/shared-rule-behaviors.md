@@ -97,10 +97,18 @@ when preparing and admitting manifests, including several token types in one pro
 Explicit implementation limits remain: at most 32 tokens per operation, no cyclic
 token dependencies, at most 64 definitions on a dependency path, and at most 4,096
 realm minions during token entry. These are admission/runtime support bounds, not
-Sorcery rules. A unit spanning multiple locations still needs an ordinary location
-choice; token placement there reports unsupported rather than guessing a location.
-Ordinary site/location choice and site-cohort summoning remain separate unfinished
-selector work. This engine slice alone does not certify additional real cards.
+Sorcery rules. A unit spanning multiple locations opens an ordinary location choice
+restricted to that live realm incarnation's footprint. Its departure empties the
+choice; token entry is skipped and independent following operations continue.
+Ordinary site choice and site-cohort summoning remain unfinished selector work.
+
+`ChooseLocation` supplies a separate ordinary binding for `chosen-location` token
+entry. Anywhere includes every existing location across all regions; local relations
+use the source's geometry and region. These choices do not invoke declared-target
+protections or hide destinations where tokens cannot survive. The existing regional
+settlement handles those entries before the parent continuation. One location choice
+places an entire simultaneous token group; pending choices share the same engine-issued
+action, checkpoint, and replay lifecycle as ordinary unit choices.
 
 Token definitions preserve an absent printed mana cost as explicit `null`, distinct
 from a printed zero. Only token minions may have that absence; tokens cannot enter

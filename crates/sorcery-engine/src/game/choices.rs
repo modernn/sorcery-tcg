@@ -1,11 +1,12 @@
-//! Engine-issued unit choices during an effect's resolution.
+//! Engine-issued ordinary choices during an effect's resolution.
 
 use super::ability::{SpatialRelation, UnitChoiceSpec};
-use super::effect::EffectSource;
+use super::effect::{EffectSource, RealmReference, ResolvedTokenLocation};
 use super::{
     ActionDescriptor, EffectFrame, Game, GameError, IdentityHash, IssuedAction, OutcomeLog, Phase,
     ResolutionContinuation, Seat, UnitQuery, UnitTarget, Value, json,
 };
+use super::{Location, Region};
 use crate::action::DeckZone;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -17,9 +18,11 @@ pub(super) struct PendingAbilityChoice {
     pub(super) return_decision_seat: Seat,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum AbilityChoiceSpec {
     Unit(UnitChoiceSpec),
+    Location(SpatialRelation),
+    TokenLocation(RealmReference),
     DrawCard,
 }
 
@@ -74,6 +77,118 @@ impl Game {
         Ok(())
     }
 
+    fn ability_location_choices(
+        &self,
+        frame: &EffectFrame,
+        spec: &AbilityChoiceSpec,
+    ) -> Result<Vec<Location>, GameError> {
+        Ok(match spec {
+            AbilityChoiceSpec::Location(SpatialRelation::Anywhere) => [
+                Region::Surface,
+                Region::Underground,
+                Region::Underwater,
+                Region::Void,
+            ]
+            .into_iter()
+            .flat_map(|region| self.selected_locations(region, &[], SpatialRelation::Anywhere))
+            .collect(),
+            AbilityChoiceSpec::Location(relation) => {
+                self.selected_locations(frame.source.region, &frame.source.cells, *relation)
+            }
+            AbilityChoiceSpec::TokenLocation(reference) => {
+                if !self.realm_reference_exists(reference) {
+                    return Ok(Vec::new());
+                }
+                let (region, cells) = self.referenced_geometry(reference)?;
+                cells
+                    .into_iter()
+                    .filter(|cell| self.location_exists_in_region(*cell, region))
+                    .map(|cell| Location { cell, region })
+                    .collect()
+            }
+            _ => Vec::new(),
+        })
+    }
+
+    pub(super) fn begin_ability_location_choice(
+        &mut self,
+        mut frame: EffectFrame,
+        spec: AbilityChoiceSpec,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        match spec {
+            AbilityChoiceSpec::Location(relation) => {
+                frame.chosen_location = None;
+                if relation != SpatialRelation::Anywhere {
+                    (frame.source.region, frame.source.cells) =
+                        self.effect_anchor(&frame.source)?;
+                }
+            }
+            AbilityChoiceSpec::TokenLocation(_) => {
+                frame.token_location = Some(ResolvedTokenLocation { location: None });
+            }
+            _ => return Err(GameError::IllegalAction),
+        }
+        if self.ability_location_choices(&frame, &spec)?.is_empty() {
+            return self.run_effect_frame(frame, outcomes);
+        }
+        let controller = frame.source.controller;
+        self.position.pending_ability_choice = Some(Box::new(PendingAbilityChoice {
+            frame: Box::new(frame),
+            spec,
+            continuation: None,
+            return_phase: self.position.phase,
+            return_decision_seat: self.position.decision_seat,
+        }));
+        self.position.phase = Phase::AbilityChoice;
+        self.position.decision_seat = controller;
+        Ok(())
+    }
+
+    pub(super) fn apply_ability_location_choice_action(
+        &mut self,
+        seat: Seat,
+        source: &IdentityHash,
+        location: Location,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let pending = self
+            .position
+            .pending_ability_choice
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        if self.position.phase != Phase::AbilityChoice
+            || seat != pending.frame.source.controller
+            || source != &pending.frame.source.instance_id
+            || !self
+                .ability_location_choices(&pending.frame, &pending.spec)?
+                .contains(&location)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let mut pending = self
+            .position
+            .pending_ability_choice
+            .take()
+            .expect("pending location choice");
+        match pending.spec {
+            AbilityChoiceSpec::Location(_) => pending.frame.chosen_location = Some(location),
+            AbilityChoiceSpec::TokenLocation(_) => {
+                pending.frame.token_location = Some(ResolvedTokenLocation {
+                    location: Some(location),
+                });
+            }
+            _ => return Err(GameError::IllegalAction),
+        }
+        outcomes.push(
+            "ability-location-choice-committed",
+            || json!({"seat": seat, "sourceInstanceId": source, "location": location}),
+        );
+        self.resume_ability_choice(*pending, outcomes)?;
+        self.position.state_version += 1;
+        Ok(())
+    }
+
     pub(super) fn begin_ability_draw_choice(&mut self, frame: EffectFrame) {
         let controller = frame.source.controller;
         self.position.pending_ability_choice = Some(Box::new(PendingAbilityChoice {
@@ -94,9 +209,9 @@ impl Game {
         let Some(pending) = &self.position.pending_ability_choice else {
             return self.append_trigger_order_actions(actions);
         };
-        match pending.spec {
+        match &pending.spec {
             AbilityChoiceSpec::Unit(spec) => {
-                for target in self.ability_unit_choices(&pending.frame.source, spec) {
+                for target in self.ability_unit_choices(&pending.frame.source, *spec) {
                     self.push_ability_choice(
                         actions,
                         &pending.frame.source.instance_id,
@@ -105,6 +220,18 @@ impl Game {
                 }
                 if spec.optional {
                     self.push_ability_choice(actions, &pending.frame.source.instance_id, None);
+                }
+            }
+            AbilityChoiceSpec::Location(_) | AbilityChoiceSpec::TokenLocation(_) => {
+                for location in self.ability_location_choices(&pending.frame, &pending.spec)? {
+                    let descriptor = ActionDescriptor::ChooseAbilityLocation {
+                        source_instance_id: pending.frame.source.instance_id.clone(),
+                        location,
+                    };
+                    let label = descriptor
+                        .state_independent_label()
+                        .expect("location choice label");
+                    self.push_action(actions, descriptor, label);
                 }
             }
             AbilityChoiceSpec::DrawCard => {
@@ -142,7 +269,7 @@ impl Game {
         let Some(pending) = &self.position.pending_ability_choice else {
             return self.apply_genesis_target_choice(seat, source, target, outcomes);
         };
-        let AbilityChoiceSpec::Unit(spec) = pending.spec else {
+        let AbilityChoiceSpec::Unit(spec) = &pending.spec else {
             return Err(GameError::IllegalAction);
         };
         if self.position.phase != Phase::AbilityChoice
@@ -151,7 +278,7 @@ impl Game {
             || match target {
                 None => !spec.optional,
                 Some(target) => !self
-                    .ability_unit_choices(&pending.frame.source, spec)
+                    .ability_unit_choices(&pending.frame.source, *spec)
                     .contains(target),
             }
         {
@@ -236,24 +363,38 @@ impl Game {
         &mut self,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
-        if self.position.terminal.is_none()
-            && self.position.pending_deathrites.is_none()
-            && self.position.pending_trigger_order.is_none()
-            && self
-                .position
-                .pending_ability_choice
-                .as_ref()
-                .is_some_and(|pending| {
-                    matches!(pending.spec, AbilityChoiceSpec::Unit(spec)
-                        if self.ability_unit_choices(&pending.frame.source, spec).is_empty())
-                })
+        if self.position.terminal.is_some()
+            || self.position.pending_deathrites.is_some()
+            || self.position.pending_trigger_order.is_some()
         {
+            return Ok(());
+        }
+        let Some(pending) = &self.position.pending_ability_choice else {
+            return Ok(());
+        };
+        let empty = match &pending.spec {
+            AbilityChoiceSpec::Unit(spec) => self
+                .ability_unit_choices(&pending.frame.source, *spec)
+                .is_empty(),
+            AbilityChoiceSpec::Location(_) | AbilityChoiceSpec::TokenLocation(_) => self
+                .ability_location_choices(&pending.frame, &pending.spec)?
+                .is_empty(),
+            AbilityChoiceSpec::DrawCard => false,
+        };
+        if empty {
             let mut pending = self
                 .position
                 .pending_ability_choice
                 .take()
                 .expect("empty choice");
-            self.select_effect_unit(&mut pending.frame, None)?;
+            match pending.spec {
+                AbilityChoiceSpec::Unit(_) => self.select_effect_unit(&mut pending.frame, None)?,
+                AbilityChoiceSpec::Location(_) => pending.frame.chosen_location = None,
+                AbilityChoiceSpec::TokenLocation(_) => {
+                    pending.frame.token_location = Some(ResolvedTokenLocation { location: None });
+                }
+                AbilityChoiceSpec::DrawCard => {}
+            }
             self.resume_ability_choice(*pending, outcomes)?;
         }
         Ok(())
@@ -274,10 +415,13 @@ impl Game {
     pub(super) fn ability_choice_value(&self, pending: &PendingAbilityChoice) -> Value {
         // The immutable program and cursor identify the selector; do not duplicate its facts.
         json!({"frame": self.effect_frame_value(&pending.frame),
-            "choice": match pending.spec {
+            "choice": match &pending.spec {
                 AbilityChoiceSpec::Unit(_) => "unit",
                 AbilityChoiceSpec::DrawCard => "draw-card",
+                AbilityChoiceSpec::Location(_) => "location",
+                AbilityChoiceSpec::TokenLocation(_) => "token-location",
             },
+            "locationReference": match &pending.spec { AbilityChoiceSpec::TokenLocation(reference) => Some(reference.value()), _ => None },
             "returnPhase": pending.return_phase.as_str(),
             "returnDecisionSeat": pending.return_decision_seat,
             "continuation": pending.continuation.as_ref().map(|tail| self.resolution_continuation_value(tail))})

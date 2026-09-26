@@ -151,6 +151,7 @@ fn install(game: &mut Game, effects: Vec<Effect>) -> CardId {
         },
         Effect::Draw { .. }
         | Effect::DrawCard
+        | Effect::ChooseLocation { .. }
         | Effect::ChooseUnit(_)
         | Effect::SummonToken { .. } => None,
     });

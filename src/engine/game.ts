@@ -64,10 +64,11 @@ type EffectProgramEffect =
   | Readonly<{ count: number; op: 'draw'; zone: DeckZone }>
   | Readonly<{
     count: number;
-    destination: 'source' | 'chosen' | 'target' | 'location';
+    destination: 'source' | 'chosen' | 'target' | 'location' | 'chosen-location';
     op: 'summon-token';
     token: string;
   }>
+  | Readonly<{ op: 'choose-location'; relation: EffectProgramRelation }>
   | Readonly<{
     alliedOnly?: boolean;
     excludeSource?: boolean;
@@ -1385,6 +1386,11 @@ type GameActionDescriptor =
     target?: GameUnitRef;
   }>
   | Readonly<{
+    kind: 'choose-ability-location';
+    sourceInstanceId: StateHash;
+    location: GameLocation;
+  }>
+  | Readonly<{
     kind: 'choose-ability-draw';
     sourceInstanceId: StateHash;
     zone: DeckZone;
@@ -1549,6 +1555,7 @@ function validateEffectProgram(program: unknown, path: string): asserts program 
       throw new RangeError(`${path}.selection.relation is unsupported`);
     }
   }
+  let hasLocationChoice = false;
   candidate.effects.forEach((effect, index) => {
     const effectPath = `${path}.effects[${index}]`;
     if (effect === null || typeof effect !== 'object' || Array.isArray(effect)) {
@@ -1556,6 +1563,23 @@ function validateEffectProgram(program: unknown, path: string): asserts program 
     }
     const value = effect as Record<string, unknown>;
     if (typeof value.op !== 'string') throw new RangeError(`${effectPath}.op must be a string`);
+    if (value.op === 'choose-location') {
+      const relation = value.relation;
+      const measured = relation !== null && typeof relation === 'object' && !Array.isArray(relation)
+        ? (relation as Record<string, unknown>).measured : undefined;
+      if (relation !== 'anywhere' && relation !== 'nearby' && relation !== 'adjacent'
+        && (typeof measured !== 'number' || !Number.isInteger(measured) || measured < 1 || measured > 255
+          || Object.keys(relation as object).length !== 1)) {
+        throw new RangeError(`${effectPath}.relation is unsupported`);
+      }
+      const unknown = Object.keys(value).find((key) => key !== 'op' && key !== 'relation');
+      if (unknown) throw new RangeError(`${effectPath}.${unknown} is unsupported`);
+      hasLocationChoice = true;
+    }
+    if (value.op === 'summon-token' && value.destination === 'chosen-location' && !hasLocationChoice) {
+      throw new RangeError(`${effectPath}.destination chosen-location requires a preceding choose-location`);
+    }
+
     if (value.op === 'grant-this-turn') {
       throw new RangeError(`${effectPath}.op grant-this-turn is obsolete; use grant`);
     }

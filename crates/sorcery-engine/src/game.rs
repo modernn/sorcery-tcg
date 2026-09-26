@@ -10272,6 +10272,15 @@ impl Game {
                     outcomes,
                     random_draws,
                 ),
+            ActionDescriptor::ChooseAbilityLocation {
+                source_instance_id,
+                location,
+            } => self.apply_ability_location_choice_action(
+                action.seat,
+                source_instance_id,
+                *location,
+                outcomes,
+            ),
             ActionDescriptor::ChooseAbilityDraw {
                 source_instance_id,
                 zone,

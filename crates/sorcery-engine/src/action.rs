@@ -635,6 +635,13 @@ pub enum ActionDescriptor {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target: Option<UnitTarget>,
     },
+    /// Select an ordinary location during ability resolution.
+    ChooseAbilityLocation {
+        /// Authoritative ability source identity.
+        source_instance_id: IdentityHash,
+        /// Existing realm location selected.
+        location: Location,
+    },
     /// Choose the deck from which an authored ability draws one card.
     ChooseAbilityDraw {
         /// Authoritative ability source identity.
@@ -1079,6 +1086,14 @@ impl ActionDescriptor {
                 target: None,
             } => Some(format!(
                 "Decline optional ability from {}…",
+                short_identity(source_instance_id)
+            )),
+            Self::ChooseAbilityLocation {
+                source_instance_id,
+                location,
+            } => Some(format!(
+                "Choose {} for ability from {}…",
+                location_label(*location),
                 short_identity(source_instance_id)
             )),
             Self::ChooseAbilityDraw {
@@ -1774,6 +1789,8 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                                 right_target.as_ref(),
                             )
                         }),
+                    (ActionDescriptor::ChooseAbilityLocation { source_instance_id: left, location: left_location },
+                     ActionDescriptor::ChooseAbilityLocation { source_instance_id: right, location: right_location }) => left_location.cmp(right_location).then_with(|| left.cmp(right)),
                     (
                         ActionDescriptor::ChooseAbilityDraw {
                             source_instance_id: left,
@@ -2256,9 +2273,9 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::ActivateArtifactDamage { .. } => 1,
         ActionDescriptor::ActivateArtifactDiscardAreaDamage { .. } => 2,
         ActionDescriptor::ActivateArtifactRollDamage { .. } => 3,
-        ActionDescriptor::ActivateArtifactSacrificeControl { .. } => 48,
-        ActionDescriptor::ActivateDiscardToGainControl { .. } => 49,
-        ActionDescriptor::DeclineFilteredSitePlay => 50,
+        ActionDescriptor::ActivateArtifactSacrificeControl { .. } => 49,
+        ActionDescriptor::ActivateDiscardToGainControl { .. } => 50,
+        ActionDescriptor::DeclineFilteredSitePlay => 51,
         ActionDescriptor::ActivateDiscardRandomDamage { .. } => 4,
         ActionDescriptor::ActivateMana { .. } => 5,
         ActionDescriptor::ActivateSiteDestruction { .. } => 6,
@@ -2268,41 +2285,42 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::CastArtifact { .. } => 10,
         ActionDescriptor::CastAura { .. } => 11,
         ActionDescriptor::CastMagic { .. } => 12,
-        ActionDescriptor::CloseDefend { .. } => 15,
-        ActionDescriptor::CloseIntercept {} => 16,
-        ActionDescriptor::ContinueBasicMovement { .. } => 17,
-        ActionDescriptor::DeclareAttack { .. } => 18,
-        ActionDescriptor::DeclineAttack => 19,
-        ActionDescriptor::Defend { .. } => 20,
-        ActionDescriptor::Draw { .. } => 21,
-        ActionDescriptor::DrawSite => 22,
-        ActionDescriptor::DrawSpell => 23,
-        ActionDescriptor::DropArtifacts { .. } => 24,
-        ActionDescriptor::EndTurn => 25,
-        ActionDescriptor::ResolveEndTurnAuraMove { .. } => 43,
-        ActionDescriptor::ResolveEndTurnAuraRandom { .. } => 44,
-        ActionDescriptor::ResolveRandomOutcome { .. } => 45,
-        ActionDescriptor::ResolveStartTurnTrigger { .. } => 46,
-        ActionDescriptor::DiscardCard { .. } => 47,
-        ActionDescriptor::ExtendChainMagic { .. } => 26,
-        ActionDescriptor::FlySite { .. } => 27,
-        ActionDescriptor::Intercept { .. } => 28,
-        ActionDescriptor::OrderTriggers { .. } => 29,
+        ActionDescriptor::CloseDefend { .. } => 16,
+        ActionDescriptor::CloseIntercept {} => 17,
+        ActionDescriptor::ContinueBasicMovement { .. } => 18,
+        ActionDescriptor::DeclareAttack { .. } => 19,
+        ActionDescriptor::DeclineAttack => 20,
+        ActionDescriptor::Defend { .. } => 21,
+        ActionDescriptor::Draw { .. } => 22,
+        ActionDescriptor::DrawSite => 23,
+        ActionDescriptor::DrawSpell => 24,
+        ActionDescriptor::DropArtifacts { .. } => 25,
+        ActionDescriptor::EndTurn => 26,
+        ActionDescriptor::ResolveEndTurnAuraMove { .. } => 44,
+        ActionDescriptor::ResolveEndTurnAuraRandom { .. } => 45,
+        ActionDescriptor::ResolveRandomOutcome { .. } => 46,
+        ActionDescriptor::ResolveStartTurnTrigger { .. } => 47,
+        ActionDescriptor::DiscardCard { .. } => 48,
+        ActionDescriptor::ExtendChainMagic { .. } => 27,
+        ActionDescriptor::FlySite { .. } => 28,
+        ActionDescriptor::Intercept { .. } => 29,
+        ActionDescriptor::OrderTriggers { .. } => 30,
         ActionDescriptor::ChooseAbility { .. } => 13,
         ActionDescriptor::ChooseAbilityDraw { .. } => 14,
-        ActionDescriptor::PickUpArtifacts { .. } => 30,
-        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 31,
-        ActionDescriptor::ResolveChainMagic => 32,
-        ActionDescriptor::ResolveGenesisSpell { .. } => 33,
-        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 34,
-        ActionDescriptor::ResolveGenesisToken { .. } => 35,
-        ActionDescriptor::ResolveRangedStep { .. } => 36,
-        ActionDescriptor::Mulligan { .. } => 37,
-        ActionDescriptor::PlaySite { .. } => 38,
-        ActionDescriptor::ShootDamageProjectile { .. } => 39,
-        ActionDescriptor::ShootDragProjectile { .. } => 40,
-        ActionDescriptor::ShootProjectile { .. } => 41,
-        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 42,
+        ActionDescriptor::ChooseAbilityLocation { .. } => 15,
+        ActionDescriptor::PickUpArtifacts { .. } => 31,
+        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 32,
+        ActionDescriptor::ResolveChainMagic => 33,
+        ActionDescriptor::ResolveGenesisSpell { .. } => 34,
+        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 35,
+        ActionDescriptor::ResolveGenesisToken { .. } => 36,
+        ActionDescriptor::ResolveRangedStep { .. } => 37,
+        ActionDescriptor::Mulligan { .. } => 38,
+        ActionDescriptor::PlaySite { .. } => 39,
+        ActionDescriptor::ShootDamageProjectile { .. } => 40,
+        ActionDescriptor::ShootDragProjectile { .. } => 41,
+        ActionDescriptor::ShootProjectile { .. } => 42,
+        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 43,
     }
 }
 
@@ -2977,6 +2995,11 @@ mod tests {
         let actions = [
             json!({"kind":"choose-ability", "sourceInstanceId":CARD_A}),
             json!({"kind":"choose-ability-draw", "sourceInstanceId":CARD_A, "zone":"atlas"}),
+            json!({"kind":"choose-ability-location", "sourceInstanceId":CARD_A, "location":{"cell":"A1","region":"surface"}}),
+            json!({"kind":"choose-ability-location", "sourceInstanceId":CARD_B, "location":{"cell":"A1","region":"surface"}}),
+            json!({"kind":"choose-ability-location", "sourceInstanceId":CARD_A, "location":{"cell":"A1","region":"underground"}}),
+            json!({"kind":"choose-ability-location", "sourceInstanceId":CARD_A, "location":{"cell":"A1","region":"underwater"}}),
+            json!({"kind":"choose-ability-location", "sourceInstanceId":CARD_A, "location":{"cell":"B1","region":"void"}}),
             json!({"kind":"choose-ability", "sourceInstanceId":CARD_A,
                 "target":{"instanceId":CASTER_A, "kind":"avatar", "seat":"north"}}),
             json!({"kind":"choose-ability", "sourceInstanceId":CARD_B,

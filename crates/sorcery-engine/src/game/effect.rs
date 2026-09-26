@@ -98,6 +98,11 @@ struct LocationBinding {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct ResolvedTokenLocation {
+    pub(super) location: Option<Location>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct EffectFrame {
     pub(super) card_id: CardId,
     entry: AbilityEntry,
@@ -107,6 +112,8 @@ pub(super) struct EffectFrame {
     pub(super) declaration_pending: bool,
     target: Option<UnitBinding>,
     chosen: Option<RealmReference>,
+    pub(super) chosen_location: Option<Location>,
+    pub(super) token_location: Option<ResolvedTokenLocation>,
     location: Option<LocationBinding>,
     pub(super) magic: Option<CardInstance>,
 }
@@ -193,7 +200,7 @@ impl Game {
                 .any(|site| reference.matches(&site.card))
     }
 
-    fn referenced_geometry(
+    pub(super) fn referenced_geometry(
         &self,
         reference: &RealmReference,
     ) -> Result<(Region, Vec<Cell>), GameError> {
@@ -312,6 +319,8 @@ impl Game {
                 && location.is_none(),
             source,
             chosen: None,
+            chosen_location: None,
+            token_location: None,
             target: target
                 .map(|target| {
                     self.unit_reference(target).map(|reference| UnitBinding {
@@ -568,7 +577,28 @@ impl Game {
                     count,
                     destination,
                 } => {
-                    if let Some(location) = self.token_effect_location(&frame, destination)?
+                    if destination == TokenDestination::Source && frame.token_location.is_none() {
+                        self.effect_anchor(&frame.source)?;
+                    }
+                    if frame.token_location.is_none()
+                        && let Some(reference) =
+                            Self::token_destination_reference(&frame, destination)
+                        && self.realm_reference_exists(reference)
+                        && self.referenced_geometry(reference)?.1.len() > 1
+                    {
+                        let reference = reference.clone();
+                        frame.cursor -= 1;
+                        return self.begin_ability_location_choice(
+                            frame,
+                            super::choices::AbilityChoiceSpec::TokenLocation(reference),
+                            outcomes,
+                        );
+                    }
+                    let location = match frame.token_location.take() {
+                        Some(choice) => choice.location,
+                        None => self.token_effect_location(&frame, destination)?,
+                    };
+                    if let Some(location) = location
                         && self.token_may_enter_location(
                             frame.source.controller,
                             token,
@@ -605,6 +635,13 @@ impl Game {
                         }
                         // Synchronous entry needs no boxed continuation or recursive restart.
                     }
+                }
+                Effect::ChooseLocation { relation } => {
+                    return self.begin_ability_location_choice(
+                        frame,
+                        super::choices::AbilityChoiceSpec::Location(relation),
+                        outcomes,
+                    );
                 }
                 Effect::ChooseUnit(spec) => {
                     return self.begin_ability_unit_choice(frame, spec, outcomes);
@@ -717,6 +754,22 @@ impl Game {
         Ok(())
     }
 
+    fn token_destination_reference(
+        frame: &EffectFrame,
+        destination: TokenDestination,
+    ) -> Option<&RealmReference> {
+        match destination {
+            TokenDestination::Source => frame.source.realm.as_ref().or(frame.source.actor.as_ref()),
+            TokenDestination::Chosen => frame.chosen.as_ref(),
+            TokenDestination::Target => frame
+                .target
+                .as_ref()
+                .filter(|binding| binding.state == BindingState::Active)
+                .map(|binding| &binding.reference),
+            TokenDestination::Location | TokenDestination::ChosenLocation => None,
+        }
+    }
+
     fn token_effect_location(
         &self,
         frame: &EffectFrame,
@@ -738,6 +791,11 @@ impl Game {
                     return Ok(None);
                 };
                 self.referenced_geometry(reference)?
+            }
+            TokenDestination::ChosenLocation => {
+                return Ok(frame.chosen_location.filter(|location| {
+                    self.location_exists_in_region(location.cell, location.region)
+                }));
             }
             TokenDestination::Location => {
                 return Ok(frame
@@ -820,6 +878,9 @@ impl Game {
             "declarationPending": frame.declaration_pending,
             "source": frame.source.value(),
             "chosen": frame.chosen.as_ref().map(RealmReference::value),
+            "chosenLocation": frame.chosen_location,
+            "tokenLocation": frame.token_location.as_ref().and_then(|choice| choice.location),
+            "tokenLocationResolved": frame.token_location.is_some(),
             "target": frame.target.as_ref().map(|binding| json!({ "object": binding.reference.value(), "state": binding.state.as_str() })),
             "location": frame.location.as_ref().map(|binding| json!({ "location": binding.location, "site": binding.site.as_ref().map(RealmReference::value), "state": binding.state.as_str() })),
             "magic": frame.magic.as_ref().map(|card| self.card_value(card)),

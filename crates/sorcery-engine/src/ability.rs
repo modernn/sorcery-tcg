@@ -23,6 +23,10 @@ impl AbilityProgram {
     ///
     /// # Errors
     /// Returns the invalid operation or unsupported selector/grant constraint.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one ordered validation dispatch tracks preceding choices"
+    )]
     pub fn validate(&self) -> Result<(), String> {
         if self.effects.is_empty() || self.effects.len() > 64 {
             return Err("effects must contain 1-64 operations".to_owned());
@@ -35,6 +39,7 @@ impl AbilityProgram {
         }
 
         let mut previous_choice = None;
+        let mut location_chosen = false;
         for (index, effect) in self.effects.iter().enumerate() {
             let path = format!("effects[{index}]");
             match effect {
@@ -63,6 +68,11 @@ impl AbilityProgram {
                         return Err(format!("{path}.count must be 1-32"));
                     }
                     match destination {
+                        TokenDestination::ChosenLocation if !location_chosen => {
+                            return Err(format!(
+                                "{path}.destination chosen-location requires a preceding choose-location"
+                            ));
+                        }
                         TokenDestination::Chosen if previous_choice.is_none() => {
                             return Err(format!(
                                 "{path}.destination chosen requires a preceding choose-unit"
@@ -84,6 +94,10 @@ impl AbilityProgram {
                         }
                         _ => {}
                     }
+                }
+                Effect::ChooseLocation { relation } => {
+                    validate_relation(*relation)?;
+                    location_chosen = true;
                 }
                 Effect::ChooseUnit(spec) => {
                     validate_relation(spec.relation)?;
@@ -429,6 +443,8 @@ pub enum TokenDestination {
     Target,
     /// The declared target location.
     Location,
+    /// The ordinarily chosen location.
+    ChosenLocation,
 }
 
 /// One executable operation in an ordered ability program.
@@ -462,6 +478,11 @@ pub enum Effect {
         zone: DeckZone,
         /// The number of cards to draw.
         count: u8,
+    },
+    /// Performs an ordinary location choice, independent of declared targets.
+    ChooseLocation {
+        /// Geometry relative to the source; anywhere spans all existing regions.
+        relation: SpatialRelation,
     },
     /// Performs an ordinary unit choice.
     ChooseUnit(UnitChoiceSpec),
