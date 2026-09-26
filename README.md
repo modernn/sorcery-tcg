@@ -126,6 +126,10 @@ swap capacity alone is not a throughput estimate.
 
 ## Search, checkpoint, and replay
 
+The repository's [Sorcery playtesting skill](skills/sorcery-playtest/SKILL.md) records
+the reproducible testing workflow and how to keep tactical claims separate from
+mechanic coverage. It does not yet claim expert playing strength.
+
 `pnpm --silent game:session` starts the existing persistent Rust JSON-lines service.
 Every request has `schemaVersion: 1`, a numeric `id`, a `method`, and `params`.
 
