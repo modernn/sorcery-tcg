@@ -65,7 +65,7 @@ type EffectProgramEffect =
   | Readonly<{
     count: number;
     destination: 'source' | 'chosen' | 'target' | 'location' | 'chosen-location';
-    op: 'summon-token';
+    op: 'summon-token' | 'conjure-token';
     token: string;
   }>
   | Readonly<{ op: 'choose-location'; relation: EffectProgramRelation }>
@@ -93,30 +93,37 @@ type EffectProgram = Readonly<{
 }>;
 
 /** Returns direct token references; callers follow the returned IDs transitively. */
-export function tokenDependencies(card: GameCardDefinition): readonly string[] {
-  const dependencies = new Set<string>();
+type TokenRequirement = Readonly<{ cardId: string; kind: 'artifact' | 'minion' }>;
+
+function tokenRequirements(card: GameCardDefinition): readonly TokenRequirement[] {
+  const requirements: TokenRequirement[] = [];
+  const addProgramRequirements = (effects: readonly EffectProgramEffect[]): void => {
+    for (const effect of effects) {
+      if (effect.op === 'summon-token') requirements.push({ cardId: effect.token, kind: 'minion' });
+      if (effect.op === 'conjure-token') requirements.push({ cardId: effect.token, kind: 'artifact' });
+    }
+  };
   if (card.cardType === 'magic') {
     if (card.summonTokenToAlliedMinionThenDrawSpell !== undefined) {
-      dependencies.add(card.summonTokenToAlliedMinionThenDrawSpell);
+      requirements.push({ cardId: card.summonTokenToAlliedMinionThenDrawSpell, kind: 'minion' });
     }
     if (card.summonTokenToEachControlledSiteBorderingEnemySite !== undefined) {
-      dependencies.add(card.summonTokenToEachControlledSiteBorderingEnemySite);
+      requirements.push({ cardId: card.summonTokenToEachControlledSiteBorderingEnemySite, kind: 'minion' });
     }
-    if (card.effectProgram !== undefined) {
-      for (const effect of card.effectProgram.effects) {
-        if (effect.op === 'summon-token') dependencies.add(effect.token);
-      }
-    }
+    if (card.effectProgram !== undefined) addProgramRequirements(card.effectProgram.effects);
   }
   if (card.cardType === 'site' && card.genesisPayOneManaToSummonToken !== undefined) {
-    dependencies.add(card.genesisPayOneManaToSummonToken);
+    requirements.push({ cardId: card.genesisPayOneManaToSummonToken, kind: 'minion' });
   }
   if (card.cardType === 'minion' && card.genesisProgram !== undefined) {
-    for (const effect of card.genesisProgram.effects) {
-      if (effect.op === 'summon-token') dependencies.add(effect.token);
-    }
+    addProgramRequirements(card.genesisProgram.effects);
   }
-  return [...dependencies].sort();
+  return requirements;
+}
+
+/** Returns direct token references; callers follow the returned IDs transitively. */
+export function tokenDependencies(card: GameCardDefinition): readonly string[] {
+  return [...new Set(tokenRequirements(card).map(({ cardId }) => cardId))].sort();
 }
 
 export type SiteCountQuery = Readonly<{
@@ -144,9 +151,10 @@ export type GameCardDefinition =
     bearerControllerChoosesExtraRandomOutcome?: never;
     cannotBeCarried?: true;
     cardType: 'artifact';
+    token?: true;
     grantsBearerLethal?: never;
     grantsBearerPower: 2;
-    manaCost: number;
+    manaCost: number | null;
     nearbyMinionsMustAttackIfAble?: never;
     nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
     sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves?: never;
@@ -162,9 +170,10 @@ export type GameCardDefinition =
     bearerControllerChoosesExtraRandomOutcome?: never;
     cannotBeCarried?: true;
     cardType: 'artifact';
+    token?: true;
     grantsBearerLethal: true;
     grantsBearerPower?: never;
-    manaCost: number;
+    manaCost: number | null;
     nearbyMinionsMustAttackIfAble?: never;
     nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
     sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves?: never;
@@ -180,9 +189,10 @@ export type GameCardDefinition =
     bearerControllerChoosesExtraRandomOutcome?: never;
     cannotBeCarried?: true;
     cardType: 'artifact';
+    token?: true;
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
-    manaCost: number;
+    manaCost: number | null;
     nearbyMinionsMustAttackIfAble?: never;
     nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
     sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves: true;
@@ -198,9 +208,10 @@ export type GameCardDefinition =
     bearerControllerChoosesExtraRandomOutcome?: never;
     cannotBeCarried?: true;
     cardType: 'artifact';
+    token?: true;
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
-    manaCost: number;
+    manaCost: number | null;
     nearbyMinionsMustAttackIfAble?: never;
     nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
     sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves?: never;
@@ -216,9 +227,10 @@ export type GameCardDefinition =
     bearerControllerChoosesExtraRandomOutcome?: never;
     cannotBeCarried?: true;
     cardType: 'artifact';
+    token?: true;
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
-    manaCost: number;
+    manaCost: number | null;
     nearbyMinionsMustAttackIfAble?: never;
     nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
     sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves?: never;
@@ -234,9 +246,10 @@ export type GameCardDefinition =
     bearerControllerChoosesExtraRandomOutcome?: never;
     cannotBeCarried?: true;
     cardType: 'artifact';
+    token?: true;
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
-    manaCost: number;
+    manaCost: number | null;
     nearbyMinionsMustAttackIfAble?: never;
     nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
     sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves?: never;
@@ -252,9 +265,10 @@ export type GameCardDefinition =
     bearerControllerChoosesExtraRandomOutcome?: never;
     cannotBeCarried?: true;
     cardType: 'artifact';
+    token?: true;
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
-    manaCost: number;
+    manaCost: number | null;
     nearbyMinionsMustAttackIfAble?: never;
     nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
     sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves?: never;
@@ -270,9 +284,10 @@ export type GameCardDefinition =
     bearerControllerChoosesExtraRandomOutcome: true;
     cannotBeCarried?: true;
     cardType: 'artifact';
+    token?: true;
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
-    manaCost: number;
+    manaCost: number | null;
     nearbyMinionsMustAttackIfAble?: never;
     nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
     sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves?: never;
@@ -288,9 +303,10 @@ export type GameCardDefinition =
     bearerControllerChoosesExtraRandomOutcome?: never;
     cannotBeCarried?: true;
     cardType: 'artifact';
+    token?: true;
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
-    manaCost: number;
+    manaCost: number | null;
     nearbyMinionsMustAttackIfAble: true;
     nearbyStrikesAgainstUnitsDealDoubleDamage?: true;
     sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves?: never;
@@ -306,9 +322,10 @@ export type GameCardDefinition =
     bearerControllerChoosesExtraRandomOutcome?: never;
     cannotBeCarried?: true;
     cardType: 'artifact';
+    token?: true;
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
-    manaCost: number;
+    manaCost: number | null;
     nearbyMinionsMustAttackIfAble?: never;
     nearbyStrikesAgainstUnitsDealDoubleDamage: true;
     sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves?: never;
@@ -324,9 +341,10 @@ export type GameCardDefinition =
     bearerControllerChoosesExtraRandomOutcome?: never;
     cannotBeCarried?: true;
     cardType: 'artifact';
+    token?: true;
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
-    manaCost: number;
+    manaCost: number | null;
     nearbyMinionsMustAttackIfAble?: never;
     nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
     sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves?: never;
@@ -342,9 +360,10 @@ export type GameCardDefinition =
     bearerControllerChoosesExtraRandomOutcome?: never;
     cannotBeCarried?: true;
     cardType: 'artifact';
+    token?: true;
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
-    manaCost: number;
+    manaCost: number | null;
     nearbyMinionsMustAttackIfAble?: never;
     nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
     sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves?: never;
@@ -1446,7 +1465,7 @@ const SUPPORTED_CARD_FIELDS = {
     sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves
     tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps
-    tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath thresholds
+    tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath thresholds token
   `.trim().split(/\s+/)),
   aura: new Set(`
     affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
@@ -1576,7 +1595,8 @@ function validateEffectProgram(program: unknown, path: string): asserts program 
       if (unknown) throw new RangeError(`${effectPath}.${unknown} is unsupported`);
       hasLocationChoice = true;
     }
-    if (value.op === 'summon-token' && value.destination === 'chosen-location' && !hasLocationChoice) {
+    if ((value.op === 'summon-token' || value.op === 'conjure-token')
+      && value.destination === 'chosen-location' && !hasLocationChoice) {
       throw new RangeError(`${effectPath}.destination chosen-location requires a preceding choose-location`);
     }
 
@@ -1879,6 +1899,9 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
         `${path}.tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath must be 4`,
       );
     }
+    if (card.token !== undefined && card.token !== true) {
+      throw new RangeError(`${path}.token must be true when defined`);
+    }
     const exclusiveArtifactEffects = Number(card.atEndOfControllerTurnUntapNearbyAllies === true)
       + Number(card.atEndOfEachTurnSiteControllerLosesLife !== undefined)
       + Number(card.atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn !== undefined)
@@ -1898,8 +1921,10 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
       || (exclusiveArtifactEffects === 0 && maskArtifactEffects === 0)) {
       throw new RangeError(`${path} must define exactly one supported Artifact effect`);
     }
-    if (!Number.isSafeInteger(card.manaCost) || card.manaCost < 0) {
-      throw new RangeError(`${path}.manaCost must be a supported nonnegative safe integer`);
+    if (card.manaCost === null) {
+      if (card.token !== true) throw new RangeError(`${path}.manaCost may be null only for token artifacts`);
+    } else if (!Number.isSafeInteger(card.manaCost) || card.manaCost < 0) {
+      throw new RangeError(`${path}.manaCost must be a supported nonnegative safe integer or null for token artifacts`);
     }
     rejectUnknownThresholds(card.thresholds, path, elements);
     for (const element of elements) {
@@ -2993,7 +3018,8 @@ function validateDeck(
       && definition?.cardType !== 'aura'
       && definition?.cardType !== 'minion'
       && definition?.cardType !== 'magic')
-      || definition?.cardType === 'minion' && definition.token === true) {
+      || definition?.cardType === 'minion' && definition.token === true
+      || definition?.cardType === 'artifact' && definition.token === true) {
       throw new RangeError(`${path}.spellbook[${index}] references an unsupported spell`);
     }
   });
@@ -3022,12 +3048,12 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
   for (const cardId of referencedCardIds) {
     const definition = input.cards[cardId];
     if (definition === undefined) continue;
-    for (const tokenCardId of tokenDependencies(definition)) {
-      const token = input.cards[tokenCardId];
-      if (token?.cardType !== 'minion' || token.token !== true) {
-        throw new RangeError(`cards.${cardId} token effect must reference a token minion`);
+    for (const requirement of tokenRequirements(definition)) {
+      const token = input.cards[requirement.cardId];
+      if (token?.cardType !== requirement.kind || token.token !== true) {
+        throw new RangeError(`cards.${cardId} token effect must reference a token ${requirement.kind}`);
       }
-      referencedCardIds.add(tokenCardId);
+      referencedCardIds.add(requirement.cardId);
     }
   }
   if (cardEntries.length !== referencedCardIds.size
@@ -3115,6 +3141,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                                 }),
             manaCost: card.manaCost,
             thresholds: { ...card.thresholds },
+            ...(card.token === true ? { token: true as const } : {}),
           }
           : card.cardType === 'site'
           ? {

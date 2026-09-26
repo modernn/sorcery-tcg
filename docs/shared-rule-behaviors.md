@@ -96,7 +96,7 @@ when preparing and admitting manifests, including several token types in one pro
 
 Explicit implementation limits remain: at most 32 tokens per operation, no cyclic
 token dependencies, at most 64 definitions on a dependency path, and at most 4,096
-realm minions during token entry. These are admission/runtime support bounds, not
+realm minions or artifacts during their respective token entry. These are admission/runtime support bounds, not
 Sorcery rules. A unit spanning multiple locations opens an ordinary location choice
 restricted to that live realm incarnation's footprint. Its departure empties the
 choice; token entry is skipped and independent following operations continue.
@@ -110,9 +110,19 @@ settlement handles those entries before the parent continuation. One location ch
 places an entire simultaneous token group; pending choices share the same engine-issued
 action, checkpoint, and replay lifecycle as ordinary unit choices.
 
+`ConjureToken` uses the same destination bindings, ordinary location choices,
+identity generation, and dependency validation to create loose artifact tokens.
+The operation requires an artifact token; `SummonToken` and legacy summoning facts
+still require minion tokens. Artifact tokens use ordinary artifact positions,
+pickup/drop, bearer relationships, and zone exits. Lower-region or void occupancy
+follows artifact rules rather than minion survival rules. Destruction, sacrifice,
+and return-to-hand banish tokens instead of inserting them into another zone.
+Direct acquisition by a bearer and composable bearer strike modifiers are still
+needed before the old Lance counter can be removed or new Lance cards admitted.
+
 Token definitions preserve an absent printed mana cost as explicit `null`, distinct
-from a printed zero. Only token minions may have that absence; tokens cannot enter
-the spellbook or be cast as ordinary minions. Effect entry pays zero without changing
+from a printed zero. Token minions and artifacts may have that absence; tokens cannot
+enter the spellbook or be cast as ordinary spells. Effect entry pays zero without changing
 the printed characteristic. Optional complete minion `elements` and `subtypes` lists
 preserve elemental identity independently of casting thresholds. The existing Demon,
 Mortal, and Undead predicates derive from explicit subtypes at admission; contradictory

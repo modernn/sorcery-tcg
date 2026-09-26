@@ -60,6 +60,11 @@ impl AbilityProgram {
                     token,
                     count,
                     destination,
+                }
+                | Effect::ConjureToken {
+                    token,
+                    count,
+                    destination,
                 } => {
                     if token.is_empty() || token.len() > 256 {
                         return Err(format!("{path}.token must be a card reference"));
@@ -173,9 +178,14 @@ impl AbilityProgram {
     }
 
     /// Card definitions required by this program, including multiple token kinds.
-    pub fn token_references(&self) -> impl Iterator<Item = &str> {
+    pub fn token_references(&self) -> impl Iterator<Item = (&str, crate::deck::CardType)> {
         self.effects.iter().filter_map(|effect| match effect {
-            Effect::SummonToken { token, .. } => Some(token.as_str()),
+            Effect::SummonToken { token, .. } => {
+                Some((token.as_str(), crate::deck::CardType::Minion))
+            }
+            Effect::ConjureToken { token, .. } => {
+                Some((token.as_str(), crate::deck::CardType::Artifact))
+            }
             _ => None,
         })
     }
@@ -451,6 +461,15 @@ pub enum TokenDestination {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "op", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Effect {
+    /// Conjures a simultaneous group of loose artifact tokens at a bound location.
+    ConjureToken {
+        /// Referenced token artifact definition.
+        token: String,
+        /// Number of artifacts entering together.
+        count: u8,
+        /// Location binding used for entry.
+        destination: TokenDestination,
+    },
     /// Creates a simultaneous group of tokens at a bound location.
     SummonToken {
         /// Referenced token minion definition.

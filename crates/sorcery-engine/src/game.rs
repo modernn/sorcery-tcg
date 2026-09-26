@@ -569,7 +569,7 @@ const fn unit_target_kind(target: &UnitTarget) -> UnitKind {
 /// exceed every printed defense, so the saturating conversion cannot change an outcome.
 fn payload_damage_amount(card: &CardDefinition) -> Result<u16, GameError> {
     let mana_cost = match &card.facts {
-        CardFacts::Artifact(facts) => facts.mana_cost,
+        CardFacts::Artifact(facts) => facts.mana_cost.ok_or(GameError::IllegalAction)?,
         CardFacts::Aura(facts) => facts.mana_cost,
         CardFacts::Magic(facts) => facts.mana_cost,
         CardFacts::Minion(facts) => facts.mana_cost.ok_or(GameError::IllegalAction)?,
@@ -1363,16 +1363,19 @@ const fn card_kind(facts: &CardFacts) -> CardKind {
     }
 }
 
-fn token_references(facts: &CardFacts) -> Vec<&str> {
+fn token_references(facts: &CardFacts) -> Vec<(&str, crate::deck::CardType)> {
     match facts {
         CardFacts::Site(site) => site
             .genesis_pay_one_mana_to_summon_token
             .as_deref()
             .into_iter()
+            .map(|id| (id, crate::deck::CardType::Minion))
             .collect(),
         CardFacts::Magic(magic) => match &magic.effect {
             MagicEffect::SummonTokenToAlliedMinionThenDrawSpell(id)
-            | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(id) => vec![id],
+            | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(id) => {
+                vec![(id, crate::deck::CardType::Minion)]
+            }
             MagicEffect::Program(program) => program.token_references().collect(),
             _ => Vec::new(),
         },
@@ -4875,8 +4878,11 @@ impl Game {
             let CardFacts::Artifact(facts) = &definition.facts else {
                 continue;
             };
+            let Some(mana_cost) = facts.mana_cost.filter(|_| !facts.token) else {
+                continue;
+            };
             if !artifact_effect_supported(facts.effect)
-                || u64::from(player.mana) < facts.mana_cost
+                || u64::from(player.mana) < mana_cost
                 || !self.thresholds_met(seat, facts.thresholds)
             {
                 continue;
@@ -4889,7 +4895,7 @@ impl Game {
                     card_instance_id: card.instance_id.clone(),
                     caster_instance_id: caster_instance_id.clone(),
                     cell,
-                    mana_cost: facts.mana_cost,
+                    mana_cost,
                 };
                 descriptors.extend(cells.iter().map(|cell| conjure(None, None, Some(*cell))));
                 if facts.cannot_be_carried {
@@ -14656,6 +14662,44 @@ impl Game {
         Ok(())
     }
 
+    /// Gives every generated object the same deterministic identity and token provenance.
+    fn create_token_card(
+        &self,
+        owner: Seat,
+        token_card_id: &str,
+        source_instance_id: &IdentityHash,
+        cell: Cell,
+        ordinal: usize,
+        origin_state_version: u64,
+    ) -> Result<CardInstance, GameError> {
+        let index = self
+            .rules
+            .cards
+            .binary_search_by(|definition| definition.id.as_str().cmp(token_card_id))
+            .map_err(|_| invalid("token effect lacks its referenced definition"))?;
+        let token = match &self.rules.cards[index].facts {
+            CardFacts::Minion(facts) => facts.token,
+            CardFacts::Artifact(facts) => facts.token,
+            _ => false,
+        };
+        if !token {
+            return Err(invalid("token effect must reference a token"));
+        }
+        Ok(CardInstance {
+            realm_entry: 0,
+            card_id: CardId(
+                u16::try_from(index)
+                    .map_err(|_| invalid("manifest contains too many card definitions"))?,
+            ),
+            instance_id: identity_hash(&json!({
+                "cardId": token_card_id, "cell": cell, "ordinal": ordinal, "owner": owner,
+                "source": "token", "sourceInstanceId": source_instance_id, "stateVersion": origin_state_version,
+            }))?,
+            owner,
+            source: CardSource::Token,
+        })
+    }
+
     fn create_token_unit(
         &self,
         owner: Seat,
@@ -14666,12 +14710,15 @@ impl Game {
         origin_state_version: u64,
     ) -> Result<UnitPosition, GameError> {
         let cell = location.cell;
-        let index = self
-            .rules
-            .cards
-            .binary_search_by(|definition| definition.id.as_str().cmp(token_card_id))
-            .map_err(|_| invalid("token effect lacks its referenced token minion definition"))?;
-        let definition = &self.rules.cards[index];
+        let card = self.create_token_card(
+            owner,
+            token_card_id,
+            source_instance_id,
+            cell,
+            ordinal,
+            origin_state_version,
+        )?;
+        let definition = &self.rules.cards[usize::from(card.card_id.0)];
         let CardFacts::Minion(facts) = &definition.facts else {
             return Err(invalid(
                 "token effect lacks its referenced token minion definition",
@@ -14697,26 +14744,8 @@ impl Game {
         {
             return Err(GameError::IllegalAction);
         }
-        let card_id = CardId(
-            u16::try_from(index)
-                .map_err(|_| invalid("manifest contains too many card definitions"))?,
-        );
         Ok(UnitPosition {
-            card: CardInstance {
-                realm_entry: 0,
-                card_id,
-                instance_id: identity_hash(&json!({
-                    "cardId": token_card_id,
-                    "cell": cell,
-                    "ordinal": ordinal,
-                    "owner": owner,
-                    "source": "token",
-                    "sourceInstanceId": source_instance_id,
-                    "stateVersion": origin_state_version,
-                }))?,
-                owner,
-                source: CardSource::Token,
-            },
+            card,
             carried_lance_count: facts.lance_count.unwrap_or(0),
             controller: owner,
             damage: 0,
@@ -24812,7 +24841,9 @@ fn referenced_manifest_cards<'a>(
     for deck in [&decks.north, &decks.south] {
         validate_deck(deck, facts)?;
         for card_id in &deck.spellbook {
-            if matches!(facts.get(card_id), Some(CardFacts::Minion(minion)) if minion.token) {
+            if matches!(facts.get(card_id), Some(CardFacts::Minion(f)) if f.token)
+                || matches!(facts.get(card_id), Some(CardFacts::Artifact(f)) if f.token)
+            {
                 return Err(invalid("spellbook references an unsupported token spell"));
             }
         }
@@ -24834,7 +24865,7 @@ fn referenced_manifest_cards<'a>(
             visiting.remove(card_id);
             let depth = token_references(&facts[card_id])
                 .into_iter()
-                .map(|id| depths[id])
+                .map(|(id, _)| depths[id])
                 .max()
                 .unwrap_or(0)
                 + 1;
@@ -24854,9 +24885,19 @@ fn referenced_manifest_cards<'a>(
                 ));
             }
             pending.push((card_id, true));
-            for token_id in token_references(&facts[card_id]) {
-                if !matches!(facts.get(token_id), Some(CardFacts::Minion(minion)) if minion.token) {
-                    return Err(invalid("token effect must reference a token minion"));
+            for (token_id, kind) in token_references(&facts[card_id]) {
+                let valid = match (kind, facts.get(token_id)) {
+                    (crate::deck::CardType::Minion, Some(CardFacts::Minion(f))) => f.token,
+                    (crate::deck::CardType::Artifact, Some(CardFacts::Artifact(f))) => f.token,
+                    _ => false,
+                };
+                if !valid {
+                    return Err(invalid(match kind {
+                        crate::deck::CardType::Artifact => {
+                            "conjure-token must reference a token artifact"
+                        }
+                        _ => "token effect must reference a token minion",
+                    }));
                 }
                 pending.push((token_id, false));
             }

@@ -175,7 +175,7 @@ pub struct CardCatalogEntry {
     pub engine_supported: bool,
     /// Mapping to the official pricing identity space.
     pub official_mapping: OfficialCardMapping,
-    /// Whether this minion is a generated token rather than a deck card.
+    /// Whether this card is a generated token rather than a deck card.
     pub token: bool,
 }
 
@@ -196,7 +196,7 @@ pub enum DeckDiagnostic {
         card_id: String,
         zone: DeckZone,
     },
-    /// A token minion was included in the Spellbook.
+    /// A token was included in the Spellbook.
     TokenInSpellbook { card_id: String },
     /// A deck card has no rarity and therefore no modeled copy limit.
     MissingRarity { card_id: String },
@@ -450,7 +450,7 @@ fn validate_zone_shape(
                 zone,
             });
         }
-        if zone == DeckZone::Spellbook && card.card_type == CardType::Minion && card.token {
+        if zone == DeckZone::Spellbook && card.token {
             diagnostics.push(DeckDiagnostic::TokenInSpellbook {
                 card_id: row.card_id.clone(),
             });

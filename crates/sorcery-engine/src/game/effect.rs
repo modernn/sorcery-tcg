@@ -576,6 +576,11 @@ impl Game {
                     ref token,
                     count,
                     destination,
+                }
+                | Effect::ConjureToken {
+                    ref token,
+                    count,
+                    destination,
                 } => {
                     if destination == TokenDestination::Source && frame.token_location.is_none() {
                         self.effect_anchor(&frame.source)?;
@@ -598,42 +603,44 @@ impl Game {
                         Some(choice) => choice.location,
                         None => self.token_effect_location(&frame, destination)?,
                     };
-                    if let Some(location) = location
-                        && self.token_may_enter_location(
+                    if let Some(location) = location {
+                        if matches!(effect, Effect::ConjureToken { .. }) {
+                            self.conjure_token_artifacts(&frame, token, count, location, outcomes)?;
+                        } else if self.token_may_enter_location(
                             frame.source.controller,
                             token,
                             location,
-                        )?
-                    {
-                        let entries = (0..usize::from(count))
-                            .map(|ordinal| {
-                                Ok(super::TokenEntryContinuation {
-                                    seat: frame.source.controller,
-                                    token: self.create_token_unit(
-                                        frame.source.controller,
-                                        token,
-                                        &frame.source.instance_id,
-                                        location,
-                                        (frame.cursor - 1) * 32 + ordinal,
-                                        self.position.state_version,
-                                    )?,
-                                    source_instance_id: frame.source.instance_id.clone(),
-                                    mana_paid: 0,
+                        )? {
+                            let entries = (0..usize::from(count))
+                                .map(|ordinal| {
+                                    Ok(super::TokenEntryContinuation {
+                                        seat: frame.source.controller,
+                                        token: self.create_token_unit(
+                                            frame.source.controller,
+                                            token,
+                                            &frame.source.instance_id,
+                                            location,
+                                            (frame.cursor - 1) * 32 + ordinal,
+                                            self.position.state_version,
+                                        )?,
+                                        source_instance_id: frame.source.instance_id.clone(),
+                                        mana_paid: 0,
+                                    })
                                 })
-                            })
-                            .collect::<Result<Vec<_>, GameError>>()?;
-                        self.finish_token_entries(entries, outcomes)?;
-                        if self.position.terminal.is_some()
-                            || self.position.pending_deathrites.is_some()
-                            || self.position.pending_trigger_order.is_some()
-                            || self.position.pending_ability_choice.is_some()
-                        {
-                            return self.continue_resolution(
-                                ResolutionContinuation::Effect(Box::new(frame)),
-                                outcomes,
-                            );
+                                .collect::<Result<Vec<_>, GameError>>()?;
+                            self.finish_token_entries(entries, outcomes)?;
+                            if self.position.terminal.is_some()
+                                || self.position.pending_deathrites.is_some()
+                                || self.position.pending_trigger_order.is_some()
+                                || self.position.pending_ability_choice.is_some()
+                            {
+                                return self.continue_resolution(
+                                    ResolutionContinuation::Effect(Box::new(frame)),
+                                    outcomes,
+                                );
+                            }
+                            // Synchronous entry needs no boxed continuation or recursive restart.
                         }
-                        // Synchronous entry needs no boxed continuation or recursive restart.
                     }
                 }
                 Effect::ChooseLocation { relation } => {
@@ -751,6 +758,64 @@ impl Game {
             }
         }
         self.finish_effect_frame(frame, outcomes);
+        Ok(())
+    }
+
+    fn conjure_token_artifacts(
+        &mut self,
+        frame: &EffectFrame,
+        token: &str,
+        count: u8,
+        location: Location,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        if self
+            .position
+            .artifacts
+            .len()
+            .saturating_add(usize::from(count))
+            > 4096
+        {
+            return Err(GameError::UnsupportedMechanic(
+                "token entry exceeds the supported realm artifact capacity".to_owned(),
+            ));
+        }
+        let entries = (0..usize::from(count))
+            .map(|ordinal| {
+                let mut card = self.create_token_card(
+                    frame.source.controller,
+                    token,
+                    &frame.source.instance_id,
+                    location.cell,
+                    (frame.cursor - 1) * 32 + ordinal,
+                    self.position.state_version,
+                )?;
+                if !matches!(
+                    self.rules.cards[usize::from(card.card_id.0)].facts,
+                    CardFacts::Artifact(_)
+                ) {
+                    return Err(GameError::IllegalAction);
+                }
+                card.enter_realm()?;
+                Ok(card)
+            })
+            .collect::<Result<Vec<_>, GameError>>()?;
+        for card in entries {
+            outcomes.push("artifact-conjured", || {
+                json!({
+                    "cardId": token, "instanceId": card.instance_id, "owner": card.owner,
+                    "seat": frame.source.controller, "sourceInstanceId": frame.source.instance_id,
+                    "cell": location.cell, "region": location.region, "manaPaid": 0, "token": true,
+                })
+            });
+            self.position.artifacts.push(super::ArtifactPosition {
+                card,
+                placement: super::ArtifactPlacement::Loose {
+                    location: location.cell,
+                    region: location.region,
+                },
+            });
+        }
         Ok(())
     }
 

@@ -132,3 +132,86 @@ fn token_program_rejects_invalid_operands_and_bindings() {
         "destination chosen requires a preceding choose-unit",
     );
 }
+
+fn artifact_token() -> Value {
+    json!({
+        "cardType": "artifact", "manaCost": null, "token": true, "grantsBearerPower": 2,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn conjure(token: &str) -> Value {
+    let mut effect = summon(token);
+    effect["op"] = json!("conjure-token");
+    effect
+}
+
+#[test]
+fn artifact_token_dependencies_preserve_kind_cost_and_deck_exclusion() {
+    let valid = selfplay_manifest_with(7110, |manifest| {
+        manifest["cards"]["north-spell-1"] = magic(&[summon("minion-token")]);
+        manifest["cards"]["minion-token"] =
+            token_minion(Some(genesis(&[conjure("artifact-token")])));
+        manifest["cards"]["artifact-token"] = artifact_token();
+    });
+    Game::from_manifest_json(&valid).expect("minion Genesis can conjure an artifact token");
+
+    for (effect, card, error) in [
+        (
+            summon("token"),
+            artifact_token(),
+            "token effect must reference a token minion",
+        ),
+        (
+            conjure("token"),
+            token_minion(None),
+            "conjure-token must reference a token artifact",
+        ),
+        (
+            conjure("missing"),
+            artifact_token(),
+            "conjure-token must reference a token artifact",
+        ),
+    ] {
+        let invalid = selfplay_manifest_with(7111, |manifest| {
+            manifest["cards"]["north-spell-1"] = magic(&[effect]);
+            manifest["cards"]["token"] = card;
+        });
+        rejected(&invalid, error);
+    }
+    let in_deck = selfplay_manifest_with(7112, |manifest| {
+        manifest["cards"]["north-spell-1"] = artifact_token();
+    });
+    rejected(&in_deck, "unsupported token spell");
+    let non_token = selfplay_manifest_with(7113, |manifest| {
+        let mut artifact = artifact_token();
+        artifact.as_object_mut().unwrap().remove("token");
+        artifact["manaCost"] = json!(0);
+        manifest["cards"]["north-spell-1"] = magic(&[conjure("token")]);
+        manifest["cards"]["token"] = artifact;
+    });
+    rejected(&non_token, "conjure-token must reference a token artifact");
+}
+
+#[test]
+fn artifact_absent_cost_is_not_zero_or_missing_cost() {
+    use sorcery_engine::facts::{CardFacts, parse_card_definition};
+    let null = artifact_token();
+    let CardFacts::Artifact(facts) = parse_card_definition("absent", &null).unwrap() else {
+        panic!("artifact");
+    };
+    assert_eq!(facts.mana_cost, None);
+    assert!(facts.token);
+    let mut zero = null.clone();
+    zero["manaCost"] = json!(0);
+    let CardFacts::Artifact(facts) = parse_card_definition("zero", &zero).unwrap() else {
+        panic!("artifact");
+    };
+    assert_eq!(facts.mana_cost, Some(0));
+    let mut missing = null.clone();
+    missing.as_object_mut().unwrap().remove("manaCost");
+    assert!(parse_card_definition("missing", &missing).is_err());
+    let mut non_token = null;
+    non_token.as_object_mut().unwrap().remove("token");
+    assert!(parse_card_definition("not-token", &non_token).is_err());
+}
