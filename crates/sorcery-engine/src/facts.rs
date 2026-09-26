@@ -441,6 +441,8 @@ pub struct MinionFacts {
     pub deathrite_mill_sites: bool,
     pub deathrite_mill_spells: bool,
     pub defense: u8,
+    /// Artifact card IDs to create as unsuppressible carried entry equipment.
+    pub enters_carrying: Vec<String>,
     /// Printed elemental identity, independent of casting thresholds; absent means unspecified.
     pub elements: Option<ElementSet>,
     pub demon: bool,
@@ -839,6 +841,39 @@ fn parse_reference(
     Ok(Some(reference.to_owned()))
 }
 
+fn parse_reference_list(
+    object: &Map<String, Value>,
+    field: &str,
+    path: &str,
+    maximum: usize,
+) -> Result<Vec<String>, FactError> {
+    let Some(value) = object.get(field) else {
+        return Ok(Vec::new());
+    };
+    let field_path = format!("{path}.{field}");
+    let values = value
+        .as_array()
+        .filter(|values| !values.is_empty() && values.len() <= maximum)
+        .ok_or_else(|| {
+            FactError::new(
+                &field_path,
+                format!("must be a nonempty array of at most {maximum} card IDs"),
+            )
+        })?;
+    values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let item_path = format!("{field_path}.{index}");
+            let reference = value
+                .as_str()
+                .ok_or_else(|| FactError::new(&item_path, "must be a card ID"))?;
+            validate_identifier(reference, &item_path)?;
+            Ok(reference.to_owned())
+        })
+        .collect()
+}
+
 fn one_effect<T>(effects: impl IntoIterator<Item = Option<T>>, path: &str) -> Result<T, FactError> {
     let mut effects = effects.into_iter().flatten();
     let Some(effect) = effects.next() else {
@@ -1056,6 +1091,7 @@ const MINION_FIELDS: &[&str] = &[
     "deathriteMillSites",
     "deathriteMillSpells",
     "defense",
+    "entersCarrying",
     "elements",
     "demon",
     "diesAtEndOfControllerTurn",
@@ -2255,6 +2291,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     )?
     .map(compact_u8);
     let token = true_only(object, "token", path)?;
+    let enters_carrying = parse_reference_list(object, "entersCarrying", path, 32)?;
     let voidwalk = optional_bool(object, "voidwalk", path)?;
     let landbound = optional_bool(object, "landbound", path)?;
     let waterbound = optional_bool(object, "waterbound", path)?;
@@ -2347,6 +2384,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
             MAX_COMBAT_STAT,
             path,
         )?),
+        enters_carrying,
         demon,
         elements,
         dies_at_end_of_controller_turn: true_only(object, "diesAtEndOfControllerTurn", path)?,

@@ -78,15 +78,75 @@ impl Game {
         for entry in entries {
             self.enter_token_unit(entry, outcomes)?;
         }
+        self.begin_entry_equipment(sources, true, outcomes)
+    }
+
+    /// Entry equipment is created for the whole group before collecting suppressible Genesis.
+    pub(super) fn begin_entry_equipment(
+        &mut self,
+        sources: Vec<(Seat, IdentityHash, CardId)>,
+        settle_regions: bool,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let sources = sources
+            .into_iter()
+            .map(|(seat, instance_id, card_id)| {
+                self.unit_reference(&super::UnitTarget::Minion { seat, instance_id })
+                    .map(|reference| (seat, reference, card_id))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        for (seat, reference, card_id) in &sources {
+            if self
+                .compiled_ability(*card_id, super::AbilityEntry::Entry)
+                .is_some()
+            {
+                let source = self.unit_effect_source(&super::UnitTarget::Minion {
+                    seat: *seat,
+                    instance_id: reference.instance_id().clone(),
+                })?;
+                let frame = self.effect_frame(
+                    *card_id,
+                    super::AbilityEntry::Entry,
+                    source,
+                    None,
+                    None,
+                    None,
+                )?;
+                self.run_effect_frame(frame, outcomes)?;
+            }
+        }
+        self.continue_resolution(
+            ResolutionContinuation::EntryGenesis {
+                sources,
+                settle_regions,
+            },
+            outcomes,
+        )
+    }
+
+    pub(super) fn finish_entry_genesis(
+        &mut self,
+        sources: Vec<(Seat, super::effect::RealmReference, CardId)>,
+        settle_regions: bool,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
         let mut triggers = Vec::new();
-        for (seat, instance_id, card_id) in sources {
-            if let Some(trigger) = self.genesis_trigger(seat, &instance_id, card_id)? {
+        for (seat, reference, card_id) in sources {
+            if self
+                .position
+                .units
+                .iter()
+                .any(|unit| reference.matches(&unit.card))
+                && let Some(trigger) =
+                    self.genesis_trigger(seat, reference.instance_id(), card_id)?
+            {
                 triggers.push(trigger);
             }
         }
-        self.settle_region_occupancy(outcomes)?;
-        self.begin_genesis_triggers(triggers, outcomes)?;
-        Ok(())
+        if settle_regions {
+            self.settle_region_occupancy(outcomes)?;
+        }
+        self.begin_genesis_triggers(triggers, outcomes)
     }
 
     pub(super) fn finish_magic_resolution(

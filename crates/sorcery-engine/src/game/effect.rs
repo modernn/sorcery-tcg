@@ -15,6 +15,7 @@ mod tests;
 pub(super) enum AbilityEntry {
     Magic,
     Genesis,
+    Entry,
     Activated,
 }
 
@@ -167,6 +168,7 @@ impl Game {
         match entry {
             AbilityEntry::Magic => &abilities.magic,
             AbilityEntry::Genesis => &abilities.genesis,
+            AbilityEntry::Entry => &abilities.entry,
             AbilityEntry::Activated => &abilities.activated,
         }
         .as_ref()
@@ -688,6 +690,7 @@ impl Game {
                     }
                     let targets = self.effect_recipients(&frame, recipients)?;
                     let allocated = match frame.entry {
+                        AbilityEntry::Entry => return Err(GameError::IllegalAction),
                         AbilityEntry::Magic => "magic-damage-allocated",
                         AbilityEntry::Genesis => "genesis-damage-allocated",
                         AbilityEntry::Activated
@@ -840,12 +843,21 @@ impl Game {
                 "token entry exceeds the supported realm artifact capacity".to_owned(),
             ));
         }
+        // Entry equipment and Genesis can conjure the same token in the same action.
+        // Separate their identity domains while retaining the real source in events.
+        let entry_source = (frame.entry == AbilityEntry::Entry)
+            .then(|| {
+                crate::canonical::identity_hash(&json!({
+                    "entryEquipment": frame.source.realm.as_ref().map(RealmReference::value),
+                }))
+            })
+            .transpose()?;
         let entries = (0..usize::from(count))
             .map(|ordinal| {
                 let mut card = self.create_token_card(
                     frame.source.controller,
                     token,
-                    &frame.source.instance_id,
+                    entry_source.as_ref().unwrap_or(&frame.source.instance_id),
                     location.cell,
                     (frame.cursor - 1) * 32 + ordinal,
                     self.position.state_version,
@@ -999,7 +1011,7 @@ impl Game {
     pub(super) fn effect_frame_value(&self, frame: &EffectFrame) -> Value {
         json!({
             "kind": "effect", "cardId": self.rules.cards[usize::from(frame.card_id.0)].id,
-            "entry": match frame.entry { AbilityEntry::Magic => "magic", AbilityEntry::Genesis => "genesis", AbilityEntry::Activated => "activated" },
+            "entry": match frame.entry { AbilityEntry::Magic => "magic", AbilityEntry::Genesis => "genesis", AbilityEntry::Entry => "entry", AbilityEntry::Activated => "activated" },
             "cursor": frame.cursor, "started": frame.started,
             "declarationPending": frame.declaration_pending,
             "source": frame.source.value(),

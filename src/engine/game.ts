@@ -137,6 +137,11 @@ function tokenRequirements(card: GameCardDefinition): readonly TokenRequirement[
   if (card.cardType === 'minion' && card.genesisProgram !== undefined) {
     addProgramRequirements(card.genesisProgram.effects);
   }
+  if (card.cardType === 'minion' && card.entersCarrying !== undefined) {
+    for (const cardId of card.entersCarrying) {
+      requirements.push({ cardId, kind: 'artifact', placement: 'carried' });
+    }
+  }
   return requirements;
 }
 
@@ -646,6 +651,7 @@ export type GameCardDefinition =
     deathriteMillSites?: boolean;
     deathriteMillSpells?: boolean;
     defense: number;
+    entersCarrying?: readonly string[];
     discardSpellToDamageRandomOtherUnitHere?: number;
     discardRandomCardInsteadOfMana?: true;
     diesAtEndOfControllerTurn?: true;
@@ -1567,7 +1573,7 @@ const SUPPORTED_CARD_FIELDS = {
     genesisDisableSelfUntilDamaged genesisDrawSite genesisDrawSpells genesisEachPlayerControlledByPreviousPlayerNextTurn genesisGainControlOfTappedMinionsHereUntilThisLeaves genesisHealController
     genesisLoseControllerLife genesisMayDamageTargetAdjacentUnit genesisProgram genesisStrikeEachEnemyHere genesisUntapAdjacentAllies
     gainsPowerRangedAndSpellcasterAtopTower gainsStealthAtEndOfTurn
-    gainsStealthAtEndOfTurnIfNoEnemiesNearby immobile lanceCount landbound lethal elements subtypes
+    entersCarrying gainsStealthAtEndOfTurnIfNoEnemiesNearby immobile lanceCount landbound lethal elements subtypes
     manaCost mayRangedStrikeOnceDuringBasicMovement mayStepAfterRangedStrike demon mortal undead movementBonus
     movesOnlyForward movesOnlySideways mustAttackAUnitIfAble
     mustBeCastBurrowed mustBeCastSubmerged mustBeCastToOuterColumn mustBeCastToWaterSite
@@ -1693,6 +1699,12 @@ function validateMinionMetadata(
   path: string,
   elements: readonly GameElement[],
 ): void {
+  if (card.entersCarrying !== undefined) {
+    if (!Array.isArray(card.entersCarrying) || card.entersCarrying.length < 1 || card.entersCarrying.length > 32) {
+      throw new RangeError(`${path}.entersCarrying must contain 1-32 card references`);
+    }
+    card.entersCarrying.forEach((cardId, index) => requireCardId(cardId, `${path}.entersCarrying[${index}]`));
+  }
   const minionElements = card.elements;
   if (minionElements !== undefined
     && (!Array.isArray(minionElements)
@@ -3633,6 +3645,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? { diesAtEndOfControllerTurn: true as const }
               : {}),
             ...(card.elements !== undefined ? { elements: [...card.elements] } : {}),
+            ...(card.entersCarrying !== undefined ? { entersCarrying: [...card.entersCarrying] } : {}),
             ...(card.discardRandomCardInsteadOfMana === true
               ? { discardRandomCardInsteadOfMana: true as const }
               : {}),

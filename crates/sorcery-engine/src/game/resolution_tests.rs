@@ -768,3 +768,136 @@ fn token_location_choice_uses_the_live_host_footprint_and_rejects_a_new_incarnat
         }
     }
 }
+
+#[test]
+fn stale_entry_equipment_skips_old_bearer_but_preserves_other_entry_genesis() {
+    let encoded = selfplay_manifest_with(9427, |m| {
+        m["cards"]["south-spell-1"]["occupiesSquareArea"] = json!(2);
+        m["cards"]["south-spell-1"]["entersCarrying"] = json!(["entry-token"]);
+        for id in ["south-spell-1", "south-spell-2"] {
+            m["cards"][id]["genesisDrawSpells"] = json!(1);
+        }
+        m["cards"]["entry-token"] = json!({"cardType":"artifact", "token":true,
+            "manaCost":null, "thresholds":{"air":0,"earth":0,"fire":0,"water":0},
+            "bearerUnitStrike":{"damageBonus":1}});
+    });
+    let (mut game, _) = setup_fixture(Game::from_manifest_json(&encoded).unwrap(), false);
+    let cells = ["B3", "C3", "B4", "C4"].map(|c| Cell::parse(c).unwrap());
+    game.position.units[0].location = cells[0];
+    game.position.units[0].occupied_cells = Some(cells);
+    let sources = game
+        .position
+        .units
+        .iter()
+        .map(|u| (u.controller, u.card.instance_id.clone(), u.card.card_id))
+        .collect();
+    let hand_before = game.position.players[0].hand_spellbook.len();
+    game.begin_entry_equipment(sources, false, &mut super::OutcomeLog::Ignore)
+        .unwrap();
+    let choices = game.legal_actions().unwrap();
+    assert_eq!(choices.len(), 4);
+    for reenter in [false, true] {
+        let mut branch = game.clone();
+        if reenter {
+            branch.position.units[0].card.enter_realm().unwrap();
+        } else {
+            branch.position.units.remove(0);
+        }
+        assert!(branch.apply_action_recorded(&choices[0]).is_err());
+        let mut events = Vec::new();
+        branch
+            .resume_empty_ability_choice(&mut super::OutcomeLog::Record(&mut events))
+            .unwrap();
+        assert!(branch.position.artifacts.is_empty());
+        assert_eq!(
+            branch.position.players[0].hand_spellbook.len(),
+            hand_before + 1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|(kind, _)| kind == "spell-drawn")
+                .count(),
+            1
+        );
+        assert!(branch.position.pending_ability_choice.is_none());
+    }
+}
+
+#[test]
+fn raised_minion_entry_choice_preserves_owner_and_defers_magic_completion() {
+    let encoded = selfplay_manifest_with(9428, |m| {
+        m["cards"]["north-spell-1"] = json!({"cardType":"magic", "manaCost":0,
+            "thresholds":{"air":0,"earth":0,"fire":0,"water":0},
+            "effectProgram":{"effects":[{"op":"draw","zone":"spellbook","count":1}]}});
+        m["cards"]["south-spell-1"]["occupiesSquareArea"] = json!(2);
+        m["cards"]["south-spell-1"]["entersCarrying"] = json!(["entry-token"]);
+        m["cards"]["south-spell-1"]["genesisDrawSpells"] = json!(1);
+        m["cards"]["entry-token"] = json!({"cardType":"artifact", "token":true,
+            "manaCost":null, "thresholds":{"air":0,"earth":0,"fire":0,"water":0},
+            "bearerUnitStrike":{"damageBonus":1}});
+    });
+    let (mut game, _) = setup_fixture(Game::from_manifest_json(&encoded).unwrap(), false);
+    let mut unit = game.position.units.remove(0);
+    unit.card.owner = Seat::South;
+    let bearer = unit.card.instance_id.clone();
+    let cells = ["B3", "C3", "B4", "C4"].map(|c| Cell::parse(c).unwrap());
+    unit.location = cells[0];
+    unit.occupied_cells = Some(cells);
+    let caster = super::UnitTarget::Avatar {
+        seat: Seat::North,
+        instance_id: game.position.players[0].avatar.card.instance_id.clone(),
+    };
+    let source = game.position.players[0].hand_spellbook[0].clone();
+    let pending = super::PendingCemeterySummon {
+        card_instance_id: bearer.clone(),
+        card_owner: Seat::South,
+        caster_instance_id: caster.instance_id().clone(),
+        seat: Seat::North,
+        source_magic_card_id: source.card_id,
+        source_magic_instance_id: source.instance_id,
+        source_magic_owner: source.owner,
+    };
+    let mut events = Vec::new();
+    game.finish_summon(
+        super::PaidSummonContinuation {
+            caster,
+            mana_paid: 0,
+            sacrificed_minion_instance_ids: vec![],
+            unit,
+        },
+        Some(pending),
+        &mut super::OutcomeLog::Record(&mut events),
+    )
+    .unwrap();
+    assert!(!events.iter().any(|(kind, _)| kind == "magic-resolved"));
+    let choices = game.legal_actions().unwrap();
+    assert_eq!(choices.len(), 4);
+    let (events, _) = game.apply_action_recorded(&choices[0]).unwrap();
+    let kinds = events
+        .iter()
+        .map(|(kind, _)| kind.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        kinds
+            .iter()
+            .position(|k| *k == "artifact-conjured")
+            .unwrap()
+            < kinds.iter().position(|k| *k == "spell-drawn").unwrap()
+    );
+    assert!(
+        kinds.iter().position(|k| *k == "spell-drawn").unwrap()
+            < kinds.iter().position(|k| *k == "magic-resolved").unwrap()
+    );
+    assert_eq!(game.position.artifacts[0].card.owner, Seat::North);
+    assert_eq!(
+        game.position
+            .units
+            .iter()
+            .find(|u| u.card.instance_id == bearer)
+            .unwrap()
+            .card
+            .owner,
+        Seat::South
+    );
+}

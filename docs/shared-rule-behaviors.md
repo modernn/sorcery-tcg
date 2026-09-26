@@ -136,9 +136,18 @@ modifiers. Ranged projectiles that cause a strike still use the shared strike ru
 Additive bonuses combined with temporary or nearby doubling require controller-owned
 damage-replacement ordering. Until those choices exist, exercised combinations fail
 explicitly, including combinations using the legacy Lance counter. This is an
-unsupported interaction, not a fixed arithmetic ordering. Unsuppressible entry-time
-equipment, replacement ordering, and full artifact characteristics are still needed
-before the old Lance counter can be removed or new Lance cards admitted.
+unsupported interaction, not a fixed arithmetic ordering. Replacement ordering and
+full artifact characteristics are still needed before the old Lance counter can be
+removed or new Lance cards admitted.
+
+Minion `entersCarrying` lists 1–32 carriable artifact-token references, with repeated
+references creating separate artifacts. It lowers to restricted carried-token effects,
+independent of suppressible Genesis. Paid summons, reanimation, and token batches
+create this equipment before Genesis; token batches place every minion and its equipment
+before regional settlement. Each artifact on an oversized bearer uses the existing
+location choice independently. Pending entry work retains bearer incarnations and
+resumes through the ordinary checkpointable continuation. Token identity separates
+entry equipment from Genesis creation by the same source in the same action.
 
 Token definitions preserve an absent printed mana cost as explicit `null`, distinct
 from a printed zero. Token minions and artifacts may have that absence; tokens cannot

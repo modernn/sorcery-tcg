@@ -6,7 +6,9 @@ pub(super) use crate::ability::{
     AbilityProgram, ControllerRelation, Effect, SelectionSpec, SpatialRelation, UnitArea,
     UnitChoiceSpec, UnitCohort, UnitSet,
 };
-use crate::ability::{EffectDuration, TemporaryModifierKind, TokenDestination};
+use crate::ability::{
+    ArtifactTokenPlacement, EffectDuration, TemporaryModifierKind, TokenDestination,
+};
 use crate::action::DeckZone;
 use crate::facts::{ArtifactEffect, CardFacts, MagicEffect, MinionFacts};
 
@@ -15,6 +17,7 @@ use crate::facts::{ArtifactEffect, CardFacts, MagicEffect, MinionFacts};
 pub(super) struct CompiledAbilities {
     pub(super) magic: Option<Arc<AbilityProgram>>,
     pub(super) genesis: Option<Arc<AbilityProgram>>,
+    pub(super) entry: Option<Arc<AbilityProgram>>,
     pub(super) activated: Option<Arc<AbilityProgram>>,
 }
 
@@ -26,16 +29,26 @@ impl CompiledAbilities {
             CardFacts::Magic(facts) => Self {
                 magic: compile_magic(facts),
                 genesis: None,
+                entry: None,
                 activated: None,
             },
             CardFacts::Minion(facts) => Self {
                 magic: None,
                 genesis: compile_genesis(facts),
+                entry: (!facts.enters_carrying.is_empty()).then(|| Arc::new(AbilityProgram {
+                    selection: None,
+                    optional_selection: false,
+                    effects: facts.enters_carrying.iter().map(|token| Effect::ConjureToken {
+                        token: token.clone(), count: 1, destination: TokenDestination::Source,
+                        placement: ArtifactTokenPlacement::Carried,
+                    }).collect(),
+                })),
                 activated: compile_minion_activation(facts),
             },
             CardFacts::Artifact(facts) => Self {
                 magic: None,
                 genesis: None,
+                entry: None,
                 activated: match facts.effect {
                     ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree => {
                         Some(ability_with_selection(
@@ -55,6 +68,7 @@ impl CompiledAbilities {
             CardFacts::Avatar(_) | CardFacts::Aura(_) | CardFacts::Site(_) => Self {
                 magic: None,
                 genesis: None,
+                entry: None,
                 activated: None,
             },
         }

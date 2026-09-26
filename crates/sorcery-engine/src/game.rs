@@ -31,6 +31,8 @@ mod ability;
 mod bearer_strike_tests;
 mod choices;
 mod effect;
+#[cfg(test)]
+mod entry_equipment_tests;
 mod modifiers;
 mod resolution;
 #[cfg(test)]
@@ -856,6 +858,10 @@ enum ResolutionContinuation {
     SiteGenesis(SiteGenesisContinuation),
     SiteGenesisTail(SiteGenesisTail),
     TokenEntries(Vec<TokenEntryContinuation>),
+    EntryGenesis {
+        sources: Vec<(Seat, effect::RealmReference, CardId)>,
+        settle_regions: bool,
+    },
     MagicResolved {
         resolution: DeferredMagicResolved,
         held_card: Option<CardInstance>,
@@ -1385,8 +1391,15 @@ fn token_references(facts: &CardFacts) -> Vec<(&str, crate::ability::TokenRequir
         },
         CardFacts::Minion(minion) => minion
             .genesis_program
-            .as_ref()
-            .map_or_else(Vec::new, |program| program.token_references().collect()),
+            .iter()
+            .flat_map(|program| program.token_references())
+            .chain(minion.enters_carrying.iter().map(|id| {
+                (
+                    id.as_str(),
+                    crate::ability::TokenRequirement::Artifact { carried: true },
+                )
+            }))
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -1656,6 +1669,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         genesis_gain_control_of_tapped_minions_here_until_this_leaves: _,
         genesis_may_damage_target_adjacent_unit: _,
         genesis_program: _,
+        enters_carrying: _,
         genesis_strike_each_enemy_here: _,
         genesis_untap_adjacent_allies: _,
         immobile: _,
@@ -13833,6 +13847,13 @@ impl Game {
                 restore();
                 self.finish_token_entries(entries, outcomes)
             }
+            ResolutionContinuation::EntryGenesis {
+                sources,
+                settle_regions,
+            } => {
+                restore();
+                self.finish_entry_genesis(sources, settle_regions, outcomes)
+            }
             ResolutionContinuation::SiteGenesisTail(continuation) => {
                 restore();
                 self.finish_site_genesis_tail(continuation, outcomes)
@@ -22549,7 +22570,15 @@ impl Game {
                 })
             });
         }
-        self.apply_minion_genesis(seat, &card_instance_id, card_id, outcomes)?;
+        if self.rules.cards[usize::from(card_id.0)]
+            .abilities
+            .entry
+            .is_some()
+        {
+            self.begin_entry_equipment(vec![(seat, card_instance_id, card_id)], false, outcomes)?;
+        } else {
+            self.apply_minion_genesis(seat, &card_instance_id, card_id, outcomes)?;
+        }
         if let Some(raised) = raised {
             self.continue_resolution(
                 ResolutionContinuation::MagicResolved {
@@ -24414,6 +24443,17 @@ impl Game {
                     "sourceInstanceId": entry.source_instance_id,
                     "manaPaid": entry.mana_paid,
                 })).collect::<Vec<_>>(),
+            }),
+            ResolutionContinuation::EntryGenesis {
+                sources,
+                settle_regions,
+            } => json!({
+                "kind": "entry-genesis",
+                "sources": sources.iter().map(|(seat, reference, card_id)| json!({
+                    "seat": seat, "source": reference.value(),
+                    "cardId": self.rules.cards[usize::from(card_id.0)].id,
+                })).collect::<Vec<_>>(),
+                "settleRegions": settle_regions,
             }),
             ResolutionContinuation::SiteGenesisTail(continuation) => json!({
                 "kind": "site-genesis-tail",
