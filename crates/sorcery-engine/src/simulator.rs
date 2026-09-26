@@ -201,7 +201,7 @@ pub fn search_from_checkpoint(
 /// Returns [`SimulatorError`] when replay rejects an action or does not reproduce
 /// the speculative rollout's final state exactly.
 pub fn replay_selected(manifest_json: &str, rollout: &Rollout) -> Result<Session, SimulatorError> {
-    apply_and_verify(Session::new(manifest_json)?, rollout)
+    replay_selected_from_session(Session::new(manifest_json)?, rollout)
 }
 
 /// Replays one selected branch from its exact authoritative checkpoint.
@@ -222,10 +222,13 @@ pub fn replay_checkpoint_branch(
         .rollouts
         .get(branch_index)
         .ok_or(SimulatorError::ReplayDiverged)?;
-    apply_and_verify(session.clone(), rollout)
+    replay_selected_from_session(session.clone(), rollout)
 }
 
-fn apply_and_verify(mut session: Session, rollout: &Rollout) -> Result<Session, SimulatorError> {
+pub(crate) fn replay_selected_from_session(
+    mut session: Session,
+    rollout: &Rollout,
+) -> Result<Session, SimulatorError> {
     if session.manifest_id() != &rollout.manifest_id {
         return Err(SimulatorError::ReplayDiverged);
     }

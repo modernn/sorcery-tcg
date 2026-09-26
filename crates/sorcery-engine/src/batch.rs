@@ -10,13 +10,13 @@ use serde::Serialize;
 
 use crate::canonical::IdentityHash;
 use crate::contract::Seat;
-use crate::game::{Game, GameEndReason, GameOutcome};
+use crate::game::{GameEndReason, GameOutcome};
 use crate::game_record::{
     game_record_from_session, session_eligibility, validate_artifacts_dir, write_game_artifacts,
 };
 use crate::policy::PolicySnapshot;
 use crate::session::{Session, SessionError};
-use crate::simulator::{SimulatorError, replay_selected, run_game};
+use crate::simulator::{SimulatorError, replay_selected_from_session, run_game};
 
 /// Maximum jobs accepted by one bounded batch.
 pub const MAX_BATCH_JOBS: usize = 256;
@@ -475,9 +475,10 @@ fn finish_job(
 
 fn run_job(job_index: usize, job: &BatchJob<'_>) -> Result<(BatchResult, Session), BatchError> {
     let failed = |source| BatchError::Job { job_index, source };
-    let game = Game::from_manifest_json(job.manifest_json)
+    let session = Session::new(job.manifest_json)
         .map_err(SimulatorError::from)
         .map_err(failed)?;
+    let game = session.game_clone();
     for (policy, deck_id) in [
         (job.north_policy, job.north_deck_id),
         (job.south_policy, job.south_deck_id),
@@ -496,7 +497,7 @@ fn run_job(job_index: usize, job: &BatchJob<'_>) -> Result<(BatchResult, Session
     if rollout.outcome().is_none() {
         return Err(BatchError::NonTerminal(job_index));
     }
-    let session = replay_selected(job.manifest_json, &rollout).map_err(failed)?;
+    let session = replay_selected_from_session(session, &rollout).map_err(failed)?;
     let (Some(outcome), Some(reason)) = (session.outcome(), session.terminal_reason()) else {
         return Err(BatchError::NonTerminal(job_index));
     };

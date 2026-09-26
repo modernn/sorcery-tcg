@@ -296,6 +296,17 @@ Targeted Magic whose caster moved before resolution currently aborts explicitly:
 the retained authority does not resolve whether the chosen casting location or the
 caster's new location determines range. Started frames keep their established bindings.
 
+The existing resolution driver also retains ordered caller work. Token-producing
+Magic queues a simultaneous entry group, its remaining draw, and one completion;
+a token's Genesis can suspend that sequence for Deathrite ordering. All members of
+an entry group enter before any Genesis resolves. Multiple simultaneous Genesis
+currently abort explicitly because player-selected trigger ordering has not migrated;
+choosing an arbitrary order would misrepresent the rules. Site effects and raised-minion
+Magic resume their remaining work through the same continuation. The pending state
+includes the full sequence and any held Magic, so checkpoint branches preserve both
+event order and card ownership. Terminal cleanup retires the spell once and skips
+remaining effects and draws.
+
 Direct scenarios cover protected targets, independent effects, death-trigger order,
 cloned checkpoint continuation, terminal cleanup, source departure, re-entry, control
 changes, oversized footprints, and movement before versus after resolution starts.
@@ -304,8 +315,9 @@ scenarios exercise the migrated operations through each origin. Validated costs 
 entry-choice adapters still use existing facts; shared atomic costs and entry-time
 choices are the next migration. In particular, targeted Genesis needs an engine-issued
 choice after entry; the old adjacent-allies shortcut is not a completed implementation
-of that rule. Site and token sequences must preserve their remaining work across that
-choice before their existing declaration-time choices can be removed.
+of that rule. The new site and token continuations provide the remaining-work boundary;
+the choice instruction and post-entry legal actions still need to replace the existing
+declaration-time choices.
 
 Migrate persistent effects through the same invocation boundary next, using typed
 lifetimes and official characteristic layers. Expand identity/forms/zones, event
@@ -319,6 +331,10 @@ Separate immutable compiled rules from per-match seed/deck configuration. Curren
 rules contexts are shared among cloned positions, but include manifest/seed identity
 and are reconstructed for each batch job. A common compiled catalog should be reused
 across independent seeded jobs without copying all 1,100 definitions into every request.
+Within a batch job, initial setup now happens once: its game clone supplies the rollout
+and the retained session records the selected actions. Final replay verification still
+reconstructs the manifest independently. This removes redundant setup without a cache
+or a second path for validating game rules.
 
 Keep each worker's position, RNG, event continuation, and temporary storage private.
 Index triggers by event kind and use compact query results. Start with straightforward
@@ -341,12 +357,24 @@ recorded replay medians were 5.677 and 5.643 games/second. Performance remained 
 unchanged on this workload; consolidating selection and checking resolution validity
 has not yet produced a demonstrated throughput improvement.
 
-The same checkpoint's 48-game recorded batch benchmark measured 3.460 games/second
+The earlier composed-execution checkpoint's 48-game recorded batch benchmark measured 3.460 games/second
 with one worker and 38.382 with 16 (three timed repetitions per worker count).
 Sixteen was best among 1, 2, 4, 8, 16, and 24 workers on this 24-logical-CPU machine;
 24 workers produced 29.509 games/second. Every worker count and repetition produced
 the same result hash. These figures describe the synthetic workload and current
 machine, not a claim of equivalent throughput for complete real decks.
+
+The ordered-continuation and batch-setup checkpoint used three alternating release
+comparisons against the selector checkpoint: raw medians were 1,330.713 before and
+1,329.636 games/second after; recorded replay medians were 5.656 and 5.842. Raw
+simulation throughput was effectively unchanged. A separate before/after worker
+sweep (48 games, warmup and three timed repetitions per count) measured 3.477 versus
+3.532 recorded games/second with one worker, 38.568 versus 39.178 with 16, and
+29.143 versus 39.588 with 24. The final build's 16- and 24-worker results were close;
+the large change at 24 workers is not sufficient evidence of a general engine
+speedup from setup reuse. Every tested count from 1 through 24 produced the same
+result hash in both builds. These are synthetic, fully recorded and independently
+replayed batches, not complete real-deck benchmarks.
 
 Expose public semantic action information to playing policies from the same compiled
 definitions. This lets a policy evaluate effect purpose and tactical outcomes without
