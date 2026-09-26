@@ -63,6 +63,39 @@ are rejected; their abilities are never silently removed. Private experiment inp
 results, and checkpoints must remain beneath `.local/authority/`. Private experiment
 artifact-directory writes are disabled; use the local session protocol for checkpoints.
 
+### Build decks across presets
+
+The recovered presets currently bind 96 of the 1,100 cards. Export a private catalog
+to discover those cards, their exact facts, rarity, printed rules, source/fact hashes,
+and the presets supplying each binding:
+
+```sh
+pnpm game:experiment-private --catalog --output-id bound-cards
+```
+
+Read `.local/authority/experiments/bound-cards.catalog.json`. Cards without bindings have
+`engineSupported: false` and `reason: "no-preset-binding"`; being in the source corpus
+does not make a card playable. The catalog also includes the local Constructed format.
+
+Create `.local/authority/experiments/decks.json` with `schemaVersion: 1`, `candidate`,
+`opponent`, `seeds`, and `workers`. Decks have the same avatar/atlas/spellbook shape used
+above; counted and expanded zones are accepted. You can start by copying an existing
+experiment request and removing `baseManifest`. Select card IDs from any supported
+preset, then prepare and run:
+
+```sh
+pnpm game:experiment-private --decks experiments/decks.json --output-id custom-decks
+pnpm --silent game:experiment < .local/authority/experiments/custom-decks.json \
+  > .local/authority/experiments/custom-result.json
+```
+
+`--decks` is relative to `.local/authority/` and accepts at most 1 MiB. Only deck
+composition, seeds, and worker count may be supplied: facts come from the source-checked
+presets. Conflicting authority/fact bindings and unsupported cards fail closed. Required
+tokens are retained, and Rust validates the manifest before it is written. This does not
+prove Constructed legality or improve the baseline policy. Generated files are private,
+created with owner-only permissions, and never overwrite an existing file.
+
 ## Search, checkpoint, and replay
 
 `pnpm --silent game:session` starts the existing persistent Rust JSON-lines service.

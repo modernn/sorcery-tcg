@@ -76,15 +76,35 @@ to make a run succeed.
 These checks establish the bounded local workflow above. They do not establish complete
 official-card coverage, competitive policy strength, or a private authority release.
 
+## Cross-preset deck construction
+
+The private experiment command now exports a card-binding catalog and accepts deck-only
+requests across the six existing presets. Their union contains 96 distinct bindings
+under one authority identity, with no conflicting facts. The catalog records the supplying
+presets and exact source/fact hashes; the other 1,004 cards are explicitly unbound.
+
+Preparation accepts card IDs and quantities, rejects supplied fact overrides, keeps token
+dependencies, and requires Rust to admit the resulting manifest before saving it. Inputs
+and outputs stay inside the private authority boundary. No new rule interpretation or
+ranked eligibility is introduced.
+
+A Fire-versus-Water cross-preset smoke test completed four games over two seeds and both
+seat orientations. Every replay verified, and reports were byte-identical with one and
+two workers. Synthetic regressions cover conflicting bindings, authority mismatches,
+token dependencies, canonical deck encodings, unsupported cards, and input bounds.
+The follow-up `pnpm verify` passed typecheck, lint, and all 484 public tests.
+
 ## Remaining work, in order
 
-1. Build an explicit audited card-to-facts registry for the desired deck field. Current
+1. Expand the 96-card preset binding pool for the desired deck field. Current
    private presets have bindings; arbitrary tournament imports do not. Report which
    missing mechanics prevent each target deck from running. Prioritize decks, not more
    generic catalog rows.
 2. Improve the baseline policy using observed tactical state and engine-issued actions.
-   It currently favors sites/minions and underuses many spells, Artifacts, Auras, and
-   activations. Policy strength limits what deck win rates mean even when rules and
+   Its observation currently contains deck counts, enemy Avatar position, and temporary
+   power identities; it needs more public tactical information to evaluate spell effects.
+   It favors sites/minions and underuses many spells, Artifacts, Auras, and activations.
+   Policy strength limits what deck win rates mean even when rules and
    replay are correct.
 3. Bind authoritative card facts to independently verified private inputs before
    reintroducing ranked eligibility. Exact historical bytes are necessary evidence,
