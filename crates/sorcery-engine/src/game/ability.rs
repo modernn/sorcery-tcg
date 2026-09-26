@@ -196,8 +196,8 @@ fn compile_minion_activation(facts: &MinionFacts) -> Option<CompiledAbility> {
     })
 }
 
-fn compile_genesis(facts: &MinionFacts) -> Option<CompiledAbility> {
-    let active_count = usize::from(facts.genesis_damage_each_other_unit_here)
+pub(super) fn genesis_clause_count(facts: &MinionFacts) -> usize {
+    usize::from(facts.genesis_damage_each_other_unit_here)
         + usize::from(facts.genesis_disable_self_until_damaged)
         + usize::from(facts.genesis_draw_site)
         + usize::from(facts.genesis_draw_spells.is_some())
@@ -207,9 +207,11 @@ fn compile_genesis(facts: &MinionFacts) -> Option<CompiledAbility> {
         + usize::from(facts.genesis_lose_controller_life)
         + usize::from(facts.genesis_may_damage_target_adjacent_unit)
         + usize::from(facts.genesis_strike_each_enemy_here)
-        + usize::from(facts.genesis_untap_adjacent_allies);
+        + usize::from(facts.genesis_untap_adjacent_allies)
+}
 
-    if active_count != 1 {
+fn compile_genesis(facts: &MinionFacts) -> Option<CompiledAbility> {
+    if genesis_clause_count(facts) != 1 {
         return None;
     }
     if facts.genesis_draw_site {

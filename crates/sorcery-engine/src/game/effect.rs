@@ -2,9 +2,9 @@
 
 use super::ability::{CompiledAbility, Effect, SelectionSpec, UnitSet};
 use super::{
-    CardFacts, CardId, CardInstance, Cell, DeathriteContinuation, Game, GameError, IdentityHash,
-    Location, OutcomeLog, Region, Seat, UnitDamageSource, UnitKind, UnitQuery, UnitTarget, Value,
-    json, seat_index,
+    CardFacts, CardId, CardInstance, Cell, DeferredMagicResolved, Game, GameError, IdentityHash,
+    Location, OutcomeLog, Region, ResolutionContinuation, Seat, UnitDamageSource, UnitKind,
+    UnitQuery, UnitTarget, Value, json, seat_index,
 };
 
 #[cfg(test)]
@@ -93,7 +93,7 @@ pub(super) struct EffectFrame {
     source: EffectSource,
     target: Option<UnitBinding>,
     location: Option<LocationBinding>,
-    magic: Option<CardInstance>,
+    pub(super) magic: Option<CardInstance>,
 }
 
 impl CardInstance {
@@ -442,14 +442,9 @@ impl Game {
         mut frame: EffectFrame,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
-        if let Some(pending) = &mut self.position.pending_deathrites {
-            if pending.continuation.is_some() {
-                return Err(GameError::UnsupportedMechanic(
-                    "overlapping ability continuations before effect start".to_owned(),
-                ));
-            }
-            pending.continuation = Some(DeathriteContinuation::Effect(Box::new(frame)));
-            return Ok(());
+        if self.position.pending_deathrites.is_some() {
+            return self
+                .continue_resolution(ResolutionContinuation::Effect(Box::new(frame)), outcomes);
         }
         if !frame.started {
             if !self.prepare_effect_source(&mut frame)? {
@@ -505,7 +500,7 @@ impl Game {
                             &casualties.avatars,
                             self.position.phase,
                             self.position.active_seat,
-                            Some(DeathriteContinuation::Effect(Box::new(frame))),
+                            Some(ResolutionContinuation::Effect(Box::new(frame))),
                             outcomes,
                         );
                     }
@@ -544,11 +539,15 @@ impl Game {
         outcomes: &mut OutcomeLog<'_>,
     ) {
         if let Some(card) = frame.magic {
-            let owner = card.owner;
-            let instance_id = card.instance_id.clone();
-            let card_id = self.rules.cards[usize::from(card.card_id.0)].id.clone();
-            self.position.players[seat_index(owner)].cemetery.push(card);
-            Self::emit_continuation_magic_resolved(&card_id, &instance_id, owner, outcomes);
+            self.finish_magic_resolution(
+                &DeferredMagicResolved {
+                    card_id: card.card_id,
+                    instance_id: card.instance_id.clone(),
+                    owner: card.owner,
+                },
+                Some(card),
+                outcomes,
+            );
         }
     }
 

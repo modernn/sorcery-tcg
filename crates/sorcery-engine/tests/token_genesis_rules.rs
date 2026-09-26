@@ -2130,11 +2130,13 @@ fn rule_catalog_0384_magic_token_summon_should_issue_and_apply_adjacent_genesis_
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
     });
+    // Only C3 borders an enemy site. Multiple simultaneous token Genesis needs its own
+    // player-selected ordering; resolution_tests proves that missing mechanism aborts.
     for (draw_zone, site_cell) in [
         (Some("atlas"), Some("C1")),
         (Some("atlas"), Some("C3")),
         (Some("atlas"), Some("C2")),
-        (Some("atlas"), Some("B3")),
+        (Some("atlas"), Some("B4")),
         (Some("atlas"), Some("B2")),
     ] {
         accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
@@ -2152,7 +2154,7 @@ fn rule_catalog_0384_magic_token_summon_should_issue_and_apply_adjacent_genesis_
     let (south_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == "south-dummy"
-            && descriptor["cell"] == "B2"
+            && descriptor["cell"] == "C2"
     });
     let south_minion_id = south_summon["cardInstanceId"]
         .as_str()
@@ -2169,7 +2171,7 @@ fn rule_catalog_0384_magic_token_summon_should_issue_and_apply_adjacent_genesis_
         .expect("Magic identity")
         .to_owned();
     let pre_cast_version = before["stateVersion"].clone();
-    let expected_token_ids: Vec<_> = ["B3", "C3"]
+    let expected_token_ids: Vec<_> = ["C3"]
         .into_iter()
         .enumerate()
         .map(|(ordinal, cell)| {
@@ -2196,12 +2198,12 @@ fn rule_catalog_0384_magic_token_summon_should_issue_and_apply_adjacent_genesis_
                 && action.descriptor.get("tokenGenesisDamage").is_some()
         })
         .collect();
-    assert_eq!(choices.len(), 9);
+    assert_eq!(choices.len(), 4); // Decline, the arriving token, North Avatar, or South minion.
     assert!(choices.iter().any(|action| {
         action.descriptor["tokenGenesisDamage"]
             .as_array()
             .is_some_and(|resolutions| {
-                resolutions.len() == 2
+                resolutions.len() == 1
                     && resolutions
                         .iter()
                         .all(|resolution| resolution["genesisDamageChoice"] == "decline")
@@ -2211,11 +2213,10 @@ fn rule_catalog_0384_magic_token_summon_should_issue_and_apply_adjacent_genesis_
         action.descriptor["tokenGenesisDamage"]
             .as_array()
             .is_some_and(|resolutions| {
-                resolutions.len() == 2
+                resolutions.len() == 1
                     && resolutions[0]["genesisDamageChoice"] == "target"
                     && resolutions[0]["genesisDamageTarget"]["instanceId"] == south_minion_id
                     && resolutions[0]["tokenInstanceId"] == expected_token_ids[0]
-                    && resolutions[1]["genesisDamageChoice"] == "decline"
             })
     }));
 
@@ -2226,9 +2227,8 @@ fn rule_catalog_0384_magic_token_summon_should_issue_and_apply_adjacent_genesis_
             && descriptor["tokenGenesisDamage"]
                 .as_array()
                 .is_some_and(|resolutions| {
-                    resolutions.len() == 2
+                    resolutions.len() == 1
                         && resolutions[0]["genesisDamageTarget"]["instanceId"] == south_minion_id
-                        && resolutions[1]["genesisDamageChoice"] == "decline"
                 })
     });
     assert_eq!(
@@ -2239,7 +2239,6 @@ fn rule_catalog_0384_magic_token_summon_should_issue_and_apply_adjacent_genesis_
             "genesis-damage-allocated",
             "damage-dealt",
             "minion-died",
-            "minion-summoned",
             "magic-resolved",
         ]
     );

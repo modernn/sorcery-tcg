@@ -1,0 +1,145 @@
+//! Ordered work that resumes after an interrupting effect finishes.
+
+use super::{
+    CardFacts, CardId, CardInstance, Cell, DeferredMagicResolved, Game, GameError,
+    GenesisDamageChoice, IdentityHash, OutcomeLog, ResolutionContinuation, Seat, UnitPosition,
+    UnitTarget, seat_index,
+};
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct TokenEntryContinuation {
+    pub(super) seat: Seat,
+    pub(super) token: UnitPosition,
+    pub(super) source_instance_id: IdentityHash,
+    pub(super) mana_paid: u64,
+    pub(super) genesis_damage_choice: Option<GenesisDamageChoice>,
+    pub(super) genesis_damage_target: Option<UnitTarget>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct SiteGenesisTail {
+    pub(super) card_id: CardId,
+    pub(super) card_instance_id: IdentityHash,
+    pub(super) cell: Cell,
+    pub(super) create_rubble_at: Option<Cell>,
+    pub(super) defer_token: bool,
+    pub(super) genesis_spell_draw_count: usize,
+    pub(super) origin_state_version: u64,
+    pub(super) seat: Seat,
+    pub(super) abilities_lost: bool,
+}
+
+impl ResolutionContinuation {
+    fn followed_by(self, next: Self) -> Self {
+        let mut sequence = match self {
+            Self::Sequence(sequence) => sequence,
+            first => vec![first],
+        };
+        match next {
+            Self::Sequence(next) => sequence.extend(next),
+            next => sequence.push(next),
+        }
+        Self::Sequence(sequence)
+    }
+
+    pub(super) fn owns_magic_completion(&self) -> bool {
+        match self {
+            Self::Blink(_) | Self::LeapAttack(_) | Self::MagicResolved { .. } => true,
+            Self::Effect(frame) => frame.magic.is_some(),
+            Self::Sequence(steps) => steps.iter().any(Self::owns_magic_completion),
+            _ => false,
+        }
+    }
+}
+
+impl Game {
+    /// A simultaneous entry group finishes placing its members before any Genesis resolves.
+    pub(super) fn finish_token_entries(
+        &mut self,
+        entries: Vec<TokenEntryContinuation>,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let mut genesis = None;
+        for entry in &entries {
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(entry.token.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            if super::ability::genesis_clause_count(facts) == 0 {
+                continue;
+            }
+            if genesis.is_some() {
+                return Err(GameError::UnsupportedMechanic(
+                    "simultaneous token Genesis requires player-selected trigger ordering"
+                        .to_owned(),
+                ));
+            }
+            genesis = Some((
+                entry.seat,
+                entry.token.card.instance_id.clone(),
+                entry.token.card.card_id,
+                entry.genesis_damage_choice,
+                entry.genesis_damage_target.clone(),
+            ));
+        }
+        for entry in entries {
+            self.enter_token_unit(entry, outcomes)?;
+        }
+        if let Some((seat, instance_id, card_id, choice, target)) = genesis {
+            self.apply_minion_genesis(
+                seat,
+                &instance_id,
+                card_id,
+                choice,
+                target.as_ref(),
+                outcomes,
+            )?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn finish_magic_resolution(
+        &mut self,
+        resolution: &DeferredMagicResolved,
+        held_card: Option<CardInstance>,
+        outcomes: &mut OutcomeLog<'_>,
+    ) {
+        if let Some(card) = held_card {
+            self.position.players[seat_index(card.owner)]
+                .cemetery
+                .push(card);
+        }
+        Self::emit_continuation_magic_resolved(
+            &self.rules.cards[usize::from(resolution.card_id.0)].id,
+            &resolution.instance_id,
+            resolution.owner,
+            outcomes,
+        );
+    }
+
+    /// Keep the remaining work behind the current interruption, or run it immediately.
+    pub(super) fn continue_resolution(
+        &mut self,
+        continuation: ResolutionContinuation,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        if self.position.terminal.is_some() {
+            self.emit_interrupted_magic_resolved(Some(&continuation), outcomes);
+        } else if let Some(pending) = &mut self.position.pending_deathrites {
+            pending.continuation = Some(match pending.continuation.take() {
+                Some(first) => first.followed_by(continuation),
+                None => continuation,
+            });
+        } else {
+            self.resume_resolution_continuation(
+                continuation,
+                self.position.phase,
+                self.position.decision_seat,
+                outcomes,
+                None,
+            )?;
+        }
+        Ok(())
+    }
+}
