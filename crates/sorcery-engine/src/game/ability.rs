@@ -14,7 +14,27 @@ pub(super) struct CompiledAbilities {
 /// One statically ordered effect program.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct CompiledAbility {
+    pub(super) selection: Option<SelectionSpec>,
     pub(super) effects: Box<[Effect]>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SpatialRelation {
+    Anywhere,
+    Nearby,
+    Adjacent,
+    Measured(u8),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SelectionSpec {
+    Unit {
+        kind: Option<super::UnitKind>,
+        relation: SpatialRelation,
+    },
+    Location {
+        relation: SpatialRelation,
+    },
 }
 
 /// An operation understood by the first effect-frame slice.
@@ -54,10 +74,16 @@ impl CompiledAbilities {
                 genesis: None,
                 activated: match facts.effect {
                     ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree => {
-                        Some(ability([Effect::Damage {
-                            recipients: UnitSet::Target,
-                            amount: 3,
-                        }]))
+                        Some(ability_with_selection(
+                            Some(SelectionSpec::Unit {
+                                kind: None,
+                                relation: SpatialRelation::Measured(2),
+                            }),
+                            [Effect::Damage {
+                                recipients: UnitSet::Target,
+                                amount: 3,
+                            }],
+                        ))
                     }
                     _ => None,
                 },
@@ -72,7 +98,15 @@ impl CompiledAbilities {
 }
 
 fn ability<const N: usize>(effects: [Effect; N]) -> CompiledAbility {
+    ability_with_selection(None, effects)
+}
+
+fn ability_with_selection<const N: usize>(
+    selection: Option<SelectionSpec>,
+    effects: [Effect; N],
+) -> CompiledAbility {
     CompiledAbility {
+        selection,
         effects: Box::new(effects),
     }
 }
@@ -81,27 +115,46 @@ fn compile_magic(facts: &crate::facts::MagicFacts) -> Option<CompiledAbility> {
     let effect = match &facts.effect {
         MagicEffect::DamageTargetUnit {
             amount,
+            target_nearby,
             untap_target_minion_after_damage,
-            ..
         } => {
             let damage = Effect::Damage {
                 recipients: UnitSet::Target,
                 amount: u16::from(*amount),
             };
+            let selection = Some(SelectionSpec::Unit {
+                kind: (*untap_target_minion_after_damage).then_some(super::UnitKind::Minion),
+                relation: if *target_nearby {
+                    SpatialRelation::Nearby
+                } else {
+                    SpatialRelation::Anywhere
+                },
+            });
             return Some(if *untap_target_minion_after_damage {
-                ability([
-                    damage,
-                    Effect::Untap {
-                        recipients: UnitSet::Target,
-                    },
-                ])
+                ability_with_selection(
+                    selection,
+                    [
+                        damage,
+                        Effect::Untap {
+                            recipients: UnitSet::Target,
+                        },
+                    ],
+                )
             } else {
-                ability([damage])
+                ability_with_selection(selection, [damage])
             });
         }
-        MagicEffect::UntapTargetMinion => Effect::Untap {
-            recipients: UnitSet::Target,
-        },
+        MagicEffect::UntapTargetMinion => {
+            return Some(ability_with_selection(
+                Some(SelectionSpec::Unit {
+                    kind: Some(super::UnitKind::Minion),
+                    relation: SpatialRelation::Anywhere,
+                }),
+                [Effect::Untap {
+                    recipients: UnitSet::Target,
+                }],
+            ));
+        }
         MagicEffect::DrawSites(count) => Effect::Draw {
             zone: DeckZone::Atlas,
             count: *count,
@@ -120,15 +173,26 @@ fn compile_magic(facts: &crate::facts::MagicFacts) -> Option<CompiledAbility> {
         },
         _ => return None,
     };
-    Some(ability([effect]))
+    let selection = match &facts.effect {
+        MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_) => Some(SelectionSpec::Location {
+            relation: SpatialRelation::Measured(2),
+        }),
+        _ => None,
+    };
+    Some(ability_with_selection(selection, [effect]))
 }
 
 fn compile_minion_activation(facts: &MinionFacts) -> Option<CompiledAbility> {
     facts.tap_to_damage_each_unit_at_adjacent_location.then(|| {
-        ability([Effect::Damage {
-            recipients: UnitSet::Location,
-            amount: 2,
-        }])
+        ability_with_selection(
+            Some(SelectionSpec::Location {
+                relation: SpatialRelation::Adjacent,
+            }),
+            [Effect::Damage {
+                recipients: UnitSet::Location,
+                amount: 2,
+            }],
+        )
     })
 }
 
@@ -176,8 +240,9 @@ fn compile_genesis(facts: &MinionFacts) -> Option<CompiledAbility> {
 mod tests {
     use serde_json::json;
 
-    use super::{CompiledAbilities, Effect, UnitSet};
+    use super::{CompiledAbilities, Effect, SelectionSpec, SpatialRelation, UnitSet};
     use crate::facts::parse_card_definition;
+    use crate::game::UnitKind;
 
     fn minion(extra: &serde_json::Value) -> crate::facts::CardFacts {
         let mut value = json!({
@@ -192,6 +257,19 @@ mod tests {
             .expect("minion object")
             .extend(extra.as_object().expect("extra object").clone());
         parse_card_definition("test-minion", &value).expect("valid synthetic minion")
+    }
+
+    fn magic(extra: &serde_json::Value) -> crate::facts::CardFacts {
+        let mut value = json!({
+            "cardType": "magic",
+            "manaCost": 1,
+            "thresholds": {"air": 0, "earth": 0, "fire": 0, "water": 0}
+        });
+        value
+            .as_object_mut()
+            .expect("magic object")
+            .extend(extra.as_object().expect("extra object").clone());
+        parse_card_definition("test-magic", &value).expect("valid synthetic magic")
     }
 
     #[test]
@@ -218,8 +296,9 @@ mod tests {
         )
         .expect("valid synthetic magic");
         let compiled = CompiledAbilities::from_facts(&facts);
+        let magic = compiled.magic.expect("compiled magic");
         assert_eq!(
-            compiled.magic.expect("compiled magic").effects.as_ref(),
+            magic.effects.as_ref(),
             &[
                 Effect::Damage {
                     recipients: UnitSet::Target,
@@ -230,5 +309,104 @@ mod tests {
                 }
             ]
         );
+        assert_eq!(
+            magic.selection,
+            Some(SelectionSpec::Unit {
+                kind: Some(UnitKind::Minion),
+                relation: SpatialRelation::Anywhere,
+            })
+        );
+    }
+
+    #[test]
+    fn selection_lowering_tracks_source_ranges_and_kinds() {
+        let nearby_target = CompiledAbilities::from_facts(&magic(&json!({
+            "damageTargetUnit": 2,
+            "targetNearby": true,
+            "untapTargetMinionAfterDamage": true
+        })))
+        .magic
+        .expect("compiled nearby target");
+        assert_eq!(
+            nearby_target.selection,
+            Some(SelectionSpec::Unit {
+                kind: Some(UnitKind::Minion),
+                relation: SpatialRelation::Nearby,
+            })
+        );
+
+        let location = CompiledAbilities::from_facts(&magic(&json!({
+            "damageEachUnitAtLocationWithinTwoSteps": 2
+        })))
+        .magic
+        .expect("compiled location target");
+        assert_eq!(
+            location.selection,
+            Some(SelectionSpec::Location {
+                relation: SpatialRelation::Measured(2),
+            })
+        );
+
+        let artifact = {
+            let facts = parse_card_definition(
+                "test-artifact",
+                &json!({
+                    "cardType": "artifact",
+                    "manaCost": 1,
+                    "tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps": 3,
+                    "thresholds": {"air": 0, "earth": 0, "fire": 0, "water": 0}
+                }),
+            )
+            .expect("valid synthetic artifact");
+            CompiledAbilities::from_facts(&facts)
+                .activated
+                .expect("compiled artifact")
+        };
+        assert_eq!(
+            artifact.selection,
+            Some(SelectionSpec::Unit {
+                kind: None,
+                relation: SpatialRelation::Measured(2),
+            })
+        );
+
+        let minion = {
+            let facts = minion(&json!({
+                "tapToDamageEachUnitAtAdjacentLocation": 2
+            }));
+            CompiledAbilities::from_facts(&facts)
+                .activated
+                .expect("compiled minion activation")
+        };
+        assert_eq!(
+            minion.selection,
+            Some(SelectionSpec::Location {
+                relation: SpatialRelation::Adjacent,
+            })
+        );
+    }
+
+    #[test]
+    fn area_draw_and_genesis_entries_have_no_selection_spec() {
+        let area = CompiledAbilities::from_facts(&magic(&json!({
+            "damageEachAbovegroundMinion": 1
+        })))
+        .magic
+        .expect("compiled area damage");
+        assert_eq!(area.selection, None);
+
+        let draw = CompiledAbilities::from_facts(&magic(&json!({
+            "drawSites": 1
+        })))
+        .magic
+        .expect("compiled draw");
+        assert_eq!(draw.selection, None);
+
+        let genesis = CompiledAbilities::from_facts(&minion(&json!({
+            "genesisDamageEachOtherUnitHere": 1
+        })))
+        .genesis
+        .expect("compiled genesis");
+        assert_eq!(genesis.selection, None);
     }
 }

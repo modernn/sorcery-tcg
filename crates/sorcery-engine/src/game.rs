@@ -27,7 +27,8 @@ use crate::prng::PrngState;
 
 mod ability;
 mod effect;
-use ability::CompiledAbilities;
+mod selection;
+use ability::{CompiledAbilities, SelectionSpec, SpatialRelation};
 use effect::{AbilityEntry, EffectFrame, RealmReference};
 
 /// Frozen public engine version bound into every admitted manifest.
@@ -3707,7 +3708,7 @@ impl Game {
                     }
                     continue;
                 }
-                let mut choices = self.magic_choices(seat, caster_instance_id, &facts.effect)?;
+                let mut choices = self.magic_choices(seat, caster_instance_id, card.card_id)?;
                 if facts.discard_card_as_additional_cost {
                     choices = self.with_chosen_hand_discard(seat, &card.instance_id, choices);
                 }
@@ -4596,33 +4597,26 @@ impl Game {
             if unit.controller != seat
                 || unit.tapped
                 || unit.summoning_sickness
-                || self.minion_is_disabled(unit)
+                || self.minion_abilities_lost(unit)
             {
                 continue;
             }
-            let CardFacts::Minion(facts) =
-                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
-            else {
+            let Some(SelectionSpec::Location { relation }) = self.rules.cards
+                [usize::from(unit.card.card_id.0)]
+            .abilities
+            .activated
+            .as_ref()
+            .and_then(|ability| ability.selection) else {
                 continue;
             };
-            if !facts.tap_to_damage_each_unit_at_adjacent_location {
-                continue;
-            }
             let occupied = Self::unit_occupied_cells(unit);
-            let adjacent: BTreeSet<_> = occupied
-                .iter()
-                .flat_map(|cell| std::iter::once(*cell).chain(cell.bordering(false)))
-                .filter(|cell| self.location_exists_in_region(*cell, unit.region))
-                .collect();
-            for cell in adjacent {
+            for target_location in self.selected_locations(unit.region, occupied, relation) {
+                let cell = target_location.cell;
                 self.push_action(
                     actions,
                     ActionDescriptor::ActivateAreaDamage {
                         source_instance_id: unit.card.instance_id.clone(),
-                        target_location: Location {
-                            cell,
-                            region: unit.region,
-                        },
+                        target_location,
                     },
                     format!(
                         "Tap {}… to damage every unit at {cell}",
@@ -5281,39 +5275,25 @@ impl Game {
             else {
                 continue;
             };
-            // Official range is two measured steps of the cells the bearer stands on, not only
-            // the remembered carried cell. A 1×1 bearer keeps the same origin.
-            let reachable: BTreeSet<_> = self
-                .locations_within_measured_steps_from_cells(
-                    self.unit_target_occupied_cells(&bearer)?,
-                    carried_at.region,
-                    2,
-                )
-                .into_iter()
-                .map(|location| location.cell)
-                .collect();
-            let mut targets = Vec::new();
-            for target in [Seat::North, Seat::South]
-                .into_iter()
-                .flat_map(|target_seat| self.seat_unit_targets(target_seat))
-            {
-                let hidden = target.seat() != seat
-                    && self.combatant_stealthed(
-                        unit_target_kind(&target),
-                        target.seat(),
-                        target.instance_id(),
-                    )?;
-                if hidden
-                    || self.unit_target_region(&target)? != carried_at.region
-                    || !self
-                        .unit_target_occupied_cells(&target)?
-                        .iter()
-                        .any(|cell| reachable.contains(cell))
-                {
-                    continue;
-                }
-                targets.push(target);
-            }
+            let Some(SelectionSpec::Unit { kind, relation }) = self.rules.cards
+                [usize::from(artifact.card.card_id.0)]
+            .abilities
+            .activated
+            .as_ref()
+            .and_then(|ability| ability.selection) else {
+                return Err(GameError::IllegalAction);
+            };
+            let targets = self.selected_units(
+                UnitQuery {
+                    region: carried_at.region,
+                    cells: Some(self.unit_target_occupied_cells(&bearer)?),
+                    kind,
+                    controller: None,
+                    exclude: None,
+                },
+                relation,
+                Some(seat),
+            );
             for helper in &helpers {
                 descriptors.extend(targets.iter().map(|target| {
                     ActionDescriptor::ActivateArtifactDamage {
@@ -6596,51 +6576,20 @@ impl Game {
         target_nearby: bool,
         minion_only: bool,
     ) -> Result<Vec<MagicChoice>, GameError> {
-        let (caster_location, caster_cells) =
-            self.spellcaster_occupied_cells(seat, caster_instance_id)?;
-        let mut targets = Vec::new();
-        for target_seat in [Seat::North, Seat::South] {
-            let player = &self.position.players[seat_index(target_seat)];
-            if !minion_only
-                && caster_location.region == Region::Surface
-                && (!target_nearby
-                    || Self::footprints_nearby(
-                        caster_cells,
-                        std::slice::from_ref(&player.avatar.location),
-                    ))
-            {
-                targets.push(MagicChoice {
-                    target: Some(UnitTarget::Avatar {
-                        instance_id: player.avatar.card.instance_id.clone(),
-                        seat: target_seat,
-                    }),
-                    ..MagicChoice::default()
-                });
-            }
-            targets.extend(
-                self.position
-                    .units
-                    .iter()
-                    .filter(|unit| {
-                        unit.controller == target_seat
-                            && unit.region == caster_location.region
-                            && (target_seat == seat || !self.minion_has_active_stealth(unit))
-                            && (!target_nearby
-                                || Self::footprints_nearby(
-                                    caster_cells,
-                                    Self::unit_occupied_cells(unit),
-                                ))
-                    })
-                    .map(|unit| MagicChoice {
-                        target: Some(UnitTarget::Minion {
-                            instance_id: unit.card.instance_id.clone(),
-                            seat: target_seat,
-                        }),
-                        ..MagicChoice::default()
-                    }),
-            );
-        }
-        Ok(targets)
+        let (origin, cells) = self.spellcaster_occupied_cells(seat, caster_instance_id)?;
+        Ok(self.selection_choices(
+            seat,
+            origin.region,
+            cells,
+            Some(SelectionSpec::Unit {
+                kind: minion_only.then_some(UnitKind::Minion),
+                relation: if target_nearby {
+                    SpatialRelation::Nearby
+                } else {
+                    SpatialRelation::Anywhere
+                },
+            }),
+        ))
     }
 
     fn destroy_target_site_choices(
@@ -7237,15 +7186,20 @@ impl Game {
         &self,
         seat: Seat,
         caster_instance_id: &IdentityHash,
-        effect: &MagicEffect,
+        card_id: CardId,
     ) -> Result<Vec<MagicChoice>, GameError> {
+        let definition = &self.rules.cards[usize::from(card_id.0)];
+        let CardFacts::Magic(facts) = &definition.facts else {
+            return Err(GameError::IllegalAction);
+        };
+        if let Some(ability) = &definition.abilities.magic {
+            return self.compiled_magic_choices(seat, caster_instance_id, ability.selection);
+        }
+        let effect = &facts.effect;
         Ok(match effect {
             MagicEffect::HealController(_)
-            | MagicEffect::DrawSites(_)
             | MagicEffect::DrawSiteThenMayPlayLandSite
             | MagicEffect::DrawSiteThenMayPlayWaterSite
-            | MagicEffect::DrawSpells(_)
-            | MagicEffect::DamageEachAbovegroundMinionOne
             | MagicEffect::GrantStealthToAlliedMinionsThenDrawSpell
             | MagicEffect::SummonRandomMinionFromAnyCemetery
             | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => {
@@ -7469,7 +7423,6 @@ impl Game {
                 self.own_artifact_at_location_choices(seat)?
             }
             MagicEffect::BanishDemonAndUndeadMinionsAtLocationWithinTwoSteps
-            | MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_)
             | MagicEffect::DestroyArtifactsAndAurasAtLocationWithinTwoSteps
             | MagicEffect::DestroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps
             | MagicEffect::KillMortalMinionsAtLocationWithinTwoSteps => {
@@ -7522,16 +7475,6 @@ impl Game {
             MagicEffect::ReturnTargetSiteFromOwnCemetery => {
                 self.own_cemetery_type_choices(seat, OwnCemeteryReturn::Site)
             }
-            MagicEffect::DamageTargetUnit {
-                target_nearby,
-                untap_target_minion_after_damage,
-                ..
-            } => self.targeted_magic_choices(
-                seat,
-                caster_instance_id,
-                *target_nearby,
-                *untap_target_minion_after_damage,
-            )?,
             MagicEffect::SubmergeTargetMinion
             | MagicEffect::KillTargetMinion
             | MagicEffect::ReturnTargetMinionToOwnerHand
@@ -7539,8 +7482,7 @@ impl Game {
             | MagicEffect::GrantAirborneToTargetMinion
             | MagicEffect::GrantStealthToTargetMinion
             | MagicEffect::GrantWardToTargetMinion
-            | MagicEffect::HealTargetMinion(_)
-            | MagicEffect::UntapTargetMinion => {
+            | MagicEffect::HealTargetMinion(_) => {
                 self.targeted_magic_choices(seat, caster_instance_id, false, true)?
             }
             MagicEffect::BurrowTargetAdjacentMinion => {
@@ -7733,6 +7675,14 @@ impl Game {
                         .cmp(right.target.as_ref().expect("Freeze target").instance_id())
                 });
                 targets
+            }
+            MagicEffect::DamageTargetUnit { .. }
+            | MagicEffect::UntapTargetMinion
+            | MagicEffect::DrawSites(_)
+            | MagicEffect::DrawSpells(_)
+            | MagicEffect::DamageEachAbovegroundMinionOne
+            | MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_) => {
+                return Err(GameError::IllegalAction);
             }
             // Chained Magic enumerates its targets through its own pending decision instead.
             MagicEffect::DamageChainNearbyUnits => {
@@ -9306,6 +9256,14 @@ impl Game {
     /// Select each physical unit once, even when several occupied cells overlap the query.
     /// Stealth and Ward do not remove members from an untargeted area effect.
     fn query_units(&self, query: UnitQuery<'_>) -> Vec<(IdentityHash, UnitKind, Seat)> {
+        self.query_units_for(query, None)
+    }
+
+    fn query_units_for(
+        &self,
+        query: UnitQuery<'_>,
+        targeted_by: Option<Seat>,
+    ) -> Vec<(IdentityHash, UnitKind, Seat)> {
         let avatars = [Seat::North, Seat::South].into_iter().map(|seat| {
             let avatar = &self.position.players[seat_index(seat)].avatar;
             (
@@ -9314,6 +9272,7 @@ impl Game {
                 seat,
                 Region::Surface,
                 std::slice::from_ref(&avatar.location),
+                false,
             )
         });
         let minions = self.position.units.iter().map(|unit| {
@@ -9323,12 +9282,16 @@ impl Game {
                 unit.controller,
                 unit.region,
                 Self::unit_occupied_cells(unit),
+                targeted_by.is_some_and(|seat| {
+                    seat != unit.controller && self.minion_has_active_stealth(unit)
+                }),
             )
         });
         let mut candidates: Vec<_> = avatars
             .chain(minions)
-            .filter(|(id, kind, controller, region, occupied)| {
-                *region == query.region
+            .filter(|(id, kind, controller, region, occupied, hidden)| {
+                !hidden
+                    && *region == query.region
                     && query.kind.is_none_or(|required| *kind == required)
                     && query
                         .controller
@@ -9338,7 +9301,7 @@ impl Game {
                         .cells
                         .is_none_or(|cells| cells.iter().any(|cell| occupied.contains(cell)))
             })
-            .map(|(id, kind, controller, _, _)| (id.clone(), kind, controller))
+            .map(|(id, kind, controller, _, _, _)| (id.clone(), kind, controller))
             .collect();
         candidates.sort_unstable_by(|left, right| left.0.cmp(&right.0));
         candidates
@@ -20180,7 +20143,11 @@ impl Game {
                 .is_some_and(|amount| player.avatar.life < u16::from(amount))
             || !token_genesis_damage_matches
             || !{
-                let mut choices = self.magic_choices(seat, caster_instance_id, &facts.effect)?;
+                let mut choices = self.magic_choices(
+                    seat,
+                    caster_instance_id,
+                    player.hand_spellbook[hand_index].card_id,
+                )?;
                 if facts.discard_card_as_additional_cost {
                     choices = self.with_chosen_hand_discard(seat, card_instance_id, choices);
                 }
@@ -20451,6 +20418,8 @@ impl Game {
                 self.unit_effect_source(&self.recorded_caster(seat, caster_instance_id))?;
             source.instance_id = card_instance_id.clone();
             source.owner = owner;
+            // The retained actor gates pre-resolution caster departure; Magic itself is not
+            // a unit damage source and must never inherit the caster's power or Lethal.
             source.realm = None;
             source.damage = UnitDamageSource {
                 current_power: 0,

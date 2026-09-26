@@ -282,14 +282,30 @@ Ward protects the dependent target operations once while independent draws proce
 The same pass corrects adjacent location selection to include the source location,
 and removes both Ward and Stealth marks when a minion loses its abilities.
 
+Compiled abilities now also carry unit or location selection data. The same spatial
+query serves Magic declarations, legacy targeted-Magic adapters, fixed artifact shots,
+adjacent area activations, and target checks at the beginning of resolution. It uses
+the existing cohort kernel for region, unit kind, controller, and footprint filtering;
+targeted queries additionally exclude opposing Stealth. Nearby, adjacent, and measured
+range remain distinct. Ward does not remove a declaration choice: protection follows
+target validation and is retained for the remainder of that ability's resolution.
+An unstarted spell also checks its caster's realm incarnation independently of its
+damage source; caster departure cancels its effects without inheriting caster power.
+Unit and artifact abilities use current source geometry when resolution begins.
+Targeted Magic whose caster moved before resolution currently aborts explicitly:
+the retained authority does not resolve whether the chosen casting location or the
+caster's new location determines range. Started frames keep their established bindings.
+
 Direct scenarios cover protected targets, independent effects, death-trigger order,
-cloned checkpoint continuation, terminal cleanup, source departure, re-entry, and
-control changes. Existing scenarios exercise the migrated operations through each
-origin. This is an execution migration: public action enumeration, validated costs,
-and choice adapters still use existing facts. Common selectors, atomic costs, and
-entry-time choices are the next migration. In particular, targeted Genesis needs
-an engine-issued choice after entry; the old adjacent-allies shortcut is not a
-completed implementation of that rule.
+cloned checkpoint continuation, terminal cleanup, source departure, re-entry, control
+changes, oversized footprints, and movement before versus after resolution starts.
+A silenced area source offers no activation until its ability returns. Existing
+scenarios exercise the migrated operations through each origin. Validated costs and
+entry-choice adapters still use existing facts; shared atomic costs and entry-time
+choices are the next migration. In particular, targeted Genesis needs an engine-issued
+choice after entry; the old adjacent-allies shortcut is not a completed implementation
+of that rule. Site and token sequences must preserve their remaining work across that
+choice before their existing declaration-time choices can be removed.
 
 Migrate persistent effects through the same invocation boundary next, using typed
 lifetimes and official characteristic layers. Expand identity/forms/zones, event
@@ -318,6 +334,12 @@ recorded replay throughput was 5.746 and 5.703 games/second. These small differe
 do not establish a speedup. This synthetic regression workload does not measure all
 new ability combinations or complete real decks. Measure the kernel on both simple
 and interaction-heavy positions as the common operations expand.
+
+The subsequent shared-selector checkpoint used the same alternating release comparison
+against composed execution: raw medians were 1,324 before and 1,318 games/second after;
+recorded replay medians were 5.677 and 5.643 games/second. Performance remained effectively
+unchanged on this workload; consolidating selection and checking resolution validity
+has not yet produced a demonstrated throughput improvement.
 
 The same checkpoint's 48-game recorded batch benchmark measured 3.460 games/second
 with one worker and 38.382 with 16 (three timed repetitions per worker count).

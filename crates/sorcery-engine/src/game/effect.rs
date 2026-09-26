@@ -1,6 +1,6 @@
 //! Shared execution of admitted composed abilities, suspended by the existing death driver.
 
-use super::ability::{CompiledAbility, Effect, UnitSet};
+use super::ability::{CompiledAbility, Effect, SelectionSpec, UnitSet};
 use super::{
     CardFacts, CardId, CardInstance, Cell, DeathriteContinuation, Game, GameError, IdentityHash,
     Location, OutcomeLog, Region, Seat, UnitDamageSource, UnitKind, UnitQuery, UnitTarget, Value,
@@ -45,7 +45,9 @@ pub(super) struct EffectSource {
     pub(super) instance_id: IdentityHash,
     pub(super) owner: Seat,
     pub(super) controller: Seat,
+    /// Realm object owning the ability and its damage characteristics; Magic has none.
     pub(super) realm: Option<RealmReference>,
+    /// Casting or activating unit, retained separately from the effect's damage source.
     pub(super) actor: Option<RealmReference>,
     pub(super) region: Region,
     pub(super) cells: Vec<Cell>,
@@ -142,6 +144,39 @@ impl Game {
                 .iter()
                 .flatten()
                 .any(|site| reference.matches(&site.card))
+    }
+
+    fn referenced_geometry(
+        &self,
+        reference: &RealmReference,
+    ) -> Result<(Region, Vec<Cell>), GameError> {
+        for player in &self.position.players {
+            if reference.matches(&player.avatar.card) {
+                return Ok((Region::Surface, vec![player.avatar.location]));
+            }
+        }
+        if let Some(unit) = self
+            .position
+            .units
+            .iter()
+            .find(|unit| reference.matches(&unit.card))
+        {
+            return Ok((unit.region, Self::unit_occupied_cells(unit).to_vec()));
+        }
+        if let Some(artifact) = self
+            .position
+            .artifacts
+            .iter()
+            .find(|artifact| reference.matches(&artifact.card))
+        {
+            let location = self.artifact_location(artifact)?;
+            let cells = match artifact.bearer() {
+                Some(bearer) => self.unit_target_occupied_cells(bearer)?.to_vec(),
+                None => vec![location.cell],
+            };
+            return Ok((location.region, cells));
+        }
+        Err(GameError::IllegalAction)
     }
 
     pub(super) fn unit_reference(&self, target: &UnitTarget) -> Result<RealmReference, GameError> {
@@ -246,8 +281,32 @@ impl Game {
     /// Target protection is decided once for the whole ability, separately from damage prevention.
     fn start_effect_frame(&mut self, frame: &mut EffectFrame, outcomes: &mut OutcomeLog<'_>) {
         frame.started = true;
+        let selection = self
+            .compiled_ability(frame.card_id, frame.entry)
+            .and_then(|ability| ability.selection);
         if let Some(binding) = &mut frame.target {
+            let selected = match selection {
+                Some(SelectionSpec::Unit { kind, relation }) => self
+                    .selected_units(
+                        UnitQuery {
+                            region: frame.source.region,
+                            cells: Some(&frame.source.cells),
+                            kind,
+                            controller: None,
+                            exclude: None,
+                        },
+                        relation,
+                        Some(frame.source.controller),
+                    )
+                    .iter()
+                    .any(|target| target.instance_id() == &binding.reference.instance_id),
+                _ => false,
+            };
+            if !selected {
+                binding.state = BindingState::Invalid;
+            }
             match self.referenced_unit(&binding.reference) {
+                _ if binding.state == BindingState::Invalid => {}
                 None => binding.state = BindingState::Invalid,
                 Some((UnitKind::Minion, seat)) if seat != frame.source.controller => {
                     let unit = self
@@ -269,8 +328,18 @@ impl Game {
             }
         }
         if let Some(binding) = &mut frame.location {
+            let selected = match selection {
+                Some(SelectionSpec::Location { relation }) => self
+                    .selected_locations(frame.source.region, &frame.source.cells, relation)
+                    .contains(&binding.location),
+                _ => false,
+            };
+            if !selected {
+                binding.state = BindingState::Invalid;
+            }
             let site = self.position.sites[binding.location.cell.index()].as_mut();
             match (&binding.site, site) {
+                _ if binding.state == BindingState::Invalid => {}
                 (Some(reference), Some(site)) if reference.matches(&site.card) => {
                     if site.controller != frame.source.controller && site.warded {
                         site.warded = false;
@@ -331,6 +400,43 @@ impl Game {
         }
     }
 
+    fn prepare_effect_source(&self, frame: &mut EffectFrame) -> Result<bool, GameError> {
+        if frame
+            .source
+            .realm
+            .as_ref()
+            .is_some_and(|reference| !self.realm_reference_exists(reference))
+            || (frame.entry == AbilityEntry::Magic
+                && frame
+                    .source
+                    .actor
+                    .as_ref()
+                    .is_some_and(|reference| self.referenced_unit(reference).is_none()))
+        {
+            return Ok(false);
+        }
+        if frame.entry == AbilityEntry::Magic {
+            // Caster identity is separate from Magic's damage source. Its chosen casting
+            // location versus later movement needs a ruling before spatial revalidation.
+            if self
+                .compiled_ability(frame.card_id, frame.entry)
+                .is_some_and(|ability| ability.selection.is_some())
+                && let Some(caster) = &frame.source.actor
+            {
+                let (region, cells) = self.referenced_geometry(caster)?;
+                if region != frame.source.region || cells != frame.source.cells {
+                    return Err(GameError::UnsupportedMechanic(
+                        "spellcaster moved before target resolution; casting-origin ruling unresolved"
+                            .to_owned(),
+                    ));
+                }
+            }
+        } else if let Some(reference) = &frame.source.realm {
+            (frame.source.region, frame.source.cells) = self.referenced_geometry(reference)?;
+        }
+        Ok(true)
+    }
+
     pub(super) fn run_effect_frame(
         &mut self,
         mut frame: EffectFrame,
@@ -346,12 +452,7 @@ impl Game {
             return Ok(());
         }
         if !frame.started {
-            if frame
-                .source
-                .realm
-                .as_ref()
-                .is_some_and(|reference| !self.realm_reference_exists(reference))
-            {
+            if !self.prepare_effect_source(&mut frame)? {
                 self.finish_effect_frame(frame, outcomes);
                 return Ok(());
             }

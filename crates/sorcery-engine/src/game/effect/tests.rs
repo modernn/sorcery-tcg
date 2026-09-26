@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use super::super::ability::{CompiledAbility, Effect, UnitSet};
+use super::super::ability::{CompiledAbility, Effect, SelectionSpec, SpatialRelation, UnitSet};
 use super::super::{
-    ActionDescriptor, CardId, CardInstance, CardSource, Cell, Game, OutcomeLog, Phase, Region,
-    Seat, SummonPlacement, UnitDamageSource, UnitPosition, UnitTarget, seat_index,
+    ActionDescriptor, CardId, CardInstance, CardSource, Cell, Game, GameError, OutcomeLog, Phase,
+    Region, Seat, SummonPlacement, UnitDamageSource, UnitPosition, UnitTarget, seat_index,
 };
 use super::{AbilityEntry, EffectSource, RealmReference};
 use crate::action::DeckZone;
@@ -114,11 +114,25 @@ fn source_for_unit(
 
 fn install(game: &mut Game, effects: Vec<Effect>) -> CardId {
     let id = card_id(game, "north-spell-1");
+    let selection = effects.iter().find_map(|effect| match effect {
+        Effect::Damage { recipients, .. } | Effect::Untap { recipients } => match recipients {
+            UnitSet::Target => Some(SelectionSpec::Unit {
+                kind: None,
+                relation: SpatialRelation::Anywhere,
+            }),
+            UnitSet::Location => Some(SelectionSpec::Location {
+                relation: SpatialRelation::Anywhere,
+            }),
+            UnitSet::OtherUnitsHere | UnitSet::SurfaceMinions => None,
+        },
+        Effect::Draw { .. } => None,
+    });
     Arc::get_mut(&mut game.rules)
         .expect("fixture rules are uniquely owned")
         .cards[usize::from(id.0)]
     .abilities
     .magic = Some(CompiledAbility {
+        selection,
         effects: effects.into_boxed_slice(),
     });
     id
@@ -198,6 +212,506 @@ fn target_protection_is_once_per_frame_but_independent_draw_and_friendly_untap_c
     let (_, target, _) = run_target_program(Seat::North, false, 4);
     assert_eq!(target.damage, 0);
     assert!(!target.tapped);
+}
+
+#[test]
+fn shared_selection_separates_adjacent_nearby_regions_and_targeting() {
+    use super::super::{UnitKind, UnitQuery};
+    let mut game = fixture_game();
+    let mut large = minion(&game, "south-spell-3", Seat::South, "large-selector", false);
+    large.occupied_cells = Some(["C3", "C4", "D3", "D4"].map(|cell| Cell::parse(cell).unwrap()));
+    large.stealthed = true;
+    let large_id = large.card.instance_id.clone();
+    let mut diagonal = minion(
+        &game,
+        "south-spell-3",
+        Seat::South,
+        "diagonal-selector",
+        false,
+    );
+    diagonal.location = Cell::parse("B2").unwrap();
+    diagonal.warded = true;
+    let diagonal_id = diagonal.card.instance_id.clone();
+    let mut underground = minion(
+        &game,
+        "south-spell-3",
+        Seat::South,
+        "underground-selector",
+        false,
+    );
+    underground.region = Region::Underground;
+    game.position.units = vec![diagonal, underground, large];
+    let anchor = [Cell::parse("C3").unwrap()];
+    let query = UnitQuery {
+        region: Region::Surface,
+        cells: Some(&anchor),
+        kind: Some(UnitKind::Minion),
+        controller: None,
+        exclude: None,
+    };
+    let adjacent = game.selected_units(query, SpatialRelation::Adjacent, None);
+    assert_eq!(adjacent.len(), 1);
+    assert_eq!(adjacent[0].instance_id(), &large_id);
+    let nearby = game.selected_units(query, SpatialRelation::Nearby, None);
+    assert_eq!(nearby.len(), 2);
+    assert!(
+        nearby
+            .windows(2)
+            .all(|pair| pair[0].instance_id() < pair[1].instance_id())
+    );
+    let targets = game.selected_units(query, SpatialRelation::Nearby, Some(Seat::North));
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].instance_id(), &diagonal_id);
+    assert!(
+        game.position.units[0].warded,
+        "Ward is resolved after declaration"
+    );
+    assert_eq!(
+        game.selected_units(query, SpatialRelation::Nearby, Some(Seat::South))
+            .len(),
+        2,
+        "allied Stealth does not prevent targeting"
+    );
+}
+
+#[test]
+fn compiled_area_activation_requires_the_source_to_retain_its_ability() {
+    let mut game = fixture_game();
+    let id = card_id(&game, "south-spell-3");
+    let definition = &mut Arc::get_mut(&mut game.rules).unwrap().cards[usize::from(id.0)];
+    let super::super::CardFacts::Minion(facts) = &mut definition.facts else {
+        unreachable!()
+    };
+    facts.tap_to_damage_each_unit_at_adjacent_location = true;
+    definition.abilities = super::super::CompiledAbilities::from_facts(&definition.facts);
+    let mut unit = minion(&game, "south-spell-3", Seat::North, "area-source", false);
+    unit.summoning_sickness = false;
+    let source_id = unit.card.instance_id.clone();
+    game.position.units.push(unit);
+    let mut site = card(&game, "south-site-1", Seat::North, "area-site");
+    site.enter_realm().unwrap();
+    game.position.sites[Cell::parse("C3").unwrap().index()] = Some(super::super::SitePosition {
+        card: site,
+        controller: Seat::North,
+        last_flight_turn: None,
+        warded: false,
+    });
+    let mut actions = Vec::new();
+    game.append_area_damage_actions(&mut actions, Seat::North);
+    assert_eq!(actions.len(), 1, "the source can select its own location");
+    game.position.units[0]
+        .temporary_silence_sources
+        .push(source_id);
+    actions.clear();
+    game.append_area_damage_actions(&mut actions, Seat::North);
+    assert!(actions.is_empty(), "silence removes the activated ability");
+    game.position.units[0].temporary_silence_sources.clear();
+    game.append_area_damage_actions(&mut actions, Seat::North);
+    assert_eq!(actions.len(), 1, "the ability returns when silence expires");
+}
+
+#[test]
+fn selection_is_revalidated_before_protection_but_not_after_an_effect_starts() {
+    let mut game = fixture_game();
+    let mut target = minion(
+        &game,
+        "south-spell-3",
+        Seat::South,
+        "moving-selection",
+        true,
+    );
+    target.warded = true;
+    let target_ref = UnitTarget::Minion {
+        seat: Seat::South,
+        instance_id: target.card.instance_id.clone(),
+    };
+    game.position.units.push(target);
+    let magic = install(
+        &mut game,
+        vec![
+            Effect::Untap {
+                recipients: UnitSet::Target,
+            },
+            Effect::Draw {
+                zone: DeckZone::Spellbook,
+                count: 1,
+            },
+        ],
+    );
+    Arc::get_mut(&mut game.rules).unwrap().cards[usize::from(magic.0)]
+        .abilities
+        .magic
+        .as_mut()
+        .unwrap()
+        .selection = Some(SelectionSpec::Unit {
+        kind: Some(super::super::UnitKind::Minion),
+        relation: SpatialRelation::Nearby,
+    });
+    let frame = game
+        .effect_frame(
+            magic,
+            AbilityEntry::Magic,
+            source("range", Seat::North, 0, None),
+            Some(&target_ref),
+            None,
+            None,
+        )
+        .unwrap();
+    let mut started = frame.clone();
+    game.position.units[0].location = Cell::parse("A1").unwrap();
+    let before = game.position.players[seat_index(Seat::North)]
+        .hand_spellbook
+        .len();
+    game.run_effect_frame(frame, &mut OutcomeLog::Ignore)
+        .unwrap();
+    assert!(game.position.units[0].tapped);
+    assert!(
+        game.position.units[0].warded,
+        "an invalid target does not consume Ward"
+    );
+    assert_eq!(
+        game.position.players[seat_index(Seat::North)]
+            .hand_spellbook
+            .len(),
+        before + 1
+    );
+    game.position.units[0].location = Cell::parse("C3").unwrap();
+    game.position.units[0].warded = false;
+    game.start_effect_frame(&mut started, &mut OutcomeLog::Ignore);
+    game.position.units[0].location = Cell::parse("A1").unwrap();
+    game.run_effect_frame(started, &mut OutcomeLog::Ignore)
+        .unwrap();
+    assert!(
+        !game.position.units[0].tapped,
+        "a started ability keeps its valid target binding"
+    );
+}
+
+#[test]
+fn magic_actor_departure_before_start_cancels_all_effects_and_releases_once() {
+    let mut game = fixture_game();
+    let caster = minion(
+        &game,
+        "south-spell-3",
+        Seat::North,
+        "departed-caster",
+        false,
+    );
+    let caster_ref = RealmReference::from_card(&caster.card);
+    let target = minion(&game, "south-spell-1", Seat::South, "departed-target", true);
+    let target_id = target.card.instance_id.clone();
+    let mut reentered = caster.clone();
+    reentered.card.enter_realm().unwrap();
+    game.position.units = vec![reentered, target];
+    game.position.units[1].warded = true;
+
+    let magic_card = card(&game, "north-spell-1", Seat::North, "departed-magic");
+    let magic_id = magic_card.instance_id.clone();
+    let magic = install(
+        &mut game,
+        vec![
+            Effect::Damage {
+                recipients: UnitSet::Target,
+                amount: 1,
+            },
+            Effect::Draw {
+                zone: DeckZone::Spellbook,
+                count: 1,
+            },
+        ],
+    );
+    let mut effect_source = source("departed-source", Seat::North, 0, None);
+    effect_source.instance_id = magic_id.clone();
+    effect_source.actor = Some(caster_ref);
+    let target_ref = UnitTarget::Minion {
+        seat: Seat::South,
+        instance_id: target_id.clone(),
+    };
+    let frame = game
+        .effect_frame(
+            magic,
+            AbilityEntry::Magic,
+            effect_source,
+            Some(&target_ref),
+            None,
+            Some(magic_card),
+        )
+        .unwrap();
+    let before_draw = game.position.players[seat_index(Seat::North)]
+        .hand_spellbook
+        .len();
+    let mut outcomes = Vec::new();
+    game.run_effect_frame(frame, &mut OutcomeLog::Record(&mut outcomes))
+        .unwrap();
+
+    let target = game
+        .position
+        .units
+        .iter()
+        .find(|unit| unit.card.instance_id == target_id)
+        .unwrap();
+    assert_eq!(target.damage, 0);
+    assert!(target.tapped);
+    assert!(target.warded);
+    assert_eq!(
+        game.position.players[seat_index(Seat::North)]
+            .hand_spellbook
+            .len(),
+        before_draw
+    );
+    assert_eq!(
+        game.position.players[seat_index(Seat::North)]
+            .cemetery
+            .iter()
+            .filter(|card| card.instance_id == magic_id)
+            .count(),
+        1
+    );
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|(kind, _)| kind == "magic-resolved")
+            .count(),
+        1
+    );
+    assert!(outcomes.iter().all(|(kind, _)| kind == "magic-resolved"));
+}
+
+#[test]
+fn magic_started_before_caster_departure_resumes_remaining_effects() {
+    let mut game = fixture_game();
+    let caster = minion(&game, "south-spell-3", Seat::North, "started-caster", false);
+    let caster_ref = RealmReference::from_card(&caster.card);
+    let caster_id = caster.card.instance_id.clone();
+    let mut target = minion(&game, "south-spell-1", Seat::North, "started-target", true);
+    let target_id = target.card.instance_id.clone();
+    target.warded = true;
+    game.position.units = vec![caster, target];
+
+    let magic_card = card(&game, "north-spell-1", Seat::North, "started-magic");
+    let magic_id = magic_card.instance_id.clone();
+    let magic = install(
+        &mut game,
+        vec![
+            Effect::Untap {
+                recipients: UnitSet::Target,
+            },
+            Effect::Draw {
+                zone: DeckZone::Spellbook,
+                count: 1,
+            },
+        ],
+    );
+    let mut effect_source = source("started-source", Seat::North, 0, None);
+    effect_source.instance_id = magic_id.clone();
+    effect_source.actor = Some(caster_ref);
+    let target_ref = UnitTarget::Minion {
+        seat: Seat::North,
+        instance_id: target_id.clone(),
+    };
+    let mut frame = game
+        .effect_frame(
+            magic,
+            AbilityEntry::Magic,
+            effect_source,
+            Some(&target_ref),
+            None,
+            Some(magic_card),
+        )
+        .unwrap();
+    game.start_effect_frame(&mut frame, &mut OutcomeLog::Ignore);
+    game.position
+        .units
+        .retain(|unit| unit.card.instance_id != caster_id);
+    let before_draw = game.position.players[seat_index(Seat::North)]
+        .hand_spellbook
+        .len();
+    game.run_effect_frame(frame, &mut OutcomeLog::Ignore)
+        .unwrap();
+
+    let target = game
+        .position
+        .units
+        .iter()
+        .find(|unit| unit.card.instance_id == target_id)
+        .unwrap();
+    assert!(!target.tapped);
+    assert!(target.warded);
+    assert_eq!(
+        game.position.players[seat_index(Seat::North)]
+            .hand_spellbook
+            .len(),
+        before_draw + 1
+    );
+    assert_eq!(
+        game.position.players[seat_index(Seat::North)]
+            .cemetery
+            .iter()
+            .filter(|card| card.instance_id == magic_id)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn magic_moved_caster_with_spatial_selection_returns_explicit_unsupported_error() {
+    let mut game = fixture_game();
+    let caster = minion(&game, "south-spell-3", Seat::North, "moved-caster", false);
+    let caster_ref = RealmReference::from_card(&caster.card);
+    let target = minion(&game, "south-spell-1", Seat::South, "moved-target", true);
+    let target_id = target.card.instance_id.clone();
+    game.position.units = vec![caster, target];
+    game.position.units[1].warded = true;
+
+    let magic_card = card(&game, "north-spell-1", Seat::North, "moved-magic");
+    let magic_id = magic_card.instance_id.clone();
+    let magic = install(
+        &mut game,
+        vec![
+            Effect::Untap {
+                recipients: UnitSet::Target,
+            },
+            Effect::Draw {
+                zone: DeckZone::Spellbook,
+                count: 1,
+            },
+        ],
+    );
+    Arc::get_mut(&mut game.rules).unwrap().cards[usize::from(magic.0)]
+        .abilities
+        .magic
+        .as_mut()
+        .unwrap()
+        .selection = Some(SelectionSpec::Unit {
+        kind: Some(super::super::UnitKind::Minion),
+        relation: SpatialRelation::Nearby,
+    });
+    let mut effect_source = source("moved-source", Seat::North, 0, None);
+    effect_source.instance_id = magic_id.clone();
+    effect_source.actor = Some(caster_ref);
+    let target_ref = UnitTarget::Minion {
+        seat: Seat::South,
+        instance_id: target_id.clone(),
+    };
+    let frame = game
+        .effect_frame(
+            magic,
+            AbilityEntry::Magic,
+            effect_source,
+            Some(&target_ref),
+            None,
+            Some(magic_card),
+        )
+        .unwrap();
+    game.position.units[0].location = Cell::parse("C4").unwrap();
+    let before_draw = game.position.players[seat_index(Seat::North)]
+        .hand_spellbook
+        .len();
+    let mut outcomes = Vec::new();
+    let error = game
+        .run_effect_frame(frame, &mut OutcomeLog::Record(&mut outcomes))
+        .unwrap_err();
+    assert!(matches!(error, GameError::UnsupportedMechanic(_)));
+    assert!(outcomes.is_empty());
+    let target = game
+        .position
+        .units
+        .iter()
+        .find(|unit| unit.card.instance_id == target_id)
+        .unwrap();
+    assert!(target.tapped);
+    assert!(target.warded);
+    assert_eq!(
+        game.position.players[seat_index(Seat::North)]
+            .hand_spellbook
+            .len(),
+        before_draw
+    );
+    assert!(
+        game.position.players[seat_index(Seat::North)]
+            .cemetery
+            .iter()
+            .all(|card| card.instance_id != magic_id)
+    );
+}
+
+#[test]
+fn activated_area_effect_refreshes_moved_source_geometry_before_selection() {
+    let mut game = fixture_game();
+    let id = card_id(&game, "south-spell-3");
+    let definition = &mut Arc::get_mut(&mut game.rules).unwrap().cards[usize::from(id.0)];
+    let super::super::CardFacts::Minion(facts) = &mut definition.facts else {
+        unreachable!()
+    };
+    facts.tap_to_damage_each_unit_at_adjacent_location = true;
+    facts.defense = 5;
+    definition.abilities = super::super::CompiledAbilities::from_facts(&definition.facts);
+
+    let mut source_unit = minion(
+        &game,
+        "south-spell-3",
+        Seat::North,
+        "moved-area-source",
+        false,
+    );
+    source_unit.location = Cell::parse("A1").unwrap();
+    source_unit.summoning_sickness = false;
+    let mut target = minion(
+        &game,
+        "south-spell-3",
+        Seat::South,
+        "moved-area-target",
+        false,
+    );
+    target.location = Cell::parse("C4").unwrap();
+    let target_id = target.card.instance_id.clone();
+    game.position.units = vec![source_unit, target];
+    let mut site = card(&game, "south-site-1", Seat::South, "moved-area-site");
+    site.enter_realm().unwrap();
+    game.position.sites[Cell::parse("C4").unwrap().index()] = Some(super::super::SitePosition {
+        card: site,
+        controller: Seat::South,
+        last_flight_turn: None,
+        warded: false,
+    });
+
+    let mut effect_source = source_for_unit(
+        &game.position.units[0],
+        Seat::North,
+        0,
+        Some(RealmReference::from_card(&game.position.units[0].card)),
+    );
+    effect_source.cells = vec![Cell::parse("C3").unwrap()];
+    let frame = game
+        .effect_frame(
+            id,
+            AbilityEntry::Activated,
+            effect_source,
+            None,
+            Some(Location {
+                cell: Cell::parse("C4").unwrap(),
+                region: Region::Surface,
+            }),
+            None,
+        )
+        .unwrap();
+    let mut outcomes = Vec::new();
+    game.run_effect_frame(frame, &mut OutcomeLog::Record(&mut outcomes))
+        .unwrap();
+
+    let target = game
+        .position
+        .units
+        .iter()
+        .find(|unit| unit.card.instance_id == target_id)
+        .unwrap();
+    assert_eq!(
+        target.damage, 0,
+        "the declared location is no longer adjacent"
+    );
+    assert!(!outcomes.iter().any(|(kind, payload)| {
+        kind == "area-damage-allocated" && payload["targetInstanceId"] == json!(target_id)
+    }));
 }
 
 #[test]
