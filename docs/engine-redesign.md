@@ -262,22 +262,34 @@ Area spells, location activations, and Genesis/turn pulses now share unit cohort
 selection and area-damage execution. The query filters region, intersecting cells,
 unit kind, controller, and excluded source; each physical unit appears once in
 canonical identity order. One executor freezes recipient defenses before allocating
-and applying damage. Callers still own death settlement and suspended continuations;
-the composed effect frame below remains to be implemented. Area membership does not
-apply explicit-target restrictions such as Stealth.
+and applying damage. Area membership does not apply explicit-target restrictions
+such as Stealth.
 
-Next migrate a complete composed slice across spells, Genesis, minion activations,
-and artifact activations: common selectors and atomic costs, then damage, untap, and
-draw operations in a resumable effect frame. Source context retains instance identity,
-owner, effect controller, actor/caster, declared choices, paid costs, and relevant
-last-known state. Target protection and actual damage are distinct result values.
+Selected complete abilities now compile into immutable damage,
+untap, and draw programs once per rules context. Magic, single-clause Genesis,
+minion area activations, and fixed artifact shots invoke the same effect runner.
+Migrated Magic execution branches are deleted. Mixed Genesis programs remain on
+the existing path as a whole until clause ordering and choices are represented;
+the compiler does not silently admit a supported prefix.
 
-The frame preserves the next operation and its dependencies across interrupting
-events. Replace the migrated action enumeration and execution branches with common
-selection and invocation; delete their old cohort/damage loops and special tail
-continuations. Keep thin action-format adapters only where the public protocol needs
-them. Test the same operation through different ability origins, including a protected
-target with an independent draw and a death-trigger interruption followed by resume.
+The frame preserves the next operation, source context, target protection, and held
+Magic across the existing death-trigger driver. A resolving spell enters its owner's
+cemetery when resolution finishes, including terminal interruption. Physical cards
+carry a realm-entry counter so an old reference cannot bind to a returned card.
+Target bindings follow current control while retaining their object incarnation;
+the authoritative state hash includes all suspended-frame data and entry counters.
+Ward protects the dependent target operations once while independent draws proceed.
+The same pass corrects adjacent location selection to include the source location,
+and removes both Ward and Stealth marks when a minion loses its abilities.
+
+Direct scenarios cover protected targets, independent effects, death-trigger order,
+cloned checkpoint continuation, terminal cleanup, source departure, re-entry, and
+control changes. Existing scenarios exercise the migrated operations through each
+origin. This is an execution migration: public action enumeration, validated costs,
+and choice adapters still use existing facts. Common selectors, atomic costs, and
+entry-time choices are the next migration. In particular, targeted Genesis needs
+an engine-issued choice after entry; the old adjacent-allies shortcut is not a
+completed implementation of that rule.
 
 Migrate persistent effects through the same invocation boundary next, using typed
 lifetimes and official characteristic layers. Expand identity/forms/zones, event
@@ -298,10 +310,21 @@ bounded derived-state evaluation; add invalidation caches only after profiling p
 they are useful and their rule dependencies are understood. Avoid allocating JSON or
 looking up card text in inner simulation loops.
 
-Preserve ordered batch results and byte-identical worker-count equivalence. The current
-local benchmark measured roughly 3.53 games/second with one worker and 38.59 with 16;
-use it as a regression baseline, not a universal performance promise. Measure the new
-kernel on both simple and interaction-heavy positions.
+Preserve ordered batch results and byte-identical worker-count equivalence. The
+composed-execution checkpoint was compared with the preceding cohort checkpoint in
+three alternating release-build rounds, each with nine samples and 100 seat pairs
+per sample. Median raw throughput was 1,330 before and 1,316 games/second after;
+recorded replay throughput was 5.746 and 5.703 games/second. These small differences
+do not establish a speedup. This synthetic regression workload does not measure all
+new ability combinations or complete real decks. Measure the kernel on both simple
+and interaction-heavy positions as the common operations expand.
+
+The same checkpoint's 48-game recorded batch benchmark measured 3.460 games/second
+with one worker and 38.382 with 16 (three timed repetitions per worker count).
+Sixteen was best among 1, 2, 4, 8, 16, and 24 workers on this 24-logical-CPU machine;
+24 workers produced 29.509 games/second. Every worker count and repetition produced
+the same result hash. These figures describe the synthetic workload and current
+machine, not a claim of equivalent throughput for complete real decks.
 
 Expose public semantic action information to playing policies from the same compiled
 definitions. This lets a policy evaluate effect purpose and tactical outcomes without

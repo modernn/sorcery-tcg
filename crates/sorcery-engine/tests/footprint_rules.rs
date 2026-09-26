@@ -1958,7 +1958,7 @@ fn rule_catalog_0189_oversized_area_damage_reaches_cells_adjacent_to_any_footpri
         "C4 borders D4, so the B3-anchored 2x2 must offer that adjacent blanket"
     );
     assert!(
-        !actions.iter().any(|action| {
+        actions.iter().any(|action| {
             action.descriptor["kind"] == "activate-area-damage"
                 && action.descriptor["sourceInstanceId"] == giant
                 && ["B3", "B4", "C3", "C4"].contains(
@@ -1967,7 +1967,7 @@ fn rule_catalog_0189_oversized_area_damage_reaches_cells_adjacent_to_any_footpri
                         .unwrap_or(""),
                 )
         }),
-        "occupied footprint cells are not adjacent targets"
+        "occupied footprint cells are adjacent targets"
     );
     let (_, receipt) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "activate-area-damage"

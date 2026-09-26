@@ -432,7 +432,7 @@ fn stage_south_charger(session: &mut Session, tap: bool) -> String {
 }
 
 #[test]
-fn rule_catalog_0613_untap_magic_readies_a_tapped_minion_without_breaking_ward() {
+fn rule_catalog_0613_opposing_ward_prevents_untap_magic() {
     let encoded = untap_manifest(613);
     let mut session = opening_main(&encoded);
     let charger_id = stage_south_charger(&mut session, true);
@@ -440,7 +440,7 @@ fn rule_catalog_0613_untap_magic_readies_a_tapped_minion_without_breaking_ward()
     assert_eq!(realm_unit(&before, &charger_id)["tapped"], true);
     assert_eq!(realm_unit(&before, &charger_id)["warded"], true);
 
-    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic"
             && descriptor["cardId"] == "north-untap"
             && descriptor["target"]["kind"] == "minion"
@@ -448,33 +448,16 @@ fn rule_catalog_0613_untap_magic_readies_a_tapped_minion_without_breaking_ward()
     });
     assert_eq!(
         event_types(&receipt),
-        ["magic-cast", "minion-untapped", "magic-resolved"]
+        ["magic-cast", "ward-broken", "magic-resolved"]
     );
-    let untapped = receipt
-        .events
-        .iter()
-        .find(|event| event.event_type == "minion-untapped")
-        .expect("untap event");
-    assert_eq!(untapped.payload["instanceId"], charger_id);
-    assert_eq!(
-        untapped.payload["sourceInstanceId"],
-        descriptor["cardInstanceId"]
-    );
-    assert!(
-        !receipt
-            .events
-            .iter()
-            .any(|event| event.event_type == "ward-broken")
-    );
-
     let after = state(&session);
-    assert_eq!(realm_unit(&after, &charger_id)["tapped"], false);
-    assert_eq!(realm_unit(&after, &charger_id)["warded"], true);
+    assert_eq!(realm_unit(&after, &charger_id)["tapped"], true);
+    assert_eq!(realm_unit(&after, &charger_id)["warded"], false);
     assert_exact_replay(&session);
 }
 
 #[test]
-fn rule_catalog_0614_untap_magic_is_a_paid_noop_when_already_untapped() {
+fn rule_catalog_0614_opposing_ward_breaks_even_when_untap_would_be_a_noop() {
     let encoded = untap_manifest(614);
     let mut session = opening_main(&encoded);
     let charger_id = stage_south_charger(&mut session, false);
@@ -488,18 +471,20 @@ fn rule_catalog_0614_untap_magic_is_a_paid_noop_when_already_untapped() {
             && descriptor["target"]["kind"] == "minion"
             && descriptor["target"]["instanceId"] == charger_id
     });
-    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "ward-broken", "magic-resolved"]
+    );
     assert!(
         !receipt
             .events
             .iter()
-            .any(|event| event.event_type == "minion-untapped"
-                || event.event_type == "ward-broken")
+            .any(|event| event.event_type == "minion-untapped")
     );
 
     let after = state(&session);
     assert_eq!(realm_unit(&after, &charger_id)["tapped"], false);
-    assert_eq!(realm_unit(&after, &charger_id)["warded"], true);
+    assert_eq!(realm_unit(&after, &charger_id)["warded"], false);
     assert_exact_replay(&session);
 }
 

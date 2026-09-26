@@ -157,11 +157,11 @@ test('Duel fixture regenerates byte-identically from Rust legality', async () =>
   });
   assert.equal(
     fixture.normalTransition.receipt.receiptId,
-    'sha256:ee971fb48fd345615bd54b650c3d2c92d0f6977e35c5c070be8049d1753b93ab',
+    'sha256:97500225cb1f606d4e25ee82693765706fa08166c99fc00b2c9119ac91adabf1',
   );
   assert.equal(
     fixture.normalTransition.stateHash,
-    'sha256:0e86b939246e778b4031bed82bb8de227be72728fc31c41ec3c1cd076c5bf76e',
+    'sha256:485a86fb59b996e917aa0393e14c78923c464ad1e43339286c5f10bad545d57f',
   );
   assert.equal(fixture.normalTransition.replayVerified, true);
 
@@ -180,11 +180,11 @@ test('Duel fixture regenerates byte-identically from Rust legality', async () =>
   });
   assert.equal(
     fixture.wardedTransition.receipt.receiptId,
-    'sha256:898d8c6803c8e9e71ca0aac04b37ac2656c2a063e9b2bf79436e9e38d2ac1b38',
+    'sha256:26af52f8822e7706508c90c9fa788691915f93af5e992f25a59bdfdb775e8774',
   );
   assert.equal(
     fixture.wardedTransition.stateHash,
-    'sha256:2fcb419fe7becd715616acf8a8ba59b24fe5861ea6d408c65fd481fea6443edb',
+    'sha256:84b0eb83e63d9e3be3bc5fbc7d7d5cf1d02ecd3d0027f840645c92704f8c98b1',
   );
   assert.equal(fixture.wardedTransition.replayVerified, true);
 
@@ -219,11 +219,11 @@ test('Duel fixture regenerates byte-identically from Rust legality', async () =>
   assert.deepEqual(underground.pending.receipt.randomDraws, []);
   assert.equal(
     underground.pending.receipt.receiptId,
-    'sha256:4aa31626e11c88edb403e68482d1ab58362809e76e8ed0f6c66037a572b4a98e',
+    'sha256:d21505063fd50b296efb01216ef207a861d4ca7dc2829267f7443c4b0389c68c',
   );
   assert.equal(
     underground.pending.stateHash,
-    'sha256:18593a0971bc7f00d80fdbb5c87b7755d9509f772f8b65fb7ca2eb870ce6cc25',
+    'sha256:40d2af84755e2beb54df129e00305dfca9311fe3d7da22e360363654f556d891',
   );
   assert.equal(underground.pending.orderActions.length, 2);
   assert.equal(underground.resolved.selectedOrderActionId, underground.pending.orderActions[0]?.actionId);
@@ -239,11 +239,11 @@ test('Duel fixture regenerates byte-identically from Rust legality', async () =>
   assert.deepEqual(underground.resolved.receipt.randomDraws, []);
   assert.equal(
     underground.resolved.receipt.receiptId,
-    'sha256:32cbdd58a5dc427db5f9217a587a1c88bbc473a67f52dfcc85a9ab6b3de14eb2',
+    'sha256:a17b6a16fc663165ab5e415aca617c03da3f075d0be9516fc55e707a5ec5069a',
   );
   assert.equal(
     underground.resolved.stateHash,
-    'sha256:e5a3370614a777e90a8a9d1fdfdb555c5d35a0bd6ee7f92bc97f786ae2627c3c',
+    'sha256:d3a68eb7735cff9639b69e3167ad0519391d2c39e5eb1b783adddea6642c2dd8',
   );
   assert.equal(underground.resolved.phase, 'main');
   assert.equal(underground.resolved.decisionSeat, 'north');

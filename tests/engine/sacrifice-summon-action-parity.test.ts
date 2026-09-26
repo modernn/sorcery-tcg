@@ -156,11 +156,11 @@ test('sacrifice-summon fixture regenerates byte-identically from Rust legality',
   assert.deepEqual(fixture.transition.receipt.randomDraws, []);
   assert.equal(
     fixture.transition.receipt.postStateHash,
-    'sha256:be3c563da371d2359fa4185a89160575c88817ad1cd0a93df3fc4fbca3c669f4',
+    'sha256:1a751baae437b35e13467fea9167bed26533b1b5f55dc333036a890c97c0f03d',
   );
   assert.equal(
     fixture.transition.receipt.receiptId,
-    'sha256:b9975441ec5806d8245a1ace8d9219d9ad66f08cf295e45a7c37fbd9ed7dc2f8',
+    'sha256:d2fd020796391b1aa2f8c44232fc7e368a368bba769ad25ff82b35367ba7fbb9',
   );
 
   assert.equal(
@@ -192,20 +192,20 @@ test('sacrifice-summon fixture regenerates byte-identically from Rust legality',
   assert.equal(fixture.deathrite.pending.stateVersion, 13);
   assert.equal(
     fixture.deathrite.pending.stateHash,
-    'sha256:1a31c6f450858ded6c7b35eb79efe07e01c9ef6a893cdb542fab653635efa604',
+    'sha256:e19f242cb5d0afd939fea8b31fc5605b7ebf54139607b46932e0a9123284bd95',
   );
   assert.equal(
     fixture.deathrite.pending.checkpointId,
-    'sha256:0910994adb36e09ece47dfcd14719463afcd1b815ff6b0c938d36579d61a33f8',
+    'sha256:d4b17649e7aebe57b097e41587bbda0b8ea19615360000c71acf38e1bd338c29',
   );
   assert.equal(
     fixture.deathrite.pending.expectedSessionHash,
-    'sha256:a8c3365ee85beb3c9ea8f4687d7a673f2dbe039f85bd59f0ba2bc2022c418d05',
+    'sha256:0949c1d532d5130a6840c210a6973b441dc8a957bcaebc8bfe783248266b3ceb',
   );
   assert.equal(fixture.deathrite.pending.checkpointRoundTrip, true);
   assert.equal(
     fixture.deathrite.pending.serializedCheckpointHash,
-    'sha256:c7f71d96932315eb76d9a605d7bfa505c96be0442b57377909fba8a60abd42c3',
+    'sha256:cf6ca9b67adb3708cd34c704c6912979e1e0f0835b44653f99d53d611cb2d3bb',
   );
   assert.deepEqual(
     fixture.deathrite.pending.orderActions.map(({ actionId, descriptor, label }) => ({
@@ -249,15 +249,15 @@ test('sacrifice-summon fixture regenerates byte-identically from Rust legality',
   assert.equal(fixture.deathrite.resolved.stateVersion, 14);
   assert.equal(
     fixture.deathrite.resolved.stateHash,
-    'sha256:db957786f73adf17ceab12ab6f7b5e7754a60d19d411a1dc1cd88e05165cb31a',
+    'sha256:401b1b56ebefddfc906255011d93f0299d5070ab5f95bc728e12e6e63a7ae456',
   );
   assert.equal(
     fixture.deathrite.resolved.expectedSessionHash,
-    'sha256:0f3b2449c39f174c00695582ef6098e89c29d03d13c2226d5e7e84db817fc8b2',
+    'sha256:542989126a2a1396337414368b83825f597b6e3c7eb71bb36d1aea1e9575b988',
   );
   assert.equal(
     fixture.deathrite.resolved.serializedCheckpointHash,
-    'sha256:4ad2d676869c8fc4d7081172ff3fb97050a3d037dbee84dbc541f0f9ed623174',
+    'sha256:d955347329d35c517b0e8954a33c1a5d96ddd307b9aad5e0d4b44d1d0539f4b0',
   );
   assert.equal(fixture.deathrite.resolved.replayVerified, true);
 });

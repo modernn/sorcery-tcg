@@ -1287,12 +1287,16 @@ fn rule_catalog_0790_genesis_sleep_requires_real_damage_not_retroactive_strike()
     );
     let position = state(&warded.session);
     assert_eq!(
-        unit(&position, &warded.target_id).expect("warded sleeper")["damage"],
-        0
+        unit(&position, &warded.target_id).expect("awakened sleeper")["damage"],
+        2
+    );
+    assert!(
+        unit(&position, &warded.target_id).expect("awakened target")["disabledUntilDamaged"]
+            .is_null()
     );
     assert_eq!(
-        unit(&position, &warded.target_id).expect("sleeping target")["disabledUntilDamaged"],
-        true
+        unit(&position, &warded.target_id).expect("awakened target")["warded"],
+        false
     );
     assert!(
         warded
@@ -1302,7 +1306,7 @@ fn rule_catalog_0790_genesis_sleep_requires_real_damage_not_retroactive_strike()
             .expect("Ward fight")
             .events
             .iter()
-            .all(|event| event.event_type != "minion-awakened")
+            .any(|event| event.event_type == "minion-awakened")
     );
     assert_exact_replay(&warded.session);
 }

@@ -53,7 +53,7 @@ test('RULE-01 deterministic agents move, fight, and complete a match', () => {
   assert.deepEqual(result, {
     acceptedActionCount: 230,
     classification: 'unranked_partial_rules',
-    finalStateHash: 'sha256:be86c59b046db97838faec73c34ccc8dd8b9d56587c04a3cd335be6c588ccc65',
+    finalStateHash: 'sha256:d2470816213290a1769dd1801af647149d51d02cd3df3dde24b170c27e41471b',
     fightCount: 6,
     replayVerified: true,
     terminal: {
@@ -62,7 +62,7 @@ test('RULE-01 deterministic agents move, fight, and complete a match', () => {
       status: 'finished',
       winner: 'south',
     },
-    transcriptHash: 'sha256:fbdad70e092de2166ee9d853bae9300d45e9921c33a88865cb94147f4cd2ad47',
+    transcriptHash: 'sha256:b9c80fa98c32df9c3764ff01dc9d974039aec1633d71f1397e13f324df701c17',
     turnCount: 27,
   });
 });

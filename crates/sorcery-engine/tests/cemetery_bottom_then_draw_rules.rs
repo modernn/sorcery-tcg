@@ -787,6 +787,10 @@ fn deathrite_cemetery_bottom_seed_with(start: u32) -> String {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one deathrite interruption and resumed cemetery choice"
+)]
 fn rule_catalog_1070_cemetery_bottom_then_draw_withheld_during_pending_deathrite_order() {
     let encoded = deathrite_cemetery_bottom_seed_with(1070);
     let mut setup = try_pending_deathrite_with_cemetery_card(&encoded)
@@ -804,7 +808,11 @@ fn rule_catalog_1070_cemetery_bottom_then_draw_withheld_during_pending_deathrite
             .iter()
             .all(|unit| unit["instanceId"] != *instance_id)
     }));
-    assert!(cemetery_ids(&paused, "north").contains(&cemetery_id));
+    assert!(!cemetery_ids(&paused, "north").contains(&cemetery_id));
+    assert_eq!(
+        paused["pendingDeathrites"]["continuation"]["magic"]["instanceId"],
+        cemetery_id
+    );
     assert!(
         session
             .legal_actions()

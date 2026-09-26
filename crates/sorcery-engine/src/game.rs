@@ -25,15 +25,16 @@ use crate::facts::{
 };
 use crate::prng::PrngState;
 
+mod ability;
+mod effect;
+use ability::CompiledAbilities;
+use effect::{AbilityEntry, EffectFrame, RealmReference};
+
 /// Frozen public engine version bound into every admitted manifest.
 pub const ENGINE_VERSION: &str = "sorcery-core-v1";
 const MAX_DECK_CARDS: usize = 200;
 const CHAIN_MAGIC_DAMAGE: u16 = 2;
 const CHAIN_MAGIC_EXTRA_TARGET_MANA: u64 = 2;
-/// The one damage amount `tapToDamageEachUnitAtAdjacentLocation` is admitted with.
-const AREA_DAMAGE_AMOUNT: u8 = 2;
-/// The one damage amount `tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps` is admitted with.
-const ARTIFACT_DAMAGE_AMOUNT: u8 = 3;
 const ARTIFACT_ROLL_DAMAGE_AMOUNT: u8 = 4;
 /// The one air affinity `flyToNearbyVoidOncePerTurnAtAirThreshold` is admitted with.
 const SITE_FLIGHT_AIR_THRESHOLD: u64 = 3;
@@ -338,6 +339,7 @@ struct CardId(u16);
 
 #[derive(Debug)]
 struct CardDefinition {
+    abilities: CompiledAbilities,
     definition_hash: IdentityHash,
     facts: CardFacts,
     id: String,
@@ -378,6 +380,7 @@ struct CardInstance {
     card_id: CardId,
     instance_id: IdentityHash,
     owner: Seat,
+    realm_entry: u64,
     source: CardSource,
 }
 
@@ -870,6 +873,7 @@ enum DeathriteContinuation {
     Blink(BlinkContinuation),
     DragProjectile(DragProjectileContinuation),
     EndTurn(EndTurnContinuation),
+    Effect(Box<EffectFrame>),
     FirstStrike(FirstStrikeContinuation),
     LeapAttack(LeapAttackContinuation),
     PaidSummon(PaidSummonContinuation),
@@ -1144,7 +1148,7 @@ struct MinionDamageStatus {
     index: usize,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct UnitDamageSource {
     current_power: u16,
     lethal: bool,
@@ -1769,6 +1773,7 @@ impl Game {
                 .remove(id)
                 .ok_or_else(|| invalid("validated manifest lacks parsed card facts"))?;
             cards.push(CardDefinition {
+                abilities: CompiledAbilities::from_facts(&facts),
                 definition_hash: identity_hash(value)?,
                 facts,
                 id: id.clone(),
@@ -4606,10 +4611,8 @@ impl Game {
             let occupied = Self::unit_occupied_cells(unit);
             let adjacent: BTreeSet<_> = occupied
                 .iter()
-                .flat_map(|cell| cell.bordering(false))
-                .filter(|cell| {
-                    !occupied.contains(cell) && self.location_exists_in_region(*cell, unit.region)
-                })
+                .flat_map(|cell| std::iter::once(*cell).chain(cell.bordering(false)))
+                .filter(|cell| self.location_exists_in_region(*cell, unit.region))
                 .collect();
             for cell in adjacent {
                 self.push_action(
@@ -10815,7 +10818,11 @@ impl Game {
             && !continuing_cast
             && !matches!(
                 pending.continuation,
-                Some(DeathriteContinuation::Blink(_) | DeathriteContinuation::LeapAttack(_))
+                Some(
+                    DeathriteContinuation::Blink(_)
+                        | DeathriteContinuation::LeapAttack(_)
+                        | DeathriteContinuation::Effect(_)
+                )
             )
         {
             pending.deferred_magic_resolved = Some(completion);
@@ -13612,41 +13619,34 @@ impl Game {
         )
     }
 
-    /// Reveals Stealth on every Disabled minion before region occupancy is judged.
-    ///
-    /// Disabled is a loss of abilities, not a delayed interaction: a Waterbound that leaves
-    /// Water is immediately visible, and the reveal is permanent even if it later returns.
-    fn reveal_disabled_stealth(&mut self, outcomes: &mut OutcomeLog<'_>) {
-        let mut revealed: Vec<(IdentityHash, Seat)> = self
+    /// Disabled and silenced minions permanently lose Stealth and Ward marks.
+    fn settle_lost_ability_marks(&mut self, outcomes: &mut OutcomeLog<'_>) {
+        let mut affected: Vec<_> = self
             .position
             .units
             .iter()
-            .filter(|unit| unit.stealthed && self.minion_is_disabled(unit))
+            .filter(|unit| (unit.stealthed || unit.warded) && self.minion_abilities_lost(unit))
             .map(|unit| (unit.card.instance_id.clone(), unit.controller))
             .collect();
-        revealed.sort_by(|left, right| left.0.cmp(&right.0));
-        for (instance_id, seat) in revealed {
-            let Some(unit) = self
+        affected.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        for (instance_id, seat) in affected {
+            let unit = self
                 .position
                 .units
                 .iter_mut()
                 .find(|unit| unit.card.instance_id == instance_id)
-            else {
-                continue;
-            };
-            if !unit.stealthed {
-                continue;
+                .expect("snapshotted realm unit");
+            for (mark, event) in [
+                (&mut unit.stealthed, "stealth-lost"),
+                (&mut unit.warded, "ward-lost"),
+            ] {
+                if std::mem::take(mark) {
+                    outcomes.push(event, || json!({ "instanceId": instance_id, "seat": seat }));
+                }
             }
-            unit.stealthed = false;
-            outcomes.push("stealth-lost", || {
-                json!({
-                    "instanceId": instance_id,
-                    "seat": seat,
-                })
-            });
         }
         self.revert_stealth_bound_controls(outcomes)
-            .expect("stealth-bound control must revert after Disable reveals Stealth");
+            .expect("stealth-bound control must revert after ability loss");
     }
 
     /// Settles every unit whose own region stopped holding it, killing or banishing it.
@@ -13657,7 +13657,7 @@ impl Game {
         if self.position.terminal.is_some() || self.position.pending_deathrites.is_some() {
             return Ok(());
         }
-        self.reveal_disabled_stealth(outcomes);
+        self.settle_lost_ability_marks(outcomes);
         let (deaths, banishments) = self.region_settlement_removals();
         if deaths.is_empty() && banishments.is_empty() {
             return Ok(());
@@ -14227,6 +14227,10 @@ impl Game {
             self.position.decision_seat = return_decision_seat;
         };
         match continuation {
+            DeathriteContinuation::Effect(frame) => {
+                restore();
+                self.run_effect_frame(*frame, outcomes)
+            }
             DeathriteContinuation::Blink(continuation) => {
                 restore();
                 self.finish_blink(&continuation, outcomes);
@@ -14286,7 +14290,7 @@ impl Game {
             .filter(|seat| defeated.contains(seat) || deck_losers.contains(seat))
             .collect();
         if losers.len() == 2 {
-            Self::emit_interrupted_magic_resolved(continuation.as_ref(), outcomes);
+            self.emit_interrupted_magic_resolved(continuation.as_ref(), outcomes);
             let reason = if defeated.len() == 2 && deck_losers.is_empty() {
                 DrawReason::SimultaneousAvatarDefeat
             } else {
@@ -14304,7 +14308,7 @@ impl Game {
                 })
             });
         } else if let Some(&loser) = losers.first() {
-            Self::emit_interrupted_magic_resolved(continuation.as_ref(), outcomes);
+            self.emit_interrupted_magic_resolved(continuation.as_ref(), outcomes);
             let winner = other_seat(loser);
             let reason = if defeated.contains(&loser) {
                 WinReason::AvatarDefeated
@@ -14871,6 +14875,8 @@ impl Game {
         }
         player.domain_established = true;
         player.mana = ordinary_mana;
+        let mut card = card;
+        card.enter_realm()?;
         self.position.sites[cell.index()] = Some(SitePosition {
             card,
             controller: seat,
@@ -15177,6 +15183,7 @@ impl Game {
         );
         Ok(UnitPosition {
             card: CardInstance {
+                realm_entry: 0,
                 card_id,
                 instance_id: identity_hash(&json!({
                     "cardId": token_card_id,
@@ -15256,6 +15263,8 @@ impl Game {
             return Err(GameError::IllegalAction);
         }
         let token_card_id = self.rules.cards[usize::from(card_id.0)].id.clone();
+        let mut token = token;
+        token.card.enter_realm()?;
         self.position.units.push(token);
         outcomes.push("minion-summoned", || {
             let mut payload = json!({
@@ -15339,6 +15348,8 @@ impl Game {
         player.domain_established = true;
         player.mana = next_mana;
         self.position.rubble[target_cell.index()] = None;
+        let mut card = card;
+        card.enter_realm()?;
         self.position.sites[target_cell.index()] = Some(SitePosition {
             card,
             controller: seat,
@@ -16391,7 +16402,6 @@ impl Game {
         {
             return Err(GameError::IllegalAction);
         }
-        let amount = u16::from(AREA_DAMAGE_AMOUNT);
         let target_location = *target_location;
         self.position
             .units
@@ -16399,8 +16409,18 @@ impl Game {
             .find(|unit| unit.controller == seat && unit.card.instance_id == *source_instance_id)
             .ok_or(GameError::IllegalAction)?
             .tapped = true;
-        let (_, damage_source) =
-            self.combatant_damage_stats(UnitKind::Minion, seat, source_instance_id)?;
+        let source = self.unit_effect_source(&UnitTarget::Minion {
+            instance_id: source_instance_id.clone(),
+            seat,
+        })?;
+        let card_id = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *source_instance_id)
+            .ok_or(GameError::IllegalAction)?
+            .card
+            .card_id;
         outcomes.push("area-damage-activated", || {
             json!({
                 "cell": target_location.cell,
@@ -16410,13 +16430,17 @@ impl Game {
             })
         });
         self.record_unit_interaction(UnitKind::Minion, seat, source_instance_id, outcomes)?;
-        self.damage_each_unit_at_location(
-            target_location,
-            amount,
-            damage_source,
-            ("area-damage-allocated", source_instance_id),
-            outcomes,
-        )
+        let frame = self.effect_frame(
+            card_id,
+            AbilityEntry::Activated,
+            source,
+            None,
+            Some(target_location),
+            None,
+        )?;
+        self.run_effect_frame(frame, outcomes)?;
+        self.position.state_version += 1;
+        Ok(())
     }
 
     /// Freeze every recipient's defenses before allocating or applying any damage. Deaths are
@@ -16528,7 +16552,21 @@ impl Game {
             .and_then(ArtifactPosition::bearer)
             .ok_or(GameError::IllegalAction)?
             .clone();
-        let amount = u16::from(ARTIFACT_DAMAGE_AMOUNT);
+        let artifact = self
+            .position
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.card.instance_id == *artifact_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let card_id = artifact.card.card_id;
+        let mut source = self.unit_effect_source(&bearer)?;
+        source.instance_id = artifact_instance_id.clone();
+        source.owner = artifact.card.owner;
+        source.realm = Some(RealmReference::from_card(&artifact.card));
+        source.damage = UnitDamageSource {
+            current_power: 0,
+            lethal: false,
+        };
         outcomes.push("artifact-damage-activated", || {
             json!({
                 "bearerInstanceId": bearer.instance_id(),
@@ -16542,26 +16580,15 @@ impl Game {
         // when the damage that kills it is dealt.
         self.tap_unit_target(&bearer)?;
         self.tap_unit_target(helper)?;
-        outcomes.push("artifact-damage-allocated", || {
-            json!({
-                "amount": amount,
-                "sourceInstanceId": artifact_instance_id,
-                "targetInstanceId": target.instance_id(),
-            })
-        });
-        self.damage_unit_and_settle_deaths(
-            &(
-                target.instance_id().clone(),
-                unit_target_kind(target),
-                target.seat(),
-            ),
-            amount,
-            UnitDamageSource {
-                current_power: 0,
-                lethal: false,
-            },
-            outcomes,
+        let frame = self.effect_frame(
+            card_id,
+            AbilityEntry::Activated,
+            source,
+            Some(target),
+            None,
+            None,
         )?;
+        self.run_effect_frame(frame, outcomes)?;
         self.position.state_version += 1;
         Ok(())
     }
@@ -17648,6 +17675,8 @@ impl Game {
                 suppresses_airborne: true,
             });
         }
+        let mut card = card;
+        card.enter_realm()?;
         self.position.auras.push(AuraPosition {
             card,
             cells: cells.clone(),
@@ -19870,6 +19899,8 @@ impl Game {
         self.record_unit_interaction(caster_kind, seat, caster_instance_id, outcomes)?;
         let instance_id = card.instance_id.clone();
         let owner = card.owner;
+        let mut card = card;
+        card.enter_realm()?;
         self.position
             .artifacts
             .push(ArtifactPosition { card, placement });
@@ -20128,6 +20159,7 @@ impl Game {
         let CardFacts::Magic(facts) = &definition.facts else {
             return Err(GameError::IllegalAction);
         };
+        let compiled_magic = definition.abilities.magic.is_some();
         let token_genesis_products = match &facts.effect {
             MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(token_card_id) => {
                 self.magic_token_genesis_damage_products(seat, card_instance_id, token_card_id)?
@@ -20356,7 +20388,12 @@ impl Game {
         let player = &mut self.position.players[player_index];
         player.mana -= mana_paid;
         player.air_thresholds_cast_this_turn = next_air_thresholds_cast_this_turn;
-        self.position.players[seat_index(owner)].cemetery.push(card);
+        let held_magic = if compiled_magic {
+            Some(card)
+        } else {
+            self.position.players[seat_index(owner)].cemetery.push(card);
+            None
+        };
         outcomes.push("magic-cast", || {
             let mut payload = json!({
                 "cardId": card_id,
@@ -20408,12 +20445,39 @@ impl Game {
             }
             payload
         });
+        // Bind the declared objects before casting reveals Stealth and may revert control.
+        let compiled_frame = if compiled_magic {
+            let mut source =
+                self.unit_effect_source(&self.recorded_caster(seat, caster_instance_id))?;
+            source.instance_id = card_instance_id.clone();
+            source.owner = owner;
+            source.realm = None;
+            source.damage = UnitDamageSource {
+                current_power: 0,
+                lethal: false,
+            };
+            Some(self.effect_frame(
+                compact_card_id,
+                AbilityEntry::Magic,
+                source,
+                target.as_ref(),
+                *target_location,
+                held_magic,
+            )?)
+        } else {
+            None
+        };
         self.record_unit_interaction(
             caster_kind.ok_or(GameError::IllegalAction)?,
             seat,
             caster_instance_id,
             outcomes,
         )?;
+        if let Some(frame) = compiled_frame {
+            self.run_effect_frame(frame, outcomes)?;
+            self.position.state_version += 1;
+            return Ok(());
+        }
         let leap_attack = matches!(
             effect,
             MagicEffect::LeapAttackAlly | MagicEffect::AllyStrikesEachEnemyAtItsLocation
@@ -20643,16 +20707,6 @@ impl Game {
                 };
                 self.apply_tap_minion(instance_id, *target_seat, seat, card_instance_id, outcomes)?;
             }
-            MagicEffect::UntapTargetMinion => {
-                let Some(UnitTarget::Minion {
-                    instance_id,
-                    seat: target_seat,
-                }) = target
-                else {
-                    return Err(GameError::IllegalAction);
-                };
-                self.apply_untap_minion(instance_id, *target_seat, card_instance_id, outcomes)?;
-            }
             MagicEffect::TargetPlayerDiscardsCards(count) => {
                 let target_seat = self.targeted_avatar_seat(target.as_ref())?;
                 raising =
@@ -20711,9 +20765,6 @@ impl Game {
                     outcomes,
                 );
             }
-            MagicEffect::DrawSites(count) => {
-                self.apply_genesis_draws(seat, card_instance_id, DeckZone::Atlas, count, outcomes);
-            }
             MagicEffect::DrawSiteThenMayPlayLandSite => {
                 self.apply_genesis_draws(seat, card_instance_id, DeckZone::Atlas, 1, outcomes);
                 raising = self.begin_filtered_site_play(
@@ -20732,15 +20783,6 @@ impl Game {
                     compact_card_id,
                     card_instance_id,
                     owner,
-                );
-            }
-            MagicEffect::DrawSpells(count) => {
-                self.apply_genesis_draws(
-                    seat,
-                    card_instance_id,
-                    DeckZone::Spellbook,
-                    count,
-                    outcomes,
                 );
             }
             MagicEffect::SummonRandomMinionFromAnyCemetery => {
@@ -22009,107 +22051,6 @@ impl Game {
                     }
                 }
             }
-            MagicEffect::DamageTargetUnit {
-                amount,
-                untap_target_minion_after_damage,
-                ..
-            } => {
-                let target = target.as_ref().ok_or(GameError::IllegalAction)?;
-                let target_instance_id = target.instance_id().clone();
-                outcomes.push("magic-damage-allocated", || {
-                    json!({
-                        "amount": amount,
-                        "sourceInstanceId": card_instance_id,
-                        "targetInstanceId": target_instance_id,
-                    })
-                });
-                let target_kind = match target {
-                    UnitTarget::Avatar { .. } => UnitKind::Avatar,
-                    UnitTarget::Minion { .. } => UnitKind::Minion,
-                };
-                let damage = self.apply_simple_damage(
-                    target_kind,
-                    target.seat(),
-                    &target_instance_id,
-                    u16::from(amount),
-                    UnitDamageSource {
-                        current_power: 0,
-                        lethal: false,
-                    },
-                    outcomes,
-                )?;
-                if damage.minion_died || damage.avatar_defeated {
-                    let defeated_seat = target.seat();
-                    self.begin_minion_deaths(
-                        if damage.minion_died {
-                            std::slice::from_ref(&target_instance_id)
-                        } else {
-                            &[]
-                        },
-                        if damage.avatar_defeated {
-                            std::slice::from_ref(&defeated_seat)
-                        } else {
-                            &[]
-                        },
-                        Phase::Main,
-                        self.position.active_seat,
-                        outcomes,
-                    )?;
-                }
-                if untap_target_minion_after_damage && !damage.minion_died {
-                    let UnitTarget::Minion {
-                        seat: target_seat, ..
-                    } = target
-                    else {
-                        return Err(GameError::IllegalAction);
-                    };
-                    self.apply_untap_minion(
-                        &target_instance_id,
-                        *target_seat,
-                        card_instance_id,
-                        outcomes,
-                    )?;
-                }
-            }
-            MagicEffect::DamageEachAbovegroundMinionOne
-            | MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_) => {
-                let (targets, amount) = match effect {
-                    MagicEffect::DamageEachAbovegroundMinionOne => (
-                        self.query_units(UnitQuery {
-                            region: Region::Surface,
-                            cells: None,
-                            kind: Some(UnitKind::Minion),
-                            controller: None,
-                            exclude: None,
-                        }),
-                        1,
-                    ),
-                    MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(amount) => (
-                        self.units_at_location(target_location.ok_or(GameError::IllegalAction)?),
-                        u16::from(amount),
-                    ),
-                    _ => unreachable!("matched area damage"),
-                };
-                let casualties = self.apply_area_damage(
-                    targets,
-                    amount,
-                    UnitDamageSource {
-                        current_power: 0,
-                        lethal: false,
-                    },
-                    ("magic-damage-allocated", card_instance_id),
-                    outcomes,
-                )?;
-                if !casualties.minions.is_empty() || !casualties.avatars.is_empty() {
-                    self.begin_minion_deaths(
-                        &casualties.minions,
-                        &casualties.avatars,
-                        Phase::Main,
-                        self.position.active_seat,
-                        outcomes,
-                    )?;
-                }
-            }
             MagicEffect::DestroyOwnArtifactAtLocationForAreaDamage(amount) => {
                 let target_artifact_instance_id = target_artifact_instance_id
                     .as_ref()
@@ -22337,6 +22278,15 @@ impl Game {
                         .cemetery
                         .push(card);
                 }
+            }
+            // Compiled entries have already transferred ownership to the common runner.
+            MagicEffect::DamageTargetUnit { .. }
+            | MagicEffect::UntapTargetMinion
+            | MagicEffect::DrawSites(_)
+            | MagicEffect::DrawSpells(_)
+            | MagicEffect::DamageEachAbovegroundMinionOne
+            | MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_) => {
+                return Err(GameError::IllegalAction);
             }
             // Chained Magic resolves through its own pending decision instead.
             MagicEffect::DamageChainNearbyUnits => return Err(GameError::IllegalAction),
@@ -22811,10 +22761,15 @@ impl Game {
 
     /// Resolves an interrupted Magic that the terminal result denied its own continuation.
     fn emit_interrupted_magic_resolved(
+        &mut self,
         continuation: Option<&DeathriteContinuation>,
         outcomes: &mut OutcomeLog<'_>,
     ) {
         let resolution = match continuation {
+            Some(DeathriteContinuation::Effect(frame)) => {
+                self.finish_effect_frame((**frame).clone(), outcomes);
+                return;
+            }
             Some(DeathriteContinuation::Blink(blink)) => {
                 (&blink.card_id, &blink.instance_id, blink.owner)
             }
@@ -23173,6 +23128,8 @@ impl Game {
         let CardFacts::Minion(_) = &self.rules.cards[usize::from(card_id.0)].facts else {
             return Err(GameError::IllegalAction);
         };
+        let mut unit = unit;
+        unit.card.enter_realm()?;
         self.position.units.push(unit);
         outcomes.push("minion-summoned", || {
             let mut payload = json!({
@@ -23365,6 +23322,19 @@ impl Game {
         genesis_damage_target: Option<&UnitTarget>,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        if self.rules.cards[usize::from(card_id.0)]
+            .abilities
+            .genesis
+            .is_some()
+        {
+            let source = self.unit_effect_source(&UnitTarget::Minion {
+                instance_id: source_instance_id.clone(),
+                seat,
+            })?;
+            let frame =
+                self.effect_frame(card_id, AbilityEntry::Genesis, source, None, None, None)?;
+            return self.run_effect_frame(frame, outcomes);
+        }
         let CardFacts::Minion(facts) = &self.rules.cards[usize::from(card_id.0)].facts else {
             return Err(GameError::IllegalAction);
         };
@@ -23399,7 +23369,7 @@ impl Game {
                     "sourceInstanceId": source_instance_id,
                 })
             });
-            self.reveal_disabled_stealth(outcomes);
+            self.settle_lost_ability_marks(outcomes);
         }
         if genesis_draw_site {
             self.apply_genesis_draws(seat, source_instance_id, DeckZone::Atlas, 1, outcomes);
@@ -23765,7 +23735,7 @@ impl Game {
                 "sourceInstanceId": source_instance_id,
             })
         });
-        self.reveal_disabled_stealth(outcomes);
+        self.settle_lost_ability_marks(outcomes);
         Ok(())
     }
 
@@ -25379,6 +25349,7 @@ impl Game {
 
     fn deathrite_continuation_value(&self, continuation: &DeathriteContinuation) -> Value {
         match continuation {
+            DeathriteContinuation::Effect(frame) => self.effect_frame_value(frame),
             DeathriteContinuation::Blink(continuation) => json!({
                 "cardId": continuation.card_id,
                 "instanceId": continuation.instance_id,
@@ -25624,12 +25595,16 @@ impl Game {
     }
 
     fn card_value(&self, card: &CardInstance) -> Value {
-        json!({
+        let mut value = json!({
             "cardId": self.rules.cards[usize::from(card.card_id.0)].id,
             "instanceId": card.instance_id,
             "owner": card.owner,
             "source": card.source.as_str(),
-        })
+        });
+        if card.realm_entry > 0 {
+            value["realmEntry"] = json!(card.realm_entry);
+        }
+        value
     }
 
     fn insert_realm_artifacts(&self, value: &mut Value) {
@@ -26158,6 +26133,7 @@ fn card_instance(
 ) -> Result<CardInstance, GameError> {
     let definition = &rules.cards[usize::from(card_id.0)];
     Ok(CardInstance {
+        realm_entry: 0,
         card_id,
         instance_id: identity_hash(&json!({
             "authorityHash": rules.authority_hash,
@@ -26411,6 +26387,7 @@ pub mod catalog_proofs {
     ) -> UnitPosition {
         UnitPosition {
             card: CardInstance {
+                realm_entry: 0,
                 card_id,
                 instance_id: IdentityHash::parse(instance_id).expect("fixture identity"),
                 owner: controller,
@@ -26517,6 +26494,7 @@ pub mod catalog_proofs {
             let cell = Cell::parse(cell).expect("fixture cell");
             game.position.sites[cell.index()] = Some(SitePosition {
                 card: CardInstance {
+                    realm_entry: 0,
                     card_id: card,
                     instance_id: identity_hash(
                         &json!({ "cell": cell, "fixture": "craterize-site" }),
@@ -26758,6 +26736,7 @@ pub mod catalog_proofs {
         let land_id = identity_hash(&json!({ "fixture": "sinkhole-land" })).expect("land identity");
         let source = SitePosition {
             card: CardInstance {
+                realm_entry: 0,
                 card_id: card_id("north-site-1"),
                 instance_id: source_id.clone(),
                 owner: Seat::North,
@@ -26769,6 +26748,7 @@ pub mod catalog_proofs {
         };
         let protected = SitePosition {
             card: CardInstance {
+                realm_entry: 0,
                 card_id: card_id("north-site-2"),
                 instance_id: protected_id.clone(),
                 owner: Seat::North,
@@ -26780,6 +26760,7 @@ pub mod catalog_proofs {
         };
         let land = SitePosition {
             card: CardInstance {
+                realm_entry: 0,
                 card_id: card_id("south-site-1"),
                 instance_id: land_id.clone(),
                 owner: Seat::South,
@@ -26984,6 +26965,7 @@ pub mod catalog_proofs {
             identity_hash(&json!({ "fixture": "sinkhole-water" })).expect("water identity");
         let source = SitePosition {
             card: CardInstance {
+                realm_entry: 0,
                 card_id: card_id("north-site-1"),
                 instance_id: source_id.clone(),
                 owner: Seat::North,
@@ -26995,6 +26977,7 @@ pub mod catalog_proofs {
         };
         let water = SitePosition {
             card: CardInstance {
+                realm_entry: 0,
                 card_id: card_id("south-site-1"),
                 instance_id: water_id.clone(),
                 owner: Seat::South,
@@ -27024,6 +27007,7 @@ pub mod catalog_proofs {
         base.position.units = vec![drowned, survivor];
         base.position.artifacts = vec![ArtifactPosition {
             card: CardInstance {
+                realm_entry: 0,
                 card_id: card_id("south-spell-3"),
                 instance_id: artifact_id.clone(),
                 owner: Seat::South,
@@ -28395,6 +28379,7 @@ pub mod catalog_proofs {
         let c4 = Cell::parse("C4").expect("C4");
         game.position.sites[c4.index()] = Some(SitePosition {
             card: CardInstance {
+                realm_entry: 0,
                 card_id: card_id("north-site-1"),
                 instance_id: identity_hash(&json!({ "fixture": "dual-site" }))
                     .expect("site identity"),
@@ -28510,6 +28495,7 @@ pub mod catalog_proofs {
     fn granary_rats_place_site(game: &mut Game, cell: Cell, card_name: &str, fixture: &str) {
         game.position.sites[cell.index()] = Some(SitePosition {
             card: CardInstance {
+                realm_entry: 0,
                 card_id: granary_rats_card_id(game, card_name),
                 instance_id: identity_hash(&json!({ "fixture": fixture })).expect("site identity"),
                 owner: Seat::North,
@@ -28693,6 +28679,7 @@ pub mod catalog_proofs {
         while have < count {
             have += 1;
             north.hand_spellbook.push(CardInstance {
+                realm_entry: 0,
                 card_id,
                 instance_id: identity_hash(&json!({
                     "fixture": "fatality-filter-spell",
@@ -28739,6 +28726,7 @@ pub mod catalog_proofs {
         let c4 = Cell::parse("C4").expect("C4");
         game.position.sites[c4.index()] = Some(SitePosition {
             card: CardInstance {
+                realm_entry: 0,
                 card_id: fatality_filter_card_id(&game, "north-site-1"),
                 instance_id: identity_hash(&json!({ "fixture": "fatality-filter-site" }))
                     .expect("site identity"),
@@ -28992,6 +28980,7 @@ pub mod catalog_proofs {
         let c1 = Cell::parse("C1").expect("C1");
         game.position.sites[c1.index()] = Some(SitePosition {
             card: CardInstance {
+                realm_entry: 0,
                 card_id: fatality_filter_card_id(&game, "south-site-1"),
                 instance_id: identity_hash(&json!({ "fixture": "fatality-filter-far-site" }))
                     .expect("far site identity"),
@@ -30303,6 +30292,7 @@ pub mod catalog_proofs {
         for (cell, fixture) in [(c3, "pickup-c3"), (c4, "pickup-c4")] {
             game.position.sites[cell.index()] = Some(SitePosition {
                 card: CardInstance {
+                    realm_entry: 0,
                     card_id: card_id("north-site-1"),
                     instance_id: identity_hash(&json!({ "fixture": fixture })).expect("site"),
                     owner: Seat::North,
@@ -30333,6 +30323,7 @@ pub mod catalog_proofs {
         game.position.units = vec![bearer];
         let artifact = |instance_id: IdentityHash, owner: Seat, placement| ArtifactPosition {
             card: CardInstance {
+                realm_entry: 0,
                 card_id: card_id("north-spell-2"),
                 instance_id,
                 owner,

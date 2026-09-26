@@ -907,6 +907,7 @@ fn rule_catalog_0722_temporary_power_raises_observed_avatar_and_disabled_minion_
             "magic-cast",
             "minion-disabled",
             "stealth-lost",
+            "ward-lost",
             "magic-resolved"
         ]
     );
@@ -955,7 +956,7 @@ fn rule_catalog_0722_temporary_power_raises_observed_avatar_and_disabled_minion_
     assert_eq!(powered["attack"], 4);
     assert_eq!(powered["defense"], 4);
     assert_eq!(powered["stealthed"], false);
-    assert_eq!(powered["warded"], true);
+    assert_eq!(powered["warded"], false);
     assert_eq!(
         powered["temporaryPowerSources"].as_array().map(Vec::len),
         Some(1)

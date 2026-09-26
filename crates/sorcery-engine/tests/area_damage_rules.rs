@@ -293,7 +293,7 @@ fn rule_catalog_0076_area_damage_should_use_bearer_lethal_without_becoming_a_str
     let mut session = Session::new(&manifest()).expect("valid area damage scenario");
     let blanket = blanket_position(&mut session, true);
 
-    // The ability reaches only the existing locations bordering C2, in the source's own region.
+    // Adjacent includes C2 itself and its existing orthogonal neighbors in the same region.
     let offered = area_damage_descriptors(&session, &blanket.source);
     assert_eq!(
         offered
@@ -302,6 +302,7 @@ fn rule_catalog_0076_area_damage_should_use_bearer_lethal_without_becoming_a_str
             .collect::<Vec<_>>(),
         [
             json!({ "cell": "C1", "region": "surface" }),
+            json!({ "cell": "C2", "region": "surface" }),
             json!({ "cell": "C3", "region": "surface" }),
         ]
     );
@@ -395,6 +396,28 @@ fn rule_catalog_0076_area_damage_should_use_bearer_lethal_without_becoming_a_str
     assert!(
         area_damage_descriptors(&session, &blanket.source).is_empty(),
         "a tapped source cannot blanket a second location"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn area_activation_can_damage_its_own_location_and_finish_after_its_source_dies() {
+    let mut session = Session::new(&manifest()).expect("valid area damage scenario");
+    let blanket = blanket_position(&mut session, true);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "activate-area-damage"
+            && descriptor["sourceInstanceId"] == blanket.source
+            && descriptor["targetLocation"]["cell"] == "C2"
+    });
+    assert!(receipt.events.iter().any(|event| {
+        event.event_type == "area-damage-allocated"
+            && event.payload["targetInstanceId"] == blanket.source
+    }));
+    assert!(
+        receipt.events.iter().any(|event| {
+            event.event_type == "minion-died" && event.payload["instanceId"] == blanket.source
+        }),
+        "the source's Lethal also applies to its own damage"
     );
     assert_exact_replay(&session);
 }

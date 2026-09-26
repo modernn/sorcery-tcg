@@ -3332,7 +3332,7 @@
       "requirementIds": [
         "RULE-04"
       ],
-      "plainLanguage": "Waterbound Disable suppresses printed abilities but the Ward mark still prevents the next damage.",
+      "plainLanguage": "A Waterbound minion loses its Ward mark when leaving water makes it Disabled; subsequent damage is not prevented by that lost mark.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "waterbound",
@@ -3342,11 +3342,11 @@
         "cast-magic"
       ],
       "eventHints": [
-        "ward-broken"
+        "ward-lost"
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/waterbound_rules.rs",
-        "testName": "rule_catalog_0163_waterbound_ward_still_prevents_damage_while_disabled"
+        "testName": "rule_catalog_0163_waterbound_loses_ward_when_disabled"
       }
     },
     {
@@ -4611,7 +4611,7 @@
         "RULE-02",
         "RULE-03"
       ],
-      "plainLanguage": "Untap-minion Magic pays its cost, offers only same-region minions, never offers an Avatar, and readies a tapped minion without dealing damage or breaking Ward.",
+      "plainLanguage": "Untap-minion Magic pays its cost and offers same-region minions, never Avatars. An opposing target's Ward breaks and prevents the untap.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "untapTargetMinion"
@@ -4621,12 +4621,12 @@
       ],
       "eventHints": [
         "magic-cast",
-        "minion-untapped",
+        "ward-broken",
         "magic-resolved"
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/untap_magic_rules.rs",
-        "testName": "rule_catalog_0613_untap_magic_readies_a_tapped_minion_without_breaking_ward"
+        "testName": "rule_catalog_0613_opposing_ward_prevents_untap_magic"
       }
     },
     {
@@ -4635,7 +4635,7 @@
         "RULE-02",
         "RULE-03"
       ],
-      "plainLanguage": "Untap-minion Magic that targets an already-untapped minion is a paid no-op. The minion stays ready, keeps Ward, and no untap event is emitted.",
+      "plainLanguage": "Untap-minion Magic targeting an already-ready opposing warded minion pays its cost and consumes Ward; the minion stays ready and no untap event is emitted.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "untapTargetMinion"
@@ -4645,11 +4645,12 @@
       ],
       "eventHints": [
         "magic-cast",
+        "ward-broken",
         "magic-resolved"
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/untap_magic_rules.rs",
-        "testName": "rule_catalog_0614_untap_magic_is_a_paid_noop_when_already_untapped"
+        "testName": "rule_catalog_0614_opposing_ward_breaks_even_when_untap_would_be_a_noop"
       }
     },
     {
@@ -14208,7 +14209,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Untap-target-minion Magic readies a tapped same-region minion without breaking Ward.",
+      "plainLanguage": "An opposing warded minion targeted by untap Magic loses Ward and remains tapped.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "untapTargetMinion"
@@ -14218,12 +14219,12 @@
       ],
       "eventHints": [
         "magic-cast",
-        "minion-untapped",
+        "ward-broken",
         "magic-resolved"
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/untap_magic_rules.rs",
-        "testName": "rule_catalog_0613_untap_magic_readies_a_tapped_minion_without_breaking_ward"
+        "testName": "rule_catalog_0613_opposing_ward_prevents_untap_magic"
       }
     },
     {
@@ -14233,7 +14234,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Untap-target-minion Magic that targets an already-untapped minion is a paid no-op.",
+      "plainLanguage": "Targeted untap Magic consumes an opposing minion's Ward even when that minion is already ready; no untap event is emitted.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "untapTargetMinion"
@@ -14243,11 +14244,12 @@
       ],
       "eventHints": [
         "magic-cast",
+        "ward-broken",
         "magic-resolved"
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/untap_magic_rules.rs",
-        "testName": "rule_catalog_0614_untap_magic_is_a_paid_noop_when_already_untapped"
+        "testName": "rule_catalog_0614_opposing_ward_breaks_even_when_untap_would_be_a_noop"
       }
     },
     {

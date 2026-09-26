@@ -415,7 +415,7 @@ fn observed_unit(session: &Session, instance_id: &str) -> Value {
 }
 
 #[test]
-fn rule_catalog_0163_waterbound_ward_still_prevents_damage_while_disabled() {
+fn rule_catalog_0163_waterbound_loses_ward_when_disabled() {
     let manifest = composed_manifest(
         163,
         waterbound_extra(json!({ "ward": true })),
@@ -431,7 +431,7 @@ fn rule_catalog_0163_waterbound_ward_still_prevents_damage_while_disabled() {
 
     draw_spell(&mut session);
     move_to_land(&mut session, &bound_id);
-    assert_eq!(unit_named(&session, &bound_id)["warded"], true);
+    assert_eq!(unit_named(&session, &bound_id)["warded"], false);
     assert_eq!(unit_named(&session, &bound_id)["damage"], 0);
     assert!(!offers(&session, |descriptor| {
         descriptor["kind"] == "activate-mana" && descriptor["unitInstanceId"] == bound_id
@@ -448,12 +448,11 @@ fn rule_catalog_0163_waterbound_ward_still_prevents_damage_while_disabled() {
             "magic-cast",
             "magic-damage-allocated",
             "damage-dealt",
-            "ward-broken",
             "magic-resolved",
         ]
     );
     let after = unit_named(&session, &bound_id);
-    assert_eq!(after["damage"], 0);
+    assert_eq!(after["damage"], 1);
     assert_eq!(after["warded"], false);
     assert_exact_replay(&session);
 }

@@ -4975,6 +4975,7 @@ test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relati
         instanceId: artifactCard.instanceId,
         location: 'C2',
         owner: 'south',
+        realmEntry: 1,
         region: 'underground',
         source: artifactCard.source,
       });
@@ -7702,7 +7703,7 @@ test('RULE-03/04 Minor Explosion damages every unit at a location up to two card
       assert.equal(deadIds.every((instanceId) => !ctx.state.realm.units.some((unit) =>
         unit.instanceId === instanceId)), true);
       assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
-        instanceId === explosion.instanceId), true);
+        instanceId === explosion.instanceId), false);
       assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
         instanceId === ally.instanceId), false);
       assert.equal([deathrite.instanceId, stealthed.instanceId].every((instanceId) =>
@@ -7726,6 +7727,8 @@ test('RULE-03/04 Minor Explosion damages every unit at a location up to two card
         && (payload as { sourceInstanceId: string }).sourceInstanceId === stealthed.instanceId), true);
       assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
         instanceId === ally.instanceId), true);
+      assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
+        instanceId === explosion.instanceId), true);
       assert.equal([deathrite.instanceId, stealthed.instanceId].every((instanceId) =>
         ctx.state.players.south.cemetery.some((card) => card.instanceId === instanceId)), true);
       const firstDeath = resolved.receipt.events.findIndex(({ type }) => type === 'minion-died');
@@ -10141,6 +10144,7 @@ test('RULE-03/04 Bury detaches and burrows Artifacts if able', async () => {
     instanceId: carried.artifactInstanceId,
     location: 'C1',
     owner: 'south',
+    realmEntry: 1,
     region: 'underground',
     source: 'spellbook',
   });
@@ -10317,6 +10321,7 @@ test('RULE-03/04 Cave-In burrows every surface minion and Artifact at one Land S
           instanceId: artifact.instanceId,
           location: 'C1',
           owner: artifact.owner,
+          realmEntry: 1,
           region: 'underground',
           source: artifact.source,
         });
@@ -11293,6 +11298,7 @@ test('RULE-02/04 playing a site surfaces uncarried Artifacts from the covered vo
       instanceId: carried.instanceId,
       location: 'B4',
       owner: 'north',
+      realmEntry: 1,
       region: 'void',
       source: carried.source,
     });
@@ -13505,6 +13511,7 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
     instanceId: artifact.instanceId,
     location: 'C3',
     owner: 'north',
+    realmEntry: 1,
     region: 'underground',
     source: 'spellbook',
   });
@@ -14659,7 +14666,7 @@ test('RULE-03/04 Vikings area damage uses bearer Lethal without becoming a strik
     const activations = (await ctx.legalActions('north')).filter(({ descriptor }) =>
       descriptor.kind === 'activate-area-damage' && descriptor.sourceInstanceId === vikings.instanceId);
     assert.deepEqual(activations.flatMap(({ descriptor }) =>
-      descriptor.kind === 'activate-area-damage' ? [descriptor.targetLocation.cell] : []), ['C2', 'C4']);
+      descriptor.kind === 'activate-area-damage' ? [descriptor.targetLocation.cell] : []), ['C2', 'C3', 'C4']);
     assert.equal(activations.every(({ descriptor }) =>
       descriptor.kind === 'activate-area-damage' && descriptor.targetLocation.region === 'surface'), true);
     assert.equal(ctx.observe('north').realm.units.find(({ instanceId }) =>
@@ -15441,11 +15448,13 @@ test('RULE-03/04 Genesis sleep ends on real damage without retroactive strikes',
 
   await fight(121, attacker, { ...sleeper, ward: true }, async ({ ctx, targetInstanceId }) => {
     assert.equal(ctx.state.realm.units
-      .find(({ instanceId }) => instanceId === targetInstanceId)?.damage, 0);
+      .find(({ instanceId }) => instanceId === targetInstanceId)?.damage, 2);
     assert.equal(ctx.observe('north').realm.units
-      .find(({ instanceId }) => instanceId === targetInstanceId)?.disabled, true);
+      .find(({ instanceId }) => instanceId === targetInstanceId)?.disabled, false);
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === targetInstanceId)?.warded, false);
     assert.equal(ctx.session.transcript.at(-1)?.events
-      .some(({ type }) => type === 'minion-awakened'), false);
+      .some(({ type }) => type === 'minion-awakened'), true);
     assert.equal(await ctx.verifyReplay(), true);
   });
 });
@@ -23412,7 +23421,7 @@ test('RULE-03 life-gain Magic heals an enemy Avatar and cannot leave Death\'s Do
   });
 });
 
-test('RULE-03 untap Magic readies a tapped minion without breaking Ward', async () => {
+test('RULE-03 opposing Ward blocks targeted untap and consumes Ward', async () => {
   const thresholds = { air: 0, earth: 1, fire: 0, water: 0 } as const;
   const cards: Record<string, GameCardDefinition> = {
     'untap-north-avatar': {
@@ -23520,26 +23529,22 @@ test('RULE-03 untap Magic readies a tapped minion without breaking Ward', async 
       descriptor.kind === 'cast-magic'
         && descriptor.target?.kind === 'minion'
         && descriptor.target.instanceId === chargerId);
-    const sourceInstanceId = cast.descriptor.kind === 'cast-magic'
-      ? cast.descriptor.cardInstanceId
-      : '';
     const untapped = await ctx.step(cast);
     assert.equal(untapped.accepted, true);
     if (!untapped.accepted) return;
     assert.deepEqual(untapped.receipt.events.map(({ type }) => type), [
       'magic-cast',
-      'minion-untapped',
+      'ward-broken',
       'magic-resolved',
     ]);
     assert.deepEqual(untapped.receipt.events[1]?.payload, {
       instanceId: chargerId,
       seat: 'south',
-      sourceInstanceId,
     });
-    assert.equal(untapped.receipt.events.some(({ type }) => type === 'ward-broken'), false);
+    assert.equal(untapped.receipt.events.some(({ type }) => type === 'minion-untapped'), false);
     const after = ctx.state.realm.units.find(({ instanceId }) => instanceId === chargerId);
-    assert.equal(after?.tapped, false);
-    assert.equal(after?.warded, true);
+    assert.equal(after?.tapped, true);
+    assert.equal(after?.warded, false);
     assert.equal(await ctx.verifyReplay(), true);
   });
 
@@ -23560,11 +23565,12 @@ test('RULE-03 untap Magic readies a tapped minion without breaking Ward', async 
     if (!noop.accepted) return;
     assert.deepEqual(noop.receipt.events.map(({ type }) => type), [
       'magic-cast',
+      'ward-broken',
       'magic-resolved',
     ]);
     const after = ctx.state.realm.units.find(({ instanceId }) => instanceId === chargerId);
     assert.equal(after?.tapped, false);
-    assert.equal(after?.warded, true);
+    assert.equal(after?.warded, false);
     assert.equal(await ctx.verifyReplay(), true);
   });
 });
