@@ -20924,36 +20924,42 @@ function runFireVileImp(
     && descriptor.cell === 'C3');
 
   const avatarInstanceId = checkpoint.state.players.north.avatar.card.instanceId;
-  const choices = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
+  const summon = stepGame(checkpoint, action(checkpoint, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.vileImpInstanceId
-      && descriptor.cell === 'C3');
-  const decline = choices.find(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.genesisDamageChoice === 'decline');
-  const selfTarget = choices.find(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.genesisDamageChoice === 'target'
-    && descriptor.genesisDamageTarget?.kind === 'minion'
-    && descriptor.genesisDamageTarget.instanceId === opening.vileImpInstanceId);
-  const target = choices.find(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.genesisDamageChoice === 'target'
-    && descriptor.genesisDamageTarget?.kind === 'avatar'
-    && descriptor.genesisDamageTarget.instanceId === avatarInstanceId);
+      && descriptor.cell === 'C3'));
+  if (!summon.accepted) throw new Error(`private Vile Imp summon was rejected: ${summon.reason.code}`);
+  const choices = legalGameActions(summon.session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'choose-ability'
+      && descriptor.sourceInstanceId === opening.vileImpInstanceId);
+  const decline = choices.find(({ descriptor }) => descriptor.kind === 'choose-ability'
+    && descriptor.target === undefined);
+  const selfTarget = choices.find(({ descriptor }) => descriptor.kind === 'choose-ability'
+    && descriptor.target?.kind === 'minion'
+    && descriptor.target.instanceId === opening.vileImpInstanceId);
+  const target = choices.find(({ descriptor }) => descriptor.kind === 'choose-ability'
+    && descriptor.target?.kind === 'avatar'
+    && descriptor.target.instanceId === avatarInstanceId);
   if (!decline || !selfTarget || !target) {
     throw new Error('private Vile Imp Genesis choices are unavailable');
   }
-  const declined = stepGame(checkpoint, decline);
-  const targeted = stepGame(checkpoint, target);
+  const declined = stepGame(summon.session, decline);
+  const targeted = stepGame(summon.session, target);
   if (!declined.accepted || !targeted.accepted) {
     throw new Error('private Vile Imp Genesis choice was rejected');
   }
-
-  const events = targeted.receipt.events;
+  const events = [...summon.receipt.events, ...targeted.receipt.events];
   const summonPayload = events[0] && isJsonRecord(events[0].payload) ? events[0].payload : undefined;
-  const allocationPayload = events[1] && isJsonRecord(events[1].payload)
-    ? events[1].payload
+  const allocationEvent = events.find(({ type }) => type === 'genesis-damage-allocated');
+  const allocationPayload = allocationEvent && isJsonRecord(allocationEvent.payload)
+    ? allocationEvent.payload
     : undefined;
-  const damagePayload = events[2] && isJsonRecord(events[2].payload) ? events[2].payload : undefined;
-  const lifePayload = events[3] && isJsonRecord(events[3].payload) ? events[3].payload : undefined;
+  const damageEvent = events.find(({ type }) => type === 'damage-dealt');
+  const damagePayload = damageEvent && isJsonRecord(damageEvent.payload)
+    ? damageEvent.payload
+    : undefined;
+  const lifeEvent = events.find(({ type }) => type === 'avatar-life-lost');
+  const lifePayload = lifeEvent && isJsonRecord(lifeEvent.payload) ? lifeEvent.payload : undefined;
   const imp = targeted.session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.vileImpInstanceId);
   const deckCardIds = [
@@ -20978,7 +20984,7 @@ function runFireVileImp(
     avatarTookTwoDamage: checkpoint.state.players.north.avatar.life === 20
       && targeted.session.state.players.north.avatar.life === 18,
     causalEventsVerified: events.map(({ type }) => type).join(',')
-      === 'minion-summoned,genesis-damage-allocated,damage-dealt,avatar-life-lost'
+      === 'minion-summoned,ability-choice-committed,genesis-damage-allocated,damage-dealt,avatar-life-lost'
       && summonPayload?.instanceId === opening.vileImpInstanceId
       && summonPayload.manaPaid === 2
       && allocationPayload?.amount === 2
@@ -20991,7 +20997,8 @@ function runFireVileImp(
       && lifePayload.seat === 'north',
     deck: deckList(opening.manifest.decks.north, opening.names),
     declinePreservedAvatar: declined.session.state.players.north.avatar.life === 20
-      && declined.receipt.events.map(({ type }) => type).join(',') === 'minion-summoned',
+      && [...summon.receipt.events, ...declined.receipt.events]
+        .map(({ type }) => type).join(',') === 'minion-summoned,ability-choice-committed',
     exactChoices: choices.length === 3
       && new Set([decline.actionId, selfTarget.actionId, target.actionId]).size === 3,
     legalLowRarityDeck,

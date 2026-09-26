@@ -4,7 +4,7 @@ import test from 'node:test';
 
 type Catalog = Readonly<{
   rules: readonly Readonly<{
-    implementationStatus: 'rust-supported' | 'typescript-supported';
+    implementationStatus: 'rust-supported' | 'typescript-supported' | 'unsupported';
     plainLanguage: string;
     ruleId: string;
     scenarioProof: Readonly<{ file: string; testName: string }>;
@@ -25,7 +25,7 @@ test('the public rules catalog stays linked to direct scenario proofs', () => {
     assert.equal(rule.plainLanguage.trim().length > 0, true);
     assert.match(
       rule.scenarioProof.file,
-      rule.implementationStatus === 'rust-supported'
+      rule.implementationStatus !== 'typescript-supported'
         ? /^crates\/sorcery-engine\/(?:src\/game\.rs|tests\/[\w-]+\.rs|tests\/common\/[\w-]+\.inc\.rs)$/u
         : /^tests\/engine\/[\w-]+\.test\.ts$/u,
     );

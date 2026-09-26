@@ -94,12 +94,14 @@ struct LocationBinding {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct EffectFrame {
-    card_id: CardId,
+    pub(super) card_id: CardId,
     entry: AbilityEntry,
     cursor: usize,
     started: bool,
-    source: EffectSource,
+    pub(super) source: EffectSource,
+    pub(super) declaration_pending: bool,
     target: Option<UnitBinding>,
+    chosen: Option<RealmReference>,
     location: Option<LocationBinding>,
     pub(super) magic: Option<CardInstance>,
 }
@@ -116,7 +118,11 @@ impl CardInstance {
 }
 
 impl Game {
-    fn compiled_ability(&self, card_id: CardId, entry: AbilityEntry) -> Option<&CompiledAbility> {
+    pub(super) fn compiled_ability(
+        &self,
+        card_id: CardId,
+        entry: AbilityEntry,
+    ) -> Option<&CompiledAbility> {
         let abilities = &self.rules.cards[usize::from(card_id.0)].abilities;
         match entry {
             AbilityEntry::Magic => &abilities.magic,
@@ -266,7 +272,13 @@ impl Game {
             entry,
             cursor: 0,
             started: false,
+            declaration_pending: self
+                .compiled_ability(card_id, entry)
+                .is_some_and(|ability| ability.selection.is_some())
+                && target.is_none()
+                && location.is_none(),
             source,
+            chosen: None,
             target: target
                 .map(|target| {
                     self.unit_reference(target).map(|reference| UnitBinding {
@@ -367,6 +379,15 @@ impl Game {
         set: UnitSet,
     ) -> Result<Vec<(IdentityHash, UnitKind, Seat)>, GameError> {
         match set {
+            UnitSet::Chosen => Ok(frame
+                .chosen
+                .as_ref()
+                .and_then(|reference| {
+                    self.referenced_unit(reference)
+                        .map(|(kind, seat)| (reference.instance_id.clone(), kind, seat))
+                })
+                .into_iter()
+                .collect()),
             UnitSet::Target => {
                 let binding = frame.target.as_ref().ok_or(GameError::IllegalAction)?;
                 Ok(if binding.state == BindingState::Active {
@@ -452,11 +473,15 @@ impl Game {
     ) -> Result<(), GameError> {
         if self.position.pending_deathrites.is_some()
             || self.position.pending_trigger_order.is_some()
+            || self.position.pending_ability_choice.is_some()
         {
             return self
                 .continue_resolution(ResolutionContinuation::Effect(Box::new(frame)), outcomes);
         }
         if !frame.started {
+            if frame.declaration_pending {
+                return Err(GameError::IllegalAction);
+            }
             if !self.prepare_effect_source(&mut frame)? {
                 self.finish_effect_frame(frame, outcomes);
                 return Ok(());
@@ -475,6 +500,9 @@ impl Game {
             };
             frame.cursor += 1;
             match effect {
+                Effect::ChooseUnit(spec) => {
+                    return self.begin_ability_unit_choice(frame, spec, outcomes);
+                }
                 Effect::Damage { recipients, amount } => {
                     if let Some(reference) = &frame.source.realm
                         && let Some((kind, seat)) = self.referenced_unit(reference)
@@ -561,12 +589,49 @@ impl Game {
         }
     }
 
+    pub(super) fn declare_effect_target(
+        &self,
+        frame: &mut EffectFrame,
+        target: Option<&UnitTarget>,
+    ) -> Result<(), GameError> {
+        let ability = self
+            .compiled_ability(frame.card_id, frame.entry)
+            .ok_or(GameError::IllegalAction)?;
+        if !frame.declaration_pending || (target.is_none() && !ability.optional_selection) {
+            return Err(GameError::IllegalAction);
+        }
+        frame.target = target
+            .map(|target| {
+                self.unit_reference(target).map(|reference| UnitBinding {
+                    reference,
+                    state: BindingState::Active,
+                })
+            })
+            .transpose()?;
+        if target.is_none() {
+            frame.cursor = ability.effects.len();
+        }
+        frame.declaration_pending = false;
+        Ok(())
+    }
+
+    pub(super) fn select_effect_unit(
+        &self,
+        frame: &mut EffectFrame,
+        unit: Option<&UnitTarget>,
+    ) -> Result<(), GameError> {
+        frame.chosen = unit.map(|unit| self.unit_reference(unit)).transpose()?;
+        Ok(())
+    }
+
     pub(super) fn effect_frame_value(&self, frame: &EffectFrame) -> Value {
         json!({
             "kind": "effect", "cardId": self.rules.cards[usize::from(frame.card_id.0)].id,
             "entry": match frame.entry { AbilityEntry::Magic => "magic", AbilityEntry::Genesis => "genesis", AbilityEntry::Activated => "activated" },
             "cursor": frame.cursor, "started": frame.started,
+            "declarationPending": frame.declaration_pending,
             "source": frame.source.value(),
+            "chosen": frame.chosen.as_ref().map(RealmReference::value),
             "target": frame.target.as_ref().map(|binding| json!({ "object": binding.reference.value(), "state": binding.state.as_str() })),
             "location": frame.location.as_ref().map(|binding| json!({ "location": binding.location, "site": binding.site.as_ref().map(RealmReference::value), "state": binding.state.as_str() })),
             "magic": frame.magic.as_ref().map(|card| self.card_value(card)),

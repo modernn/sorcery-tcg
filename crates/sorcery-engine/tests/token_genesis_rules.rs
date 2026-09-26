@@ -3,7 +3,11 @@
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt};
-use sorcery_engine::session::{Session, StepResult};
+use sorcery_engine::game::GameError;
+use sorcery_engine::session::{Session, SessionError, StepResult};
+
+const MIXED_GENESIS_UNSUPPORTED: &str =
+    "mixed Genesis choices require an explicitly ordered compiled program";
 
 fn avatar() -> Value {
     json!({
@@ -103,6 +107,37 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
         panic!("engine-issued action must be accepted");
     };
     (descriptor, receipt)
+}
+
+fn choose_ability(session: &mut Session, source_id: &str, target: Option<&str>) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "choose-ability"
+            && descriptor["sourceInstanceId"] == source_id
+            && match target {
+                Some(target_id) => descriptor["target"]["instanceId"] == target_id,
+                None => descriptor.get("target").is_none_or(Value::is_null),
+            }
+    });
+    receipt
+}
+
+fn assert_unsupported_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) {
+    let action = session
+        .legal_actions()
+        .expect("legal actions")
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))
+        .expect("expected engine-issued action");
+    let result = session.step(ActionRequest {
+        action_id: action.action_id.to_string(),
+        seat: action.seat,
+        state_version: action.state_version,
+    });
+    assert!(matches!(
+        result,
+        Err(SessionError::Game(GameError::UnsupportedMechanic(reason)))
+            if reason == MIXED_GENESIS_UNSUPPORTED
+    ));
 }
 
 fn keep(session: &mut Session) {
@@ -738,37 +773,15 @@ fn rule_catalog_0487_token_genesis_disable_declines_adjacent_damage() {
         .as_str()
         .expect("site identity")
         .to_owned();
-    let (_, receipt) = accept_where(&mut session, |descriptor| {
+    assert_unsupported_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site"
             && descriptor["cardInstanceId"] == source_id
             && descriptor["cell"] == "C4"
             && descriptor["genesisTokenChoice"] == "pay-one-mana"
-            && descriptor["genesisDamageChoice"] == "decline"
     });
-    assert_eq!(
-        event_types(&receipt),
-        ["site-played", "minion-summoned", "minion-disabled"]
-    );
-    let token_id = receipt.events[1].payload["instanceId"]
-        .as_str()
-        .expect("token identity");
-    assert_eq!(receipt.events[2].payload["instanceId"], token_id);
-    let after = state(&session);
-    let unit = after["realm"]["units"]
-        .as_array()
-        .expect("units")
-        .iter()
-        .find(|unit| unit["instanceId"] == token_id)
-        .expect("summoned token");
-    assert_eq!(unit["disabledUntilDamaged"], true);
-    assert_exact_replay(&session);
 }
 
 #[test]
-#[expect(
-    clippy::too_many_lines,
-    reason = "one catalog proof keeps setup, target damage, disable state, and replay together"
-)]
 fn rule_catalog_0488_spellbook_summon_genesis_disable_targets_adjacent_damage() {
     let scout = json!({
         "attack": 2,
@@ -844,47 +857,11 @@ fn rule_catalog_0488_spellbook_summon_genesis_disable_targets_adjacent_damage() 
         .as_str()
         .expect("scout identity")
         .to_owned();
-    let avatar_id = before["players"]["north"]["avatar"]["card"]["instanceId"]
-        .as_str()
-        .expect("Avatar identity")
-        .to_owned();
-    let (_, receipt) = accept_where(&mut session, |descriptor| {
+    assert_unsupported_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardInstanceId"] == source_id
             && descriptor["cell"] == "C4"
-            && descriptor["genesisDamageTarget"]["instanceId"] == avatar_id
     });
-    assert_eq!(
-        event_types(&receipt),
-        [
-            "minion-summoned",
-            "minion-disabled",
-            "genesis-damage-allocated",
-            "damage-dealt",
-            "avatar-life-lost"
-        ]
-    );
-    assert_eq!(
-        receipt.events[2].payload,
-        json!({
-            "amount": 2,
-            "sourceInstanceId": source_id,
-            "targetInstanceId": avatar_id,
-        })
-    );
-    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 18);
-    let minion_id = receipt.events[0].payload["instanceId"]
-        .as_str()
-        .expect("minion identity");
-    let after = state(&session);
-    let unit = after["realm"]["units"]
-        .as_array()
-        .expect("units")
-        .iter()
-        .find(|unit| unit["instanceId"] == minion_id)
-        .expect("summoned minion");
-    assert_eq!(unit["disabledUntilDamaged"], true);
-    assert_exact_replay(&session);
 }
 
 #[test]
@@ -2018,62 +1995,68 @@ fn rule_catalog_0383_token_genesis_damage_should_issue_decline_and_nearby_target
     }))
     .expect("deterministic token identity")
     .to_string();
-    let choices: Vec<_> = session
+    let mut entry = session.clone();
+    let (_, entry_receipt) = accept_where(&mut entry, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardInstanceId"] == source_id
+            && descriptor["cell"] == "C4"
+            && descriptor["genesisTokenChoice"] == "pay-one-mana"
+    });
+    assert_eq!(
+        event_types(&entry_receipt),
+        ["site-played", "minion-summoned"]
+    );
+    let choices: Vec<_> = entry
         .legal_actions()
         .expect("legal actions")
         .into_iter()
         .filter(|action| {
-            action.descriptor["kind"] == "play-site"
-                && action.descriptor["cardInstanceId"] == source_id
-                && action.descriptor["cell"] == "C4"
-                && action.descriptor["genesisTokenChoice"] == "pay-one-mana"
+            action.descriptor["kind"] == "choose-ability"
+                && action.descriptor["sourceInstanceId"] == expected_token_id
         })
         .collect();
     assert_eq!(choices.len(), 3);
-    assert_eq!(choices[0].descriptor["genesisDamageChoice"], "decline");
-    assert!(choices[0].descriptor.get("genesisDamageTarget").is_none());
-    let mut expected_target_ids = [expected_token_id.clone(), avatar_id.clone()];
+    let mut expected_target_ids = vec![expected_token_id.clone(), avatar_id.clone()];
     expected_target_ids.sort();
-    assert_eq!(
-        choices[1..]
-            .iter()
-            .map(|action| {
-                assert_eq!(action.descriptor["genesisDamageChoice"], "target");
-                action.descriptor["genesisDamageTarget"]["instanceId"]
-                    .as_str()
-                    .expect("target identity")
-            })
-            .collect::<Vec<_>>(),
-        expected_target_ids
-    );
+    let mut actual_target_ids: Vec<_> = choices
+        .iter()
+        .filter_map(|action| action.descriptor["target"]["instanceId"].as_str())
+        .map(str::to_owned)
+        .collect();
+    actual_target_ids.sort_unstable();
+    assert_eq!(actual_target_ids, expected_target_ids);
 
     let mut declined = session.clone();
-    let (_, declined_receipt) = accept_where(&mut declined, |descriptor| {
+    let (_, declined_entry_receipt) = accept_where(&mut declined, |descriptor| {
         descriptor["kind"] == "play-site"
             && descriptor["cardInstanceId"] == source_id
             && descriptor["cell"] == "C4"
             && descriptor["genesisTokenChoice"] == "pay-one-mana"
-            && descriptor["genesisDamageChoice"] == "decline"
     });
     assert_eq!(
-        event_types(&declined_receipt),
+        event_types(&declined_entry_receipt),
         ["site-played", "minion-summoned"]
     );
+    let declined_receipt = choose_ability(&mut declined, &expected_token_id, None);
+    assert_eq!(event_types(&declined_receipt), ["ability-choice-committed"]);
     assert_exact_replay(&declined);
 
     let mut targeted = session;
-    let (_, targeted_receipt) = accept_where(&mut targeted, |descriptor| {
+    let (_, targeted_entry_receipt) = accept_where(&mut targeted, |descriptor| {
         descriptor["kind"] == "play-site"
             && descriptor["cardInstanceId"] == source_id
             && descriptor["cell"] == "C4"
             && descriptor["genesisTokenChoice"] == "pay-one-mana"
-            && descriptor["genesisDamageTarget"]["instanceId"] == avatar_id
     });
+    assert_eq!(
+        event_types(&targeted_entry_receipt),
+        ["site-played", "minion-summoned"]
+    );
+    let targeted_receipt = choose_ability(&mut targeted, &expected_token_id, Some(&avatar_id));
     assert_eq!(
         event_types(&targeted_receipt),
         [
-            "site-played",
-            "minion-summoned",
+            "ability-choice-committed",
             "genesis-damage-allocated",
             "damage-dealt",
             "avatar-life-lost",
@@ -2170,6 +2153,10 @@ fn rule_catalog_0384_magic_token_summon_should_issue_and_apply_adjacent_genesis_
         .as_str()
         .expect("Magic identity")
         .to_owned();
+    let avatar_id = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar identity")
+        .to_owned();
     let pre_cast_version = before["stateVersion"].clone();
     let expected_token_ids: Vec<_> = ["C3"]
         .into_iter()
@@ -2188,54 +2175,90 @@ fn rule_catalog_0384_magic_token_summon_should_issue_and_apply_adjacent_genesis_
             .to_string()
         })
         .collect();
-    let choices: Vec<_> = session
+    let cast_choices: Vec<_> = session
         .legal_actions()
         .expect("legal actions")
         .into_iter()
         .filter(|action| {
             action.descriptor["kind"] == "cast-magic"
                 && action.descriptor["cardInstanceId"] == magic_id
-                && action.descriptor.get("tokenGenesisDamage").is_some()
+        })
+        .collect();
+    assert_eq!(cast_choices.len(), 1);
+    let mut entry = session.clone();
+    let (_, entry_receipt) = accept_where(&mut entry, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardInstanceId"] == magic_id
+    });
+    assert_eq!(
+        event_types(&entry_receipt),
+        ["magic-cast", "minion-summoned"]
+    );
+    let token_instance_id = entry_receipt.events[1].payload["instanceId"]
+        .as_str()
+        .expect("token identity")
+        .to_owned();
+    assert_eq!(token_instance_id, expected_token_ids[0]);
+    let choices: Vec<_> = entry
+        .legal_actions()
+        .expect("legal actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "choose-ability"
+                && action.descriptor["sourceInstanceId"] == token_instance_id
         })
         .collect();
     assert_eq!(choices.len(), 4); // Decline, the arriving token, North Avatar, or South minion.
-    assert!(choices.iter().any(|action| {
-        action.descriptor["tokenGenesisDamage"]
-            .as_array()
-            .is_some_and(|resolutions| {
-                resolutions.len() == 1
-                    && resolutions
-                        .iter()
-                        .all(|resolution| resolution["genesisDamageChoice"] == "decline")
-            })
-    }));
-    assert!(choices.iter().any(|action| {
-        action.descriptor["tokenGenesisDamage"]
-            .as_array()
-            .is_some_and(|resolutions| {
-                resolutions.len() == 1
-                    && resolutions[0]["genesisDamageChoice"] == "target"
-                    && resolutions[0]["genesisDamageTarget"]["instanceId"] == south_minion_id
-                    && resolutions[0]["tokenInstanceId"] == expected_token_ids[0]
-            })
-    }));
+    let mut actual_target_ids: Vec<_> = choices
+        .iter()
+        .filter_map(|action| action.descriptor["target"]["instanceId"].as_str())
+        .map(str::to_owned)
+        .collect();
+    actual_target_ids.sort_unstable();
+    let mut expected_target_ids = vec![
+        token_instance_id.clone(),
+        avatar_id.clone(),
+        south_minion_id.clone(),
+    ];
+    expected_target_ids.sort_unstable();
+    assert_eq!(actual_target_ids, expected_target_ids);
+
+    let mut declined = session.clone();
+    let (_, declined_entry_receipt) = accept_where(&mut declined, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardInstanceId"] == magic_id
+    });
+    assert_eq!(
+        event_types(&declined_entry_receipt),
+        ["magic-cast", "minion-summoned"]
+    );
+    let declined_token_id = declined_entry_receipt.events[1].payload["instanceId"]
+        .as_str()
+        .expect("token identity")
+        .to_owned();
+    let declined_receipt = choose_ability(&mut declined, &declined_token_id, None);
+    assert_eq!(
+        event_types(&declined_receipt),
+        ["ability-choice-committed", "magic-resolved"]
+    );
+    assert_exact_replay(&declined);
 
     let mut targeted = session;
-    let (_, targeted_receipt) = accept_where(&mut targeted, |descriptor| {
-        descriptor["kind"] == "cast-magic"
-            && descriptor["cardInstanceId"] == magic_id
-            && descriptor["tokenGenesisDamage"]
-                .as_array()
-                .is_some_and(|resolutions| {
-                    resolutions.len() == 1
-                        && resolutions[0]["genesisDamageTarget"]["instanceId"] == south_minion_id
-                })
+    let (_, targeted_entry_receipt) = accept_where(&mut targeted, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardInstanceId"] == magic_id
     });
+    assert_eq!(
+        event_types(&targeted_entry_receipt),
+        ["magic-cast", "minion-summoned"]
+    );
+    let targeted_token_id = targeted_entry_receipt.events[1].payload["instanceId"]
+        .as_str()
+        .expect("token identity")
+        .to_owned();
+    let targeted_receipt =
+        choose_ability(&mut targeted, &targeted_token_id, Some(&south_minion_id));
     assert_eq!(
         event_types(&targeted_receipt),
         [
-            "magic-cast",
-            "minion-summoned",
+            "ability-choice-committed",
             "genesis-damage-allocated",
             "damage-dealt",
             "minion-died",

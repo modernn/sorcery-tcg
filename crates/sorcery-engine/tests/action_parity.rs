@@ -80,6 +80,7 @@ fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
         ActionDescriptor::CloseDefend { .. } => "close-defend",
         ActionDescriptor::Intercept { .. } => "intercept",
         ActionDescriptor::OrderTriggers { .. } => "order-triggers",
+        ActionDescriptor::ChooseAbility { .. } => "choose-ability",
         ActionDescriptor::ShootProjectile { .. } => "shoot-projectile",
         ActionDescriptor::ShootDamageProjectile { .. } => "shoot-damage-projectile",
         ActionDescriptor::ShootDragProjectile { .. } => "shoot-drag-projectile",

@@ -12138,77 +12138,82 @@ test('RULE-03/04 Vile Imp may deal 2 damage to one adjacent unit or decline', as
     assert.ok(wardedTarget);
     assert.equal(wardedTarget.warded, true);
     const summons = (await ctx.legalActions('north'))
-      .flatMap(({ descriptor }) => descriptor.kind === 'summon-minion'
+      .filter(({ descriptor }) => descriptor.kind === 'summon-minion'
         && descriptor.cardInstanceId === card.instanceId
-        && descriptor.cell === 'C4' ? [descriptor] : []);
-    assert.deepEqual(summons.map((descriptor) => ({
-      choice: descriptor.genesisDamageChoice,
-      target: descriptor.genesisDamageTarget?.instanceId,
-    })).sort((left, right) => (left.target ?? '').localeCompare(right.target ?? '')), [
-      { choice: 'decline', target: undefined },
-      { choice: 'target', target: card.instanceId },
-      { choice: 'target', target: avatar.instanceId },
-      { choice: 'target', target: wardedTarget.instanceId },
-    ].sort((left, right) => (left.target ?? '').localeCompare(right.target ?? '')));
+        && descriptor.cell === 'C4');
+    assert.equal(summons.length, 1);
     const checkpointVersion = ctx.state.stateVersion;
 
     await withFork(ctx, async (declineCtx) => {
-      const decline = await declineCtx.step(await declineCtx.action(({ descriptor }) =>
+      const summon = await declineCtx.step(await declineCtx.action(({ descriptor }) =>
         descriptor.kind === 'summon-minion'
           && descriptor.cardInstanceId === card.instanceId
-          && descriptor.cell === 'C4'
-          && descriptor.genesisDamageChoice === 'decline'));
+          && descriptor.cell === 'C4'));
+      assert.equal(summon.accepted, true);
+      const decline = await declineCtx.step(await declineCtx.action(({ descriptor }) =>
+        descriptor.kind === 'choose-ability'
+          && descriptor.sourceInstanceId === card.instanceId
+          && descriptor.target === undefined));
       assert.equal(decline.accepted, true);
       assert.equal(decline.session.state.players.north.avatar.life, 20);
-      assert.deepEqual(decline.receipt.events.map(({ type }) => type), ['minion-summoned']);
+      assert.deepEqual([...summon.receipt.events, ...decline.receipt.events]
+        .map(({ type }) => type), ['minion-summoned', 'ability-choice-committed']);
       assert.equal(await declineCtx.verifyReplay(), true);
     });
 
     await withFork(ctx, async (targetedCtx) => {
-      const targeted = await targetedCtx.step(await targetedCtx.action(({ descriptor }) =>
+      const summon = await targetedCtx.step(await targetedCtx.action(({ descriptor }) =>
         descriptor.kind === 'summon-minion'
           && descriptor.cardInstanceId === card.instanceId
-          && descriptor.cell === 'C4'
-          && descriptor.genesisDamageChoice === 'target'
-          && descriptor.genesisDamageTarget?.instanceId === avatar.instanceId));
+          && descriptor.cell === 'C4'));
+      assert.equal(summon.accepted, true);
+      const targeted = await targetedCtx.step(await targetedCtx.action(({ descriptor }) =>
+        descriptor.kind === 'choose-ability'
+          && descriptor.sourceInstanceId === card.instanceId
+          && descriptor.target?.instanceId === avatar.instanceId));
       assert.equal(targeted.accepted, true);
       const source = targeted.session.state.realm.units.find(({ instanceId }) =>
         instanceId === card.instanceId);
       assert.ok(source);
       assert.equal(source.damage, 0);
       assert.equal(targeted.session.state.players.north.avatar.life, 18);
-      assert.deepEqual(targeted.receipt.events.map(({ type }) => type), [
+      assert.deepEqual([...summon.receipt.events, ...targeted.receipt.events]
+        .map(({ type }) => type), [
         'minion-summoned',
+        'ability-choice-committed',
         'genesis-damage-allocated',
         'damage-dealt',
         'avatar-life-lost',
       ]);
-      assert.deepEqual(targeted.receipt.events[1]?.payload, {
+      assert.deepEqual(targeted.receipt.events.find(({ type }) => type === 'genesis-damage-allocated')?.payload, {
         amount: 2,
         sourceInstanceId: source.instanceId,
         targetInstanceId: avatar.instanceId,
       });
       assert.equal(targeted.receipt.randomDraws.length, 0);
-      assert.equal(targeted.session.state.stateVersion, checkpointVersion + 1);
+      assert.equal(targeted.session.state.stateVersion, checkpointVersion + 2);
       assert.equal(await targetedCtx.verifyReplay(), true);
     });
 
-    const warded = await ctx.step(await ctx.action(({ descriptor }) =>
+    const summon = await ctx.step(await ctx.action(({ descriptor }) =>
       descriptor.kind === 'summon-minion'
         && descriptor.cardInstanceId === card.instanceId
-        && descriptor.cell === 'C4'
-        && descriptor.genesisDamageChoice === 'target'
-        && descriptor.genesisDamageTarget?.instanceId === wardedTarget.instanceId));
+        && descriptor.cell === 'C4'));
+    assert.equal(summon.accepted, true);
+    const warded = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'choose-ability'
+        && descriptor.sourceInstanceId === card.instanceId
+        && descriptor.target?.instanceId === wardedTarget.instanceId));
     assert.equal(warded.accepted, true);
     const wardedSurvivor = warded.session.state.realm.units.find(({ instanceId }) =>
       instanceId === wardedTarget.instanceId);
     assert.ok(wardedSurvivor);
     assert.equal(wardedSurvivor.damage, 0);
     assert.equal(wardedSurvivor.warded, false);
-    assert.deepEqual(warded.receipt.events.map(({ type }) => type), [
+    assert.deepEqual([...summon.receipt.events, ...warded.receipt.events]
+      .map(({ type }) => type), [
       'minion-summoned',
-      'genesis-damage-allocated',
-      'damage-dealt',
+      'ability-choice-committed',
       'ward-broken',
     ]);
     assert.equal(await ctx.verifyReplay(), true);
@@ -31438,11 +31443,28 @@ test('RULE-03 Raise Dead selects a public random cemetery minion before free pla
       const northSelected = await northFork.step(northChoice);
       assert.equal(northSelected.accepted, true);
       if (!northSelected.accepted) return;
-      const genesisLabels = (await northFork.legalActions('north'))
-        .filter(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C4')
-        .map(({ label }) => label);
-      assert.equal(genesisLabels.some((label) => label.endsWith('; decline Genesis')), true);
-      assert.equal(genesisLabels.some((label) => label.includes('; Genesis targets avatar ')), true);
+      const northPlacement = (await northFork.legalActions('north'))
+        .find(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C4');
+      assert.ok(northPlacement);
+      if (!northPlacement) return;
+      const northPlaced = await northFork.step(northPlacement);
+      assert.equal(northPlaced.accepted, true);
+      if (!northPlaced.accepted) return;
+      const genesisChoices = (await northFork.legalActions('north'))
+        .filter(({ descriptor }) => descriptor.kind === 'choose-ability'
+          && descriptor.sourceInstanceId === northCorpseInstanceId);
+      const genesisLabels = genesisChoices.map(({ label }) => label);
+      assert.equal(genesisLabels.some((label) => label.startsWith('Decline optional ability from ')), true);
+      assert.equal(genesisLabels.some((label) => label.startsWith('Choose avatar ')), true);
+      const genesisDecline = genesisChoices.find(({ descriptor }) =>
+        descriptor.kind === 'choose-ability' && descriptor.target === undefined);
+      assert.ok(genesisDecline);
+      if (!genesisDecline) return;
+      const genesisResolved = await northFork.step(genesisDecline);
+      assert.equal(genesisResolved.accepted, true);
+      if (!genesisResolved.accepted) return;
+      assert.deepEqual([...northPlaced.receipt.events, ...genesisResolved.receipt.events]
+        .map(({ type }) => type), ['minion-summoned', 'ability-choice-committed', 'magic-resolved']);
       assert.equal(await northFork.verifyReplay(), true);
     });
 

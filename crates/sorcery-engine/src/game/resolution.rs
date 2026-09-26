@@ -1,8 +1,8 @@
 //! Ordered work that resumes after an interrupting effect finishes.
 
 use super::{
-    CardId, CardInstance, Cell, DeferredMagicResolved, Game, GameError, GenesisDamageChoice,
-    IdentityHash, OutcomeLog, ResolutionContinuation, Seat, UnitPosition, UnitTarget, seat_index,
+    CardId, CardInstance, Cell, DeferredMagicResolved, Game, GameError, IdentityHash, OutcomeLog,
+    ResolutionContinuation, Seat, UnitPosition, seat_index,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -11,8 +11,6 @@ pub(super) struct TokenEntryContinuation {
     pub(super) token: UnitPosition,
     pub(super) source_instance_id: IdentityHash,
     pub(super) mana_paid: u64,
-    pub(super) genesis_damage_choice: Option<GenesisDamageChoice>,
-    pub(super) genesis_damage_target: Option<UnitTarget>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -69,8 +67,6 @@ impl Game {
                     entry.seat,
                     entry.token.card.instance_id.clone(),
                     entry.token.card.card_id,
-                    entry.genesis_damage_choice,
-                    entry.genesis_damage_target.clone(),
                 )
             })
             .collect::<Vec<_>>();
@@ -78,10 +74,8 @@ impl Game {
             self.enter_token_unit(entry, outcomes)?;
         }
         let mut triggers = Vec::new();
-        for (seat, instance_id, card_id, choice, target) in sources {
-            if let Some(trigger) =
-                self.genesis_trigger(seat, &instance_id, card_id, choice, target)?
-            {
+        for (seat, instance_id, card_id) in sources {
+            if let Some(trigger) = self.genesis_trigger(seat, &instance_id, card_id)? {
                 triggers.push(trigger);
             }
         }
@@ -122,6 +116,11 @@ impl Game {
                 None => continuation,
             });
         } else if let Some(pending) = &mut self.position.pending_trigger_order {
+            pending.continuation = Some(match pending.continuation.take() {
+                Some(first) => first.followed_by(continuation),
+                None => continuation,
+            });
+        } else if let Some(pending) = &mut self.position.pending_ability_choice {
             pending.continuation = Some(match pending.continuation.take() {
                 Some(first) => first.followed_by(continuation),
                 None => continuation,

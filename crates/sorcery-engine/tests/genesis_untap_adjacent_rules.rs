@@ -1,8 +1,8 @@
 //! Direct proofs for Genesis untap-adjacent-allies (RULE-CATALOG-0537–0538, 1111).
 //!
-//! On entry, a minion untaps tapped allies that share its region and stand on
-//! a bordering cell. Same-cell allies are not adjacent. Enemy units are not
-//! untapped. The Avatar counts as an ally.
+//! On entry, a minion chooses one ally that shares its region and is on
+//! its cell or an orthogonally bordering cell. The Avatar counts as an ally;
+//! diagonal and other-region units are excluded.
 //!
 //! While Deathrites wait for ordering, summoning a genesis untap-adjacent
 //! minion stays withheld until the chain drains.
@@ -146,6 +146,19 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
     try_accept_where(session, predicate).expect("expected engine-issued action")
 }
 
+fn choose_ability(session: &mut Session, source_id: &str, target_id: &str) -> Receipt {
+    assert_eq!(
+        session.replay_value().expect("authoritative replay")["state"]["phase"],
+        "ability-choice"
+    );
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "choose-ability"
+            && descriptor["sourceInstanceId"] == source_id
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    receipt
+}
+
 fn keep(session: &mut Session) {
     accept_where(session, |descriptor| {
         descriptor["kind"] == "mulligan"
@@ -265,17 +278,20 @@ fn rule_catalog_0537_genesis_untaps_an_adjacent_tapped_avatar() {
         true
     );
 
-    let (_, summoned) = accept_where(&mut session, |descriptor| {
+    let (summon, summoned) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == "north-hob"
             && descriptor["cell"] == "C3"
             && descriptor["region"].is_null()
     });
+    assert_eq!(event_types(&summoned), ["minion-summoned"]);
+    let source_id = summon["cardInstanceId"].as_str().expect("Hob identity");
+    let choice = choose_ability(&mut session, source_id, &north_avatar);
     assert_eq!(
-        event_types(&summoned),
-        ["minion-summoned", "avatar-untapped"]
+        event_types(&choice),
+        ["ability-choice-committed", "avatar-untapped"]
     );
-    assert_eq!(summoned.events[1].payload["instanceId"], north_avatar);
+    assert_eq!(choice.events[1].payload["instanceId"], north_avatar);
     assert!(
         !summoned
             .events
@@ -291,30 +307,30 @@ fn rule_catalog_0537_genesis_untaps_an_adjacent_tapped_avatar() {
 }
 
 #[test]
-fn rule_catalog_0538_genesis_does_not_untap_a_same_cell_avatar() {
+fn rule_catalog_0538_genesis_untaps_a_same_cell_avatar() {
     let encoded = seed_with_hob();
     let mut session = opening_main(&encoded);
     let before = state(&session);
     let north_avatar = avatar_instance_id(&before, "north");
     assert_eq!(before["players"]["north"]["avatar"]["tapped"], true);
 
-    let (_, summoned) = accept_where(&mut session, |descriptor| {
+    let (summon, summoned) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == "north-hob"
             && descriptor["cell"] == "C4"
             && descriptor["region"].is_null()
     });
     assert_eq!(event_types(&summoned), ["minion-summoned"]);
-    assert!(
-        !summoned
-            .events
-            .iter()
-            .any(|event| event.event_type == "avatar-untapped"
-                && event.payload["instanceId"] == north_avatar)
+    let source_id = summon["cardInstanceId"].as_str().expect("Hob identity");
+    let choice = choose_ability(&mut session, source_id, &north_avatar);
+    assert_eq!(
+        event_types(&choice),
+        ["ability-choice-committed", "avatar-untapped"]
     );
+    assert_eq!(choice.events[1].payload["instanceId"], north_avatar);
     assert_eq!(
         state(&session)["players"]["north"]["avatar"]["tapped"],
-        true
+        false
     );
     assert_exact_replay(&session);
 }
@@ -507,17 +523,20 @@ fn rule_catalog_1111_genesis_untap_adjacent_withheld_during_pending_deathrite_or
     });
     assert_eq!(state(session)["players"]["north"]["avatar"]["tapped"], true);
 
-    let (_, summoned) = accept_where(session, |descriptor| {
+    let (summon, summoned) = accept_where(session, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == "north-hob"
             && descriptor["cell"] == "C3"
             && descriptor["region"].is_null()
     });
+    assert_eq!(event_types(&summoned), ["minion-summoned"]);
+    let source_id = summon["cardInstanceId"].as_str().expect("Hob identity");
+    let choice = choose_ability(session, source_id, &north_avatar);
     assert_eq!(
-        event_types(&summoned),
-        ["minion-summoned", "avatar-untapped"]
+        event_types(&choice),
+        ["ability-choice-committed", "avatar-untapped"]
     );
-    assert_eq!(summoned.events[1].payload["instanceId"], north_avatar);
+    assert_eq!(choice.events[1].payload["instanceId"], north_avatar);
     assert_eq!(
         state(session)["players"]["north"]["avatar"]["tapped"],
         false

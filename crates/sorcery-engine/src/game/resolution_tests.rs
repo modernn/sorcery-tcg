@@ -302,8 +302,6 @@ fn token_entry(game: &Game, token_id: &str, ordinal: usize) -> super::TokenEntry
             .unwrap(),
         source_instance_id: source,
         mana_paid: 0,
-        genesis_damage_choice: None,
-        genesis_damage_target: None,
     }
 }
 

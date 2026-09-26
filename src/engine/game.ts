@@ -751,7 +751,7 @@ type PendingDeathriteBatch = Readonly<{
   stage: 'active-order' | 'non-active-order' | 'resolve';
 }>;
 
-type GamePhase = 'allocate' | 'attack' | 'cemetery-summon' | 'chain-magic' | 'trigger-order' | 'defend' | 'discard-card' | 'draw' | 'end-turn-aura' | 'filtered-site-play' | 'genesis' | 'intercept' | 'main' | 'movement' | 'mulligan' | 'random-choice' | 'ranged-step' | 'start-turn' | 'terminal';
+type GamePhase = 'allocate' | 'attack' | 'cemetery-summon' | 'chain-magic' | 'trigger-order' | 'ability-choice' | 'defend' | 'discard-card' | 'draw' | 'end-turn-aura' | 'filtered-site-play' | 'genesis' | 'intercept' | 'main' | 'movement' | 'mulligan' | 'random-choice' | 'ranged-step' | 'start-turn' | 'terminal';
 
 type LeapAttackContinuation = Readonly<{
   ally: GameUnitRef;
@@ -768,8 +768,6 @@ type PlaySiteDescriptor = Readonly<{
   cell: RealmCell;
   createRubbleAt?: RealmCell;
   fromTopAtlas?: true;
-  genesisDamageChoice?: 'decline' | 'target';
-  genesisDamageTarget?: GameUnitRef;
   genesisTokenChoice?: 'decline' | 'defer' | 'pay-one-mana';
   kind: 'play-site';
 }>;
@@ -1057,8 +1055,6 @@ type SummonMinionDescriptor = Readonly<{
   cells?: TwoByTwoArea;
   kind: 'summon-minion';
   manaCost: number;
-  genesisDamageChoice?: 'decline' | 'target';
-  genesisDamageTarget?: GameUnitRef;
   paymentMode?: 'random-card-discard';
   region?: 'underground' | 'underwater' | 'void';
   sacrificedMinionInstanceIds?: readonly StateHash[];
@@ -1076,8 +1072,6 @@ type GameActionDescriptor =
   }>
   | Readonly<{
     choice: 'decline' | 'pay-one-mana';
-    genesisDamageChoice?: 'decline' | 'target';
-    genesisDamageTarget?: GameUnitRef;
     kind: 'resolve-genesis-token';
   }>
   | Readonly<{
@@ -1291,6 +1285,11 @@ type GameActionDescriptor =
   | Readonly<{
     kind: 'order-triggers';
     sourceInstanceId: StateHash;
+  }>
+  | Readonly<{
+    kind: 'choose-ability';
+    sourceInstanceId: StateHash;
+    target?: GameUnitRef;
   }>
   | Readonly<{
     auraInstanceId: StateHash;

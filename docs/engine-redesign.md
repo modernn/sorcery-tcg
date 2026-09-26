@@ -266,7 +266,7 @@ and applying damage. Area membership does not apply explicit-target restrictions
 such as Stealth.
 
 Selected complete abilities now compile into immutable damage,
-untap, and draw programs once per rules context. Magic, single-clause Genesis,
+untap, draw, and ordinary unit-choice programs once per rules context. Magic, single-clause Genesis,
 minion area activations, and fixed artifact shots invoke the same effect runner.
 Migrated Magic execution branches are deleted. Mixed Genesis programs remain on
 the existing path as a whole until clause ordering and choices are represented;
@@ -305,8 +305,9 @@ action. The active player commits their order first; the non-active player's
 effects resolve first. Each nested death chain finishes its corpse cleanup before
 the next Genesis resumes. Trigger records retain the ability's controller and
 source incarnation; a departed or re-entered source cannot start its old trigger.
-Single Genesis invocations bypass the ordering batch, and the batch moves records
-into resolution without cloning them. Simultaneous uncompiled Genesis remains
+Single Genesis invocations without target declarations bypass the ordering batch;
+targeted invocations retain their compiled frame until declaration. The batch moves
+records into resolution without cloning them. Simultaneous uncompiled Genesis remains
 explicitly unsupported until its choices and ordered effects migrate. Site effects
 and raised-minion Magic resume their remaining work through the same continuation. The pending state
 includes the full sequence and any held Magic, so checkpoint branches preserve both
@@ -318,12 +319,29 @@ cloned checkpoint continuation, terminal cleanup, source departure, re-entry, co
 changes, oversized footprints, and movement before versus after resolution starts.
 A silenced area source offers no activation until its ability returns. Existing
 scenarios exercise the migrated operations through each origin. Validated costs and
-entry-choice adapters still use existing facts; shared atomic costs and entry-time
-choices are the next migration. In particular, targeted Genesis needs an engine-issued
-choice after entry; the old adjacent-allies shortcut is not a completed implementation
-of that rule. The new site and token continuations provide the remaining-work boundary;
-the choice instruction and post-entry legal actions still need to replace the existing
-declaration-time choices.
+entry adapters still use existing facts; shared atomic costs remain to migrate.
+
+Summon, site, and token-producing Magic actions no longer enumerate Cartesian
+products of future Genesis targets. After the whole entry group exists, the engine
+issues `choose-ability` declarations. Declaring a target also commits that source's
+position within its controller's trigger order. All active-player declarations precede
+non-active-player declarations; no grouped effect starts before these choices finish.
+Targets bind to exact realm incarnations and pass through shared range/protection
+validation when resolution begins. A source with no declaration still offers
+`order-triggers`, including in a group that also contains targeted sources.
+
+Ordinary unit choices use a resumable `ChooseUnit` instruction and the same spatial
+query without target protections. The adjacent-ally untap operation now selects exactly
+one ally, including its source or Avatar in the same square. It does not untap every
+bordering ally. Mandatory choices omit decline; optional choices issue it explicitly.
+Choice state, source, effect cursor, selected incarnation, and caller continuation
+survive checkpoint cloning and enter the authoritative state hash.
+
+The synthetic optional-target contract currently permits decline at declaration.
+Retained authority does not settle acceptance timing for an optional triggered clause;
+this is an explicit unresolved rule question, not proof of official ranked support.
+Mixed Genesis facts containing choices now fail explicitly until a compiled program
+supplies clause order, rather than applying a guessed legacy sequence.
 
 Migrate persistent effects through the same invocation boundary next, using typed
 lifetimes and official characteristic layers. Expand identity/forms/zones, event
@@ -349,38 +367,21 @@ they are useful and their rule dependencies are understood. Avoid allocating JSO
 looking up card text in inner simulation loops.
 
 Preserve ordered batch results and byte-identical worker-count equivalence. The
-composed-execution checkpoint was compared with the preceding cohort checkpoint in
-three alternating release-build rounds, each with nine samples and 100 seat pairs
-per sample. Median raw throughput was 1,330 before and 1,316 games/second after;
-recorded replay throughput was 5.746 and 5.703 games/second. These small differences
-do not establish a speedup. This synthetic regression workload does not measure all
-new ability combinations or complete real decks. Measure the kernel on both simple
-and interaction-heavy positions as the common operations expand.
+shared-choice checkpoint was compared with the preceding shared-trigger checkpoint
+in three alternating release-build rounds, each with nine samples and 100 seat pairs
+per sample. Median raw throughput was 1,305.531 before and 1,314.102 games/second
+after; recorded replay throughput was 5.711 and 5.652 games/second. These differences
+do not establish a speedup. This synthetic workload does not measure all new ability
+combinations or complete real decks. The verified structural saving is avoiding the
+upfront product of future Genesis target choices; the later decisions still exist.
 
-The subsequent shared-selector checkpoint used the same alternating release comparison
-against composed execution: raw medians were 1,324 before and 1,318 games/second after;
-recorded replay medians were 5.677 and 5.643 games/second. Performance remained effectively
-unchanged on this workload; consolidating selection and checking resolution validity
-has not yet produced a demonstrated throughput improvement.
-
-The earlier composed-execution checkpoint's 48-game recorded batch benchmark measured 3.460 games/second
-with one worker and 38.382 with 16 (three timed repetitions per worker count).
-Sixteen was best among 1, 2, 4, 8, 16, and 24 workers on this 24-logical-CPU machine;
-24 workers produced 29.509 games/second. Every worker count and repetition produced
-the same result hash. These figures describe the synthetic workload and current
-machine, not a claim of equivalent throughput for complete real decks.
-
-The ordered-continuation and batch-setup checkpoint used three alternating release
-comparisons against the selector checkpoint: raw medians were 1,330.713 before and
-1,329.636 games/second after; recorded replay medians were 5.656 and 5.842. Raw
-simulation throughput was effectively unchanged. A separate before/after worker
-sweep (48 games, warmup and three timed repetitions per count) measured 3.477 versus
-3.532 recorded games/second with one worker, 38.568 versus 39.178 with 16, and
-29.143 versus 39.588 with 24. The final build's 16- and 24-worker results were close;
-the large change at 24 workers is not sufficient evidence of a general engine
-speedup from setup reuse. Every tested count from 1 through 24 produced the same
-result hash in both builds. These are synthetic, fully recorded and independently
-replayed batches, not complete real-deck benchmarks.
+The most recent worker sweep, from the preceding batch-setup checkpoint, used 48-game
+recorded batches, warmup, and three timed repetitions per count. It measured 3.532
+recorded games/second with one worker, 39.178 with 16, and 39.588 with 24 on this
+24-logical-CPU machine. Sixteen and 24 were close. Every tested count from 1 through
+24 produced the same result hash. These are synthetic, fully recorded and independently
+replayed batches, not complete real-deck benchmarks or a fresh worker sweep of the
+shared-choice checkpoint. Detailed historical comparisons remain in local receipts.
 
 Expose public semantic action information to playing policies from the same compiled
 definitions. This lets a policy evaluate effect purpose and tactical outcomes without

@@ -113,6 +113,15 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
     (descriptor, receipt)
 }
 
+fn choose_ability(session: &mut Session, source_id: &str, target_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "choose-ability"
+            && descriptor["sourceInstanceId"] == source_id
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    receipt
+}
+
 fn keep(session: &mut Session) {
     accept_where(session, |descriptor| {
         descriptor["kind"] == "mulligan"
@@ -312,12 +321,15 @@ fn disabled_malakhim_should_stay_tapped_while_damage_resets() {
         "untapsAtEndOfControllerTurn": true,
     })));
     advance_to_tapped_malakhim(&mut session, &instance_id);
-    accept_where(&mut session, |descriptor| {
+    let (damager_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == "north-damager"
             && descriptor["cell"] == "C3"
-            && descriptor["genesisDamageTarget"]["instanceId"] == instance_id
     });
+    let damager_id = damager_summon["cardInstanceId"]
+        .as_str()
+        .expect("damager identity");
+    choose_ability(&mut session, damager_id, &instance_id);
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic"
             && descriptor["cardId"] == "north-freeze"
@@ -489,12 +501,15 @@ fn disabled_ignited_should_survive_cleanup_reset_damage_and_expire_disable() {
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
     });
-    accept_where(&mut session, |descriptor| {
+    let (damager_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == "north-damager"
             && descriptor["cell"] == "C4"
-            && descriptor["genesisDamageTarget"]["instanceId"] == ignited_id
     });
+    let damager_id = damager_summon["cardInstanceId"]
+        .as_str()
+        .expect("damager identity");
+    choose_ability(&mut session, damager_id, &ignited_id);
     let damaged = state(&session);
     assert_eq!(unit(&damaged, &ignited_id)["damage"], 2);
     assert_eq!(
@@ -775,11 +790,13 @@ fn rule_catalog_0760_terminal_end_turn_deathrite_suppresses_turn_transition() {
         .as_str()
         .expect("survivor identity")
         .to_owned();
-    accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "summon-minion"
-            && descriptor["cardId"] == "north-drawrite-a"
-            && descriptor["genesisDamageTarget"]["instanceId"] == survivor_id
+    let (drawrite_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "north-drawrite-a"
     });
+    let drawrite_id = drawrite_summon["cardInstanceId"]
+        .as_str()
+        .expect("drawrite identity");
+    choose_ability(&mut session, drawrite_id, &survivor_id);
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "north-ignited"
     });

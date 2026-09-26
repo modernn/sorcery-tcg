@@ -123,15 +123,16 @@ fn install(game: &mut Game, effects: Vec<Effect>) -> CardId {
             UnitSet::Location => Some(SelectionSpec::Location {
                 relation: SpatialRelation::Anywhere,
             }),
-            UnitSet::OtherUnitsHere | UnitSet::SurfaceMinions => None,
+            UnitSet::OtherUnitsHere | UnitSet::SurfaceMinions | UnitSet::Chosen => None,
         },
-        Effect::Draw { .. } => None,
+        Effect::Draw { .. } | Effect::ChooseUnit(_) => None,
     });
     Arc::get_mut(&mut game.rules)
         .expect("fixture rules are uniquely owned")
         .cards[usize::from(id.0)]
     .abilities
     .magic = Some(CompiledAbility {
+        optional_selection: false,
         selection,
         effects: effects.into_boxed_slice(),
     });
@@ -1380,4 +1381,129 @@ fn realm_entry_prevents_rebinding_before_start_but_started_frame_survives_source
             .len(),
         before_draw + 1
     );
+}
+
+#[test]
+fn ordinary_unit_choice_resumes_one_effect_and_survives_checkpoint_cloning() {
+    use super::super::ability::UnitChoiceSpec;
+
+    let mut game = fixture_game();
+    let mut first = minion(&game, "south-spell-1", Seat::North, "choice-first", true);
+    first.warded = true;
+    first.stealthed = true;
+    let second = minion(&game, "south-spell-2", Seat::North, "choice-second", true);
+    let selected = UnitTarget::Minion {
+        instance_id: first.card.instance_id.clone(),
+        seat: Seat::North,
+    };
+    game.position.units = vec![first, second];
+    let source = game.unit_effect_source(&selected).expect("live source");
+    let source_id = source.instance_id.clone();
+    let id = install(
+        &mut game,
+        vec![
+            Effect::ChooseUnit(UnitChoiceSpec {
+                kind: None,
+                relation: SpatialRelation::Adjacent,
+                allied_only: true,
+                optional: false,
+            }),
+            Effect::Untap {
+                recipients: UnitSet::Chosen,
+            },
+        ],
+    );
+    let frame = game
+        .effect_frame(id, AbilityEntry::Magic, source, None, None, None)
+        .expect("ordinary choice program");
+    game.run_effect_frame(frame, &mut OutcomeLog::Ignore)
+        .expect("pause for choice");
+    assert_eq!(game.position.phase, Phase::AbilityChoice);
+    assert!(game.authoritative_state()["pendingAbilityChoice"].is_object());
+    let mut actions = Vec::new();
+    game.append_ability_choice_actions(&mut actions)
+        .expect("choices");
+    assert!(actions.iter().all(|action| matches!(
+        action.descriptor,
+        ActionDescriptor::ChooseAbility {
+            target: Some(_),
+            ..
+        }
+    )));
+    assert!(actions.iter().any(|action| matches!(&action.descriptor,
+        ActionDescriptor::ChooseAbility { target: Some(target), .. } if target == &selected)));
+    let mut branch = game.clone();
+    let mut outcomes = Vec::new();
+    let mut branch_outcomes = Vec::new();
+    game.apply_ability_choice_action(
+        Seat::North,
+        &source_id,
+        Some(&selected),
+        &mut OutcomeLog::Record(&mut outcomes),
+    )
+    .expect("choose self");
+    branch
+        .apply_ability_choice_action(
+            Seat::North,
+            &source_id,
+            Some(&selected),
+            &mut OutcomeLog::Record(&mut branch_outcomes),
+        )
+        .expect("same branch choice");
+    assert_eq!(game.authoritative_state(), branch.authoritative_state());
+    assert_eq!(outcomes, branch_outcomes);
+    assert_eq!(game.position.phase, Phase::Main);
+    assert!(!game.position.units[0].tapped);
+    assert!(game.position.units[0].warded);
+    assert!(game.position.units[0].stealthed);
+    assert!(
+        game.position.units[1].tapped,
+        "only the selected ally untaps"
+    );
+    assert!(game.position.pending_ability_choice.is_none());
+}
+
+#[test]
+fn emptied_choice_after_source_departure_resumes_independent_effects() {
+    use super::super::ability::UnitChoiceSpec;
+    let mut game = fixture_game();
+    let unit = minion(&game, "south-spell-1", Seat::North, "only-choice", true);
+    let selected = UnitTarget::Minion {
+        instance_id: unit.card.instance_id.clone(),
+        seat: Seat::North,
+    };
+    game.position.units = vec![unit];
+    let source = game.unit_effect_source(&selected).expect("source");
+    let id = install(
+        &mut game,
+        vec![
+            Effect::ChooseUnit(UnitChoiceSpec {
+                kind: Some(super::super::UnitKind::Minion),
+                relation: SpatialRelation::Adjacent,
+                allied_only: true,
+                optional: false,
+            }),
+            Effect::Untap {
+                recipients: UnitSet::Chosen,
+            },
+            Effect::Draw {
+                zone: DeckZone::Spellbook,
+                count: 1,
+            },
+        ],
+    );
+    let frame = game
+        .effect_frame(id, AbilityEntry::Magic, source, None, None, None)
+        .expect("frame");
+    game.run_effect_frame(frame, &mut OutcomeLog::Ignore)
+        .expect("pending choice");
+    assert_eq!(game.position.phase, Phase::AbilityChoice);
+    // Simulate settlement removing the sole eligible unit while the effect is interrupted.
+    game.position.units.clear();
+    let before = game.position.players[0].hand_spellbook.len();
+    game.resume_empty_ability_choice(&mut OutcomeLog::Ignore)
+        .expect("empty choice resumes");
+    assert_eq!(game.position.phase, Phase::Main);
+    assert!(game.position.pending_ability_choice.is_none());
+    assert_eq!(game.position.players[0].hand_spellbook.len(), before + 1);
 }

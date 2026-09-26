@@ -11157,8 +11157,8 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "When a token minion carries both disable-until-damaged and optional adjacent Genesis damage, declining the damage disables the token without dealing damage.",
-      "implementationStatus": "rust-supported",
+      "plainLanguage": "A token minion carrying both disable-until-damaged and optional adjacent Genesis damage is currently unsupported because the mixed Genesis clauses lack an explicitly ordered compiled program.",
+      "implementationStatus": "unsupported",
       "genericFactHints": [
         "genesisDisableSelfUntilDamaged",
         "genesisMayDamageTargetAdjacentUnit"
@@ -11166,10 +11166,7 @@
       "actionHints": [
         "play-site"
       ],
-      "eventHints": [
-        "minion-summoned",
-        "minion-disabled"
-      ],
+      "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
         "testName": "rule_catalog_0487_token_genesis_disable_declines_adjacent_damage"
@@ -11182,8 +11179,8 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "When a spellbook minion carries both disable-until-damaged and optional adjacent Genesis damage, choosing a legal target disables the minion and then deals the printed Genesis damage.",
-      "implementationStatus": "rust-supported",
+      "plainLanguage": "A spellbook minion carrying both disable-until-damaged and optional adjacent Genesis damage is currently unsupported because the mixed Genesis clauses lack an explicitly ordered compiled program.",
+      "implementationStatus": "unsupported",
       "genericFactHints": [
         "genesisDisableSelfUntilDamaged",
         "genesisMayDamageTargetAdjacentUnit"
@@ -11191,13 +11188,7 @@
       "actionHints": [
         "summon-minion"
       ],
-      "eventHints": [
-        "minion-summoned",
-        "minion-disabled",
-        "genesis-damage-allocated",
-        "damage-dealt",
-        "avatar-life-lost"
-      ],
+      "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
         "testName": "rule_catalog_0488_spellbook_summon_genesis_disable_targets_adjacent_damage"
@@ -12398,16 +12389,18 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Genesis that untaps adjacent allies untaps a tapped Avatar on a bordering cell in the same region. An enemy minion two steps away is not untapped.",
+      "plainLanguage": "Genesis that untaps adjacent allies offers an engine-issued choice after entry; a tapped Avatar on a bordering cell in the same region can be selected, while an enemy minion two steps away cannot.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesisUntapAdjacentAllies"
       ],
       "actionHints": [
-        "summon-minion"
+        "summon-minion",
+        "choose-ability"
       ],
       "eventHints": [
         "minion-summoned",
+        "ability-choice-committed",
         "avatar-untapped"
       ],
       "scenarioProof": {
@@ -12422,20 +12415,23 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Genesis that untaps adjacent allies does not untap a tapped Avatar sharing the newcomer's cell. Same-cell is not adjacent.",
+      "plainLanguage": "Genesis that untaps adjacent allies can select a tapped Avatar sharing the newcomer's cell; same-cell allies are included in the choice.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesisUntapAdjacentAllies"
       ],
       "actionHints": [
-        "summon-minion"
+        "summon-minion",
+        "choose-ability"
       ],
       "eventHints": [
-        "minion-summoned"
+        "minion-summoned",
+        "ability-choice-committed",
+        "avatar-untapped"
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_untap_adjacent_rules.rs",
-        "testName": "rule_catalog_0538_genesis_does_not_untap_a_same_cell_avatar"
+        "testName": "rule_catalog_0538_genesis_untaps_a_same_cell_avatar"
       }
     },
     {

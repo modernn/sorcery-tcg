@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use super::{
     ActionDescriptor, CardId, CardInstance, CardSource, Cell, DeferredMagicResolved, Game,
     OutcomeLog, Phase, Region, ResolutionContinuation, Seat, SitePosition, SummonPlacement,
-    UnitPosition, seat_index,
+    UnitPosition, UnitTarget, seat_index,
 };
 use crate::canonical::identity_hash;
 use crate::synthetic::selfplay_manifest_with;
@@ -100,6 +100,14 @@ fn manifest(seed: u32) -> String {
             "manaCost": 0,
             "thresholds": {"air": 0, "earth": 0, "fire": 0, "water": 0},
         });
+        manifest["cards"]["north-spell-5"] = json!({
+            "attack": 0,
+            "cardType": "minion",
+            "defense": 3,
+            "genesisMayDamageTargetAdjacentUnit": 2,
+            "manaCost": 0,
+            "thresholds": {"air": 0, "earth": 0, "fire": 0, "water": 0},
+        });
     })
 }
 
@@ -134,15 +142,9 @@ fn fixture(seed: u32) -> Game {
 }
 
 fn trigger(game: &Game, seat: Seat, source: &UnitPosition) -> super::GenesisTrigger {
-    game.genesis_trigger(
-        seat,
-        &source.card.instance_id,
-        source.card.card_id,
-        None,
-        None,
-    )
-    .expect("Genesis trigger")
-    .expect("compiled Genesis")
+    game.genesis_trigger(seat, &source.card.instance_id, source.card.card_id)
+        .expect("Genesis trigger")
+        .expect("compiled Genesis")
 }
 
 fn order_action(game: &Game, instance_id: &str) -> super::IssuedAction {
@@ -157,6 +159,27 @@ fn order_action(game: &Game, instance_id: &str) -> super::IssuedAction {
             )
         })
         .expect("requested trigger order")
+}
+
+fn ability_action(
+    game: &Game,
+    source_instance_id: &str,
+    target: Option<&super::UnitTarget>,
+) -> super::IssuedAction {
+    game.legal_actions()
+        .expect("ability choice actions")
+        .into_iter()
+        .find(|action| {
+            matches!(
+                &action.descriptor,
+                ActionDescriptor::ChooseAbility {
+                    source_instance_id: actual_source,
+                    target: actual,
+                } if actual_source.as_str() == source_instance_id
+                    && actual.as_ref() == target
+            )
+        })
+        .expect("requested ability choice")
 }
 
 fn draw_sources(events: &[(String, Value)]) -> Vec<&str> {
@@ -399,6 +422,162 @@ fn simultaneous_uncompiled_genesis_rejects_without_partial_effects() {
 }
 
 #[test]
+fn singleton_targeted_genesis_declares_in_ability_choice_and_nap_resolves_first() {
+    let mut game = fixture(1110);
+    let active = unit(&game, "north-spell-5", Seat::North, "targeted-active", "C3");
+    let non_active = unit(
+        &game,
+        "north-spell-5",
+        Seat::South,
+        "targeted-non-active",
+        "C4",
+    );
+    let active_id = active.card.instance_id.clone();
+    let non_active_id = non_active.card.instance_id.clone();
+    game.position.units = vec![active.clone(), non_active.clone()];
+    game.begin_genesis_triggers(
+        vec![
+            trigger(&game, Seat::North, &active),
+            trigger(&game, Seat::South, &non_active),
+        ],
+        &mut OutcomeLog::Ignore,
+    )
+    .expect("targeted Genesis declarations");
+    assert_eq!(game.position.phase, Phase::AbilityChoice);
+    let active_target = UnitTarget::Minion {
+        instance_id: non_active_id.clone(),
+        seat: Seat::South,
+    };
+    let non_active_target = UnitTarget::Minion {
+        instance_id: active_id,
+        seat: Seat::North,
+    };
+    let active_choice = ability_action(
+        &game,
+        active.card.instance_id.as_str(),
+        Some(&active_target),
+    );
+    game.apply_action_recorded(&active_choice)
+        .expect("active Genesis declaration");
+    assert_eq!(game.position.phase, Phase::AbilityChoice);
+    let non_active_choice = ability_action(
+        &game,
+        non_active.card.instance_id.as_str(),
+        Some(&non_active_target),
+    );
+    let (events, _) = game
+        .apply_action_recorded(&non_active_choice)
+        .expect("non-active Genesis declaration");
+    let first_damage = events
+        .iter()
+        .find(|(kind, _)| kind == "genesis-damage-allocated")
+        .expect("Genesis damage");
+    assert_eq!(first_damage.1["sourceInstanceId"], json!(non_active_id));
+}
+
+#[test]
+fn multiple_targeted_genesis_declare_every_source_before_resolution() {
+    let mut game = fixture(1111);
+    let first = unit(&game, "north-spell-5", Seat::North, "targeted-first", "C3");
+    let second = unit(&game, "north-spell-5", Seat::North, "targeted-second", "C4");
+    let first_id = first.card.instance_id.clone();
+    let second_id = second.card.instance_id.clone();
+    game.position.units = vec![first.clone(), second.clone()];
+    game.begin_genesis_triggers(
+        vec![
+            trigger(&game, Seat::North, &first),
+            trigger(&game, Seat::North, &second),
+        ],
+        &mut OutcomeLog::Ignore,
+    )
+    .expect("targeted Genesis declarations");
+    assert_eq!(game.position.phase, Phase::TriggerOrder);
+    assert!(
+        game.legal_actions()
+            .expect("declaration actions")
+            .iter()
+            .any(|action| matches!(action.descriptor, ActionDescriptor::ChooseAbility { .. }))
+    );
+    assert_eq!(game.position.units.len(), 2);
+    let first_target = UnitTarget::Minion {
+        instance_id: second_id.clone(),
+        seat: Seat::North,
+    };
+    let first_choice = ability_action(&game, first_id.as_str(), Some(&first_target));
+    game.apply_action_recorded(&first_choice)
+        .expect("first declaration");
+    assert_eq!(game.position.phase, Phase::AbilityChoice);
+    let second_target = UnitTarget::Minion {
+        instance_id: first_id,
+        seat: Seat::North,
+    };
+    let second_choice = ability_action(&game, second_id.as_str(), Some(&second_target));
+    game.apply_action_recorded(&second_choice)
+        .expect("second declaration");
+}
+
+#[test]
+fn pending_targeted_genesis_clone_replays_identically() {
+    let mut game = fixture(1112);
+    let source = unit(&game, "north-spell-5", Seat::North, "clone-targeted", "C3");
+    let target = unit(&game, "north-spell-1", Seat::South, "clone-target", "C4");
+    game.position.units = vec![source.clone(), target.clone()];
+    game.begin_genesis_triggers(
+        vec![trigger(&game, Seat::North, &source)],
+        &mut OutcomeLog::Ignore,
+    )
+    .expect("targeted Genesis declaration");
+    assert_eq!(game.position.phase, Phase::AbilityChoice);
+    let checkpoint = game.clone();
+    let target = UnitTarget::Minion {
+        instance_id: target.card.instance_id.clone(),
+        seat: Seat::South,
+    };
+    let action = ability_action(&game, source.card.instance_id.as_str(), Some(&target));
+    let result = game.apply_action_recorded(&action).expect("choice replay");
+    let mut replay = checkpoint;
+    assert_eq!(
+        result,
+        replay
+            .apply_action_recorded(&action)
+            .expect("choice replay")
+    );
+    assert_eq!(game.authoritative_state(), replay.authoritative_state());
+}
+
+#[test]
+fn declining_optional_targeted_genesis_does_not_break_ward() {
+    let mut game = fixture(1113);
+    let source = unit(
+        &game,
+        "north-spell-5",
+        Seat::North,
+        "decline-targeted",
+        "C3",
+    );
+    let mut target = unit(&game, "north-spell-1", Seat::South, "decline-target", "C4");
+    target.warded = true;
+    let target_id = target.card.instance_id.clone();
+    game.position.units = vec![source.clone(), target];
+    game.begin_genesis_triggers(
+        vec![trigger(&game, Seat::North, &source)],
+        &mut OutcomeLog::Ignore,
+    )
+    .expect("optional Genesis declaration");
+    let action = ability_action(&game, source.card.instance_id.as_str(), None);
+    game.apply_action_recorded(&action)
+        .expect("decline optional Genesis");
+    assert!(
+        game.position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == target_id)
+            .expect("target remains")
+            .warded
+    );
+}
+
+#[test]
 fn terminal_genesis_skips_remaining_triggers_and_completes_held_magic_once() {
     let mut game = fixture(1107);
     let first = unit(&game, "north-spell-1", Seat::North, "terminal-first", "C3");
@@ -460,4 +639,36 @@ fn terminal_genesis_skips_remaining_triggers_and_completes_held_magic_once() {
             .any(|(kind, _)| kind == "genesis-damage-allocated")
     );
     assert_eq!(game.position.units.len(), 2);
+}
+
+#[test]
+fn untargeted_trigger_can_be_ordered_before_an_undeclared_targeted_trigger() {
+    let mut game = fixture(1114);
+    let draw = unit(&game, "north-spell-1", Seat::North, "mixed-draw", "C3");
+    let targeted = unit(&game, "north-spell-5", Seat::North, "mixed-targeted", "C3");
+    game.position.units = vec![draw.clone(), targeted.clone()];
+    let hand_size = game.position.players[0].hand_spellbook.len();
+    game.begin_genesis_triggers(
+        vec![
+            trigger(&game, Seat::North, &draw),
+            trigger(&game, Seat::North, &targeted),
+        ],
+        &mut OutcomeLog::Ignore,
+    )
+    .expect("mixed trigger group");
+    let order = order_action(&game, draw.card.instance_id.as_str());
+    let _declaration = ability_action(&game, targeted.card.instance_id.as_str(), None);
+    let (events, _) = game
+        .apply_action_recorded(&order)
+        .expect("order draw first");
+    assert!(
+        draw_sources(&events).is_empty(),
+        "no effect before all declarations"
+    );
+    assert_eq!(game.position.phase, Phase::AbilityChoice);
+    let decline = ability_action(&game, targeted.card.instance_id.as_str(), None);
+    game.apply_action_recorded(&decline)
+        .expect("finish declaring group");
+    assert_eq!(game.position.phase, Phase::Main);
+    assert_eq!(game.position.players[0].hand_spellbook.len(), hand_size + 1);
 }

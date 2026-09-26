@@ -1155,16 +1155,22 @@ fn rule_catalog_0172_oversized_adjacent_genesis_reaches_units_bordering_any_foot
         &["north-giant"],
     );
     let enemy = establish_north_square_and_south_c2(&mut session);
-    let (_, receipt) = accept_where(&mut session, |descriptor| {
+    let (summon, entry_receipt) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == "north-giant"
             && descriptor["cell"] == "B3"
-            && descriptor["genesisDamageTarget"]["instanceId"] == enemy
+    });
+    assert_eq!(event_types(&entry_receipt), ["minion-summoned"]);
+    let source_id = summon["cardInstanceId"].as_str().expect("giant identity");
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "choose-ability"
+            && descriptor["sourceInstanceId"] == source_id
+            && descriptor["target"]["instanceId"] == enemy
     });
     assert_eq!(
         event_types(&receipt),
         [
-            "minion-summoned",
+            "ability-choice-committed",
             "genesis-damage-allocated",
             "damage-dealt"
         ]

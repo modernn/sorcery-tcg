@@ -15,6 +15,7 @@ pub(super) struct CompiledAbilities {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct CompiledAbility {
     pub(super) selection: Option<SelectionSpec>,
+    pub(super) optional_selection: bool,
     pub(super) effects: Box<[Effect]>,
 }
 
@@ -37,18 +38,28 @@ pub(super) enum SelectionSpec {
     },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct UnitChoiceSpec {
+    pub(super) kind: Option<super::UnitKind>,
+    pub(super) relation: SpatialRelation,
+    pub(super) allied_only: bool,
+    pub(super) optional: bool,
+}
+
 /// An operation understood by the first effect-frame slice.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Effect {
     Damage { recipients: UnitSet, amount: u16 },
     Untap { recipients: UnitSet },
     Draw { zone: DeckZone, count: u8 },
+    ChooseUnit(UnitChoiceSpec),
 }
 
 /// A fixed recipient query for a compiled operation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum UnitSet {
     Target,
+    Chosen,
     Location,
     OtherUnitsHere,
     SurfaceMinions,
@@ -105,8 +116,17 @@ fn ability_with_selection<const N: usize>(
     selection: Option<SelectionSpec>,
     effects: [Effect; N],
 ) -> CompiledAbility {
+    ability_with_options(selection, false, effects)
+}
+
+fn ability_with_options<const N: usize>(
+    selection: Option<SelectionSpec>,
+    optional_selection: bool,
+    effects: [Effect; N],
+) -> CompiledAbility {
     CompiledAbility {
         selection,
+        optional_selection,
         effects: Box::new(effects),
     }
 }
@@ -232,9 +252,32 @@ fn compile_genesis(facts: &MinionFacts) -> Option<CompiledAbility> {
             amount: 1,
         }]));
     }
-
-    // Adjacent-allies Genesis currently needs an entry-time engine-issued choice.
-    // Keep it on the legacy path until that declaration is part of the frame.
+    if facts.genesis_may_damage_target_adjacent_unit {
+        return Some(ability_with_options(
+            Some(SelectionSpec::Unit {
+                kind: None,
+                relation: SpatialRelation::Adjacent,
+            }),
+            true,
+            [Effect::Damage {
+                recipients: UnitSet::Target,
+                amount: 2,
+            }],
+        ));
+    }
+    if facts.genesis_untap_adjacent_allies {
+        return Some(ability([
+            Effect::ChooseUnit(UnitChoiceSpec {
+                kind: None,
+                relation: SpatialRelation::Adjacent,
+                allied_only: true,
+                optional: false,
+            }),
+            Effect::Untap {
+                recipients: UnitSet::Chosen,
+            },
+        ]));
+    }
     None
 }
 
@@ -242,7 +285,9 @@ fn compile_genesis(facts: &MinionFacts) -> Option<CompiledAbility> {
 mod tests {
     use serde_json::json;
 
-    use super::{CompiledAbilities, Effect, SelectionSpec, SpatialRelation, UnitSet};
+    use super::{
+        CompiledAbilities, Effect, SelectionSpec, SpatialRelation, UnitChoiceSpec, UnitSet,
+    };
     use crate::facts::parse_card_definition;
     use crate::game::UnitKind;
 
@@ -410,5 +455,54 @@ mod tests {
         .genesis
         .expect("compiled genesis");
         assert_eq!(genesis.selection, None);
+    }
+
+    #[test]
+    fn optional_genesis_damage_lowers_to_adjacent_target_selection() {
+        let genesis = CompiledAbilities::from_facts(&minion(&json!({
+            "genesisMayDamageTargetAdjacentUnit": 2
+        })))
+        .genesis
+        .expect("compiled genesis");
+        assert!(genesis.optional_selection);
+        assert_eq!(
+            genesis.selection,
+            Some(SelectionSpec::Unit {
+                kind: None,
+                relation: SpatialRelation::Adjacent,
+            })
+        );
+        assert_eq!(
+            genesis.effects.as_ref(),
+            &[Effect::Damage {
+                recipients: UnitSet::Target,
+                amount: 2,
+            }]
+        );
+    }
+
+    #[test]
+    fn genesis_untap_lowers_to_choice_then_untap() {
+        let genesis = CompiledAbilities::from_facts(&minion(&json!({
+            "genesisUntapAdjacentAllies": true
+        })))
+        .genesis
+        .expect("compiled genesis");
+        assert!(!genesis.optional_selection);
+        assert_eq!(genesis.selection, None);
+        assert_eq!(
+            genesis.effects.as_ref(),
+            &[
+                Effect::ChooseUnit(UnitChoiceSpec {
+                    kind: None,
+                    relation: SpatialRelation::Adjacent,
+                    allied_only: true,
+                    optional: false,
+                }),
+                Effect::Untap {
+                    recipients: UnitSet::Chosen,
+                },
+            ]
+        );
     }
 }

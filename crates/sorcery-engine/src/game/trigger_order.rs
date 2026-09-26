@@ -4,6 +4,9 @@ use super::{GameError, IdentityHash, Seat};
 pub(super) trait TriggerSource {
     fn controller(&self) -> Seat;
     fn instance_id(&self) -> &IdentityHash;
+    fn needs_declaration(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -31,8 +34,12 @@ impl<T: TriggerSource> TriggerBatch<T> {
         let (active, non_active): (Vec<_>, Vec<_>) = sources
             .into_iter()
             .partition(|source| source.controller() == active_seat);
-        let active_needs_order = active.len() > 1;
-        let non_active_needs_order = non_active.len() > 1;
+        let active_needs_order =
+            active.len() > 1 || active.first().is_some_and(TriggerSource::needs_declaration);
+        let non_active_needs_order = non_active.len() > 1
+            || non_active
+                .first()
+                .is_some_and(TriggerSource::needs_declaration);
         let stage = if active_needs_order {
             TriggerOrderStage::ActiveOrder
         } else if non_active_needs_order {
@@ -72,10 +79,22 @@ impl<T: TriggerSource> TriggerBatch<T> {
 
     pub(super) fn pending_order(&self) -> Option<&[T]> {
         match self.stage {
-            TriggerOrderStage::ActiveOrder if self.active_remaining.len() > 1 => {
+            TriggerOrderStage::ActiveOrder
+                if self.active_remaining.len() > 1
+                    || self
+                        .active_remaining
+                        .first()
+                        .is_some_and(TriggerSource::needs_declaration) =>
+            {
                 Some(&self.active_remaining)
             }
-            TriggerOrderStage::NonActiveOrder if self.non_active_remaining.len() > 1 => {
+            TriggerOrderStage::NonActiveOrder
+                if self.non_active_remaining.len() > 1
+                    || self
+                        .non_active_remaining
+                        .first()
+                        .is_some_and(TriggerSource::needs_declaration) =>
+            {
                 Some(&self.non_active_remaining)
             }
             TriggerOrderStage::ActiveOrder
@@ -93,25 +112,28 @@ impl<T: TriggerSource> TriggerBatch<T> {
         } else {
             return Err(GameError::IllegalAction);
         };
-        if remaining.len() < 2 {
+        if remaining.is_empty() {
             return Err(GameError::IllegalAction);
         }
         let index = remaining
             .iter()
             .position(|source| source.instance_id() == source_instance_id)
             .ok_or(GameError::IllegalAction)?;
+        if remaining[index].needs_declaration() {
+            return Err(GameError::IllegalAction);
+        }
         committed.push(remaining.remove(index));
-        if remaining.len() == 1 {
+        if remaining.len() == 1 && !remaining[0].needs_declaration() {
             committed.push(remaining.remove(0));
         }
-        if remaining.len() > 1 {
+        if !remaining.is_empty() {
             return Ok(());
         }
-        if active_stage && self.non_active_remaining.len() > 1 {
+        if active_stage && !self.non_active_remaining.is_empty() {
             self.stage = TriggerOrderStage::NonActiveOrder;
-            return Ok(());
+        } else {
+            self.start_resolving();
         }
-        self.start_resolving();
         Ok(())
     }
 }

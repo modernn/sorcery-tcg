@@ -122,6 +122,22 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
     (descriptor, receipt)
 }
 
+fn choose_ability(session: &mut Session, source_id: &str, target: Option<&str>) -> Receipt {
+    assert_eq!(
+        session.replay_value().expect("authoritative replay")["state"]["phase"],
+        "ability-choice"
+    );
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "choose-ability"
+            && descriptor["sourceInstanceId"] == source_id
+            && match target {
+                Some(target_id) => descriptor["target"]["instanceId"] == target_id,
+                None => descriptor.get("target").is_none_or(Value::is_null),
+            }
+    });
+    receipt
+}
+
 fn keep(session: &mut Session) {
     accept_where(session, |descriptor| {
         descriptor["kind"] == "mulligan"
@@ -614,7 +630,7 @@ fn rule_catalog_0856_optional_targeted_genesis_damage_issues_decline_and_nearby_
         .as_str()
         .expect("enemy identity")
         .to_owned();
-    let choices: Vec<_> = checkpoint
+    let summon_choices: Vec<_> = checkpoint
         .legal_actions()
         .expect("legal actions")
         .into_iter()
@@ -624,50 +640,50 @@ fn rule_catalog_0856_optional_targeted_genesis_damage_issues_decline_and_nearby_
                 && action.descriptor["cell"] == "C4"
         })
         .collect();
-    assert_eq!(choices.len(), 4);
-    assert_eq!(choices[0].descriptor["genesisDamageChoice"], "decline");
-    assert!(choices[0].descriptor.get("genesisDamageTarget").is_none());
-    assert_eq!(
-        choices[0].label,
-        "Summon north-minion at C4 (0 mana); decline Genesis"
-    );
-    let mut expected_target_ids = [source_id.clone(), avatar_id.clone(), enemy_id.clone()];
-    expected_target_ids.sort();
-    assert_eq!(
-        choices[1..]
-            .iter()
-            .map(|action| {
-                assert_eq!(action.descriptor["genesisDamageChoice"], "target");
-                action.descriptor["genesisDamageTarget"]["instanceId"]
-                    .as_str()
-                    .expect("target identity")
-            })
-            .collect::<Vec<_>>(),
-        expected_target_ids
-    );
+    assert_eq!(summon_choices.len(), 1);
     assert_checkpoint_round_trip(&checkpoint);
 
     let mut declined = checkpoint.clone();
-    let (_, declined_receipt) = accept_where(&mut declined, |descriptor| {
+    let (_, summon_receipt) = accept_where(&mut declined, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardInstanceId"] == source_id
             && descriptor["cell"] == "C4"
-            && descriptor["genesisDamageChoice"] == "decline"
     });
-    assert_eq!(event_types(&declined_receipt), ["minion-summoned"]);
+    assert_eq!(event_types(&summon_receipt), ["minion-summoned"]);
+    let ability_choices: Vec<_> = declined
+        .legal_actions()
+        .expect("ability choices")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "choose-ability"
+                && action.descriptor["sourceInstanceId"] == source_id
+        })
+        .collect();
+    assert_eq!(ability_choices.len(), 4);
+    let mut target_ids: Vec<_> = ability_choices
+        .iter()
+        .filter_map(|action| action.descriptor["target"]["instanceId"].as_str())
+        .collect();
+    target_ids.sort_unstable();
+    let mut expected_target_ids = vec![source_id.as_str(), avatar_id.as_str(), enemy_id.as_str()];
+    expected_target_ids.sort_unstable();
+    assert_eq!(target_ids, expected_target_ids);
+    let declined_receipt = choose_ability(&mut declined, &source_id, None);
+    assert_eq!(event_types(&declined_receipt), ["ability-choice-committed"]);
     assert_exact_replay(&declined);
 
     let mut avatar_targeted = checkpoint.clone();
-    let (_, avatar_receipt) = accept_where(&mut avatar_targeted, |descriptor| {
+    let (_, summon_receipt) = accept_where(&mut avatar_targeted, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardInstanceId"] == source_id
             && descriptor["cell"] == "C4"
-            && descriptor["genesisDamageTarget"]["instanceId"] == avatar_id
     });
+    assert_eq!(event_types(&summon_receipt), ["minion-summoned"]);
+    let avatar_receipt = choose_ability(&mut avatar_targeted, &source_id, Some(&avatar_id));
     assert_eq!(
         event_types(&avatar_receipt),
         [
-            "minion-summoned",
+            "ability-choice-committed",
             "genesis-damage-allocated",
             "damage-dealt",
             "avatar-life-lost"
@@ -688,20 +704,16 @@ fn rule_catalog_0856_optional_targeted_genesis_damage_issues_decline_and_nearby_
     assert_exact_replay(&avatar_targeted);
 
     let mut warded = checkpoint;
-    let (_, warded_receipt) = accept_where(&mut warded, |descriptor| {
+    let (_, summon_receipt) = accept_where(&mut warded, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardInstanceId"] == source_id
             && descriptor["cell"] == "C4"
-            && descriptor["genesisDamageTarget"]["instanceId"] == enemy_id
     });
+    assert_eq!(event_types(&summon_receipt), ["minion-summoned"]);
+    let warded_receipt = choose_ability(&mut warded, &source_id, Some(&enemy_id));
     assert_eq!(
         event_types(&warded_receipt),
-        [
-            "minion-summoned",
-            "genesis-damage-allocated",
-            "damage-dealt",
-            "ward-broken"
-        ]
+        ["ability-choice-committed", "ward-broken"]
     );
     let warded_state = state(&warded);
     let survivor = warded_state["realm"]["units"]
@@ -771,26 +783,26 @@ fn rule_catalog_0481_targeted_genesis_alt_payment_decline_discards_and_summons()
                 && action.descriptor["paymentMode"] == "random-card-discard"
         })
         .collect();
-    assert!(
-        alt_summons
-            .iter()
-            .any(|action| action.descriptor["genesisDamageChoice"] == "decline")
-    );
+    assert_eq!(alt_summons.len(), 1);
     let mut session = checkpoint;
-    let (_, receipt) = accept_where(&mut session, |descriptor| {
+    let (_, summon_receipt) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardInstanceId"] == source_id
             && descriptor["cell"] == "C4"
             && descriptor["paymentMode"] == "random-card-discard"
-            && descriptor["genesisDamageChoice"] == "decline"
     });
-    assert_eq!(event_types(&receipt), ["card-discarded", "minion-summoned"]);
-    assert_eq!(receipt.events[1].payload["manaPaid"], 0);
-    assert_eq!(receipt.random_draws.len(), 1);
     assert_eq!(
-        receipt.random_draws[0]["purpose"],
+        event_types(&summon_receipt),
+        ["card-discarded", "minion-summoned"]
+    );
+    assert_eq!(summon_receipt.events[1].payload["manaPaid"], 0);
+    assert_eq!(summon_receipt.random_draws.len(), 1);
+    assert_eq!(
+        summon_receipt.random_draws[0]["purpose"],
         "summon_random_card_discard_cost"
     );
+    let receipt = choose_ability(&mut session, &source_id, None);
+    assert_eq!(event_types(&receipt), ["ability-choice-committed"]);
     assert_exact_replay(&session);
 }
 
@@ -798,25 +810,28 @@ fn rule_catalog_0481_targeted_genesis_alt_payment_decline_discards_and_summons()
 fn rule_catalog_0482_targeted_genesis_alt_payment_target_deals_damage() {
     let (checkpoint, source_id, avatar_id) = targeted_genesis_alt_payment_checkpoint();
     let mut session = checkpoint;
-    let (_, receipt) = accept_where(&mut session, |descriptor| {
+    let (_, summon_receipt) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardInstanceId"] == source_id
             && descriptor["cell"] == "C4"
             && descriptor["paymentMode"] == "random-card-discard"
-            && descriptor["genesisDamageTarget"]["instanceId"] == avatar_id
     });
+    assert_eq!(
+        event_types(&summon_receipt),
+        ["card-discarded", "minion-summoned"]
+    );
+    let receipt = choose_ability(&mut session, &source_id, Some(&avatar_id));
     assert_eq!(
         event_types(&receipt),
         [
-            "card-discarded",
-            "minion-summoned",
+            "ability-choice-committed",
             "genesis-damage-allocated",
             "damage-dealt",
             "avatar-life-lost"
         ]
     );
     assert_eq!(
-        receipt.events[2].payload,
+        receipt.events[1].payload,
         json!({
             "amount": 2,
             "sourceInstanceId": source_id,
@@ -941,24 +956,21 @@ fn rule_catalog_0499_targeted_genesis_sacrifice_decline_sacrifices_and_summons()
                 && action.descriptor["sacrificedMinionInstanceIds"] == json!([local_id.clone()])
         })
         .collect();
-    assert!(
-        sacrifice_summons
-            .iter()
-            .any(|action| action.descriptor["genesisDamageChoice"] == "decline")
-    );
+    assert_eq!(sacrifice_summons.len(), 1);
     let mut session = checkpoint;
-    let (_, receipt) = accept_where(&mut session, |descriptor| {
+    let (_, summon_receipt) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardInstanceId"] == source_id
             && descriptor["cell"] == "C4"
             && descriptor["sacrificedMinionInstanceIds"] == json!([local_id])
-            && descriptor["genesisDamageChoice"] == "decline"
     });
     assert_eq!(
-        event_types(&receipt),
+        event_types(&summon_receipt),
         ["minion-sacrificed", "minion-died", "minion-summoned"]
     );
-    assert_eq!(receipt.events[2].payload["manaPaid"], 0);
+    assert_eq!(summon_receipt.events[2].payload["manaPaid"], 0);
+    let receipt = choose_ability(&mut session, &source_id, None);
+    assert_eq!(event_types(&receipt), ["ability-choice-committed"]);
     assert_exact_replay(&session);
 }
 
@@ -966,26 +978,28 @@ fn rule_catalog_0499_targeted_genesis_sacrifice_decline_sacrifices_and_summons()
 fn rule_catalog_0500_targeted_genesis_sacrifice_target_deals_damage() {
     let (checkpoint, source_id, avatar_id, local_id) = targeted_genesis_sacrifice_checkpoint();
     let mut session = checkpoint;
-    let (_, receipt) = accept_where(&mut session, |descriptor| {
+    let (_, summon_receipt) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardInstanceId"] == source_id
             && descriptor["cell"] == "C4"
             && descriptor["sacrificedMinionInstanceIds"] == json!([local_id])
-            && descriptor["genesisDamageTarget"]["instanceId"] == avatar_id
     });
+    assert_eq!(
+        event_types(&summon_receipt),
+        ["minion-sacrificed", "minion-died", "minion-summoned"]
+    );
+    let receipt = choose_ability(&mut session, &source_id, Some(&avatar_id));
     assert_eq!(
         event_types(&receipt),
         [
-            "minion-sacrificed",
-            "minion-died",
-            "minion-summoned",
+            "ability-choice-committed",
             "genesis-damage-allocated",
             "damage-dealt",
             "avatar-life-lost"
         ]
     );
     assert_eq!(
-        receipt.events[3].payload,
+        receipt.events[1].payload,
         json!({
             "amount": 2,
             "sourceInstanceId": source_id,
