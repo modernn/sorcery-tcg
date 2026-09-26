@@ -136,11 +136,18 @@ Independent next-strike doubling grants multiply separately: two grants produce
 four times the strike damage, including repeated grants from the same source.
 They leave current power unchanged and are all consumed by the qualifying strike.
 
-Additive bonuses combined with temporary or nearby doubling require controller-owned
-damage-replacement ordering. Until those choices exist, exercised combinations fail
-explicitly, including combinations using the legacy Lance counter. This is an
-unsupported interaction, not a fixed arithmetic ordering. Replacement ordering is
-still needed before the old Lance counter can be removed or new Lance cards admitted.
+Ranged strikes combine carried additive bonuses and nearby doubling through a shared
+replacement queue. The active player applies their effects first, then the other
+player. A carried artifact follows bearer control; an uncontrolled artifact follows
+its owner for ordering. Mixed arithmetic offers `choose-damage-modifier` actions;
+commuting effects resolve automatically. Pending choices retain source incarnations,
+are visible to clients, and resume through checkpoints before prevention, source
+consumption, deaths, and the optional post-strike step.
+
+Other strike paths and combinations involving temporary doubling still reject mixed
+additive/doubling interactions explicitly. Extending the shared queue to simultaneous
+fights and effect-driven strikes, and retaining lasting-effect control provenance,
+remains necessary before removing the old Lance counter or admitting new Lance cards.
 
 Minion `entersCarrying` lists 1–32 carriable artifact-token references, with repeated
 references creating separate artifacts. It lowers to restricted carried-token effects,

@@ -35,6 +35,7 @@ const NORTH_AVATAR: &str =
 
 fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
     match descriptor {
+        ActionDescriptor::ChooseDamageModifier { .. } => "choose-damage-modifier",
         ActionDescriptor::ActivateAreaDamage { .. } => "activate-area-damage",
         ActionDescriptor::ActivateArtifactDamage { .. } => "activate-artifact-damage",
         ActionDescriptor::ActivateArtifactDiscardAreaDamage { .. } => {

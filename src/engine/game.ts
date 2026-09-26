@@ -866,6 +866,35 @@ type PendingCombat = Readonly<{
   targetRemoved: boolean;
 }>;
 
+export type PendingDamageOrder = Readonly<{
+  activeSeat: GameSeat;
+  amount: number;
+  continuation: Readonly<{
+    kind: 'ranged-strike';
+    returnPhase: GamePhase;
+    seat: GameSeat;
+    shooterInstanceId: StateHash;
+    stepAfter: boolean;
+    strike: Readonly<{
+      additiveBonus: number;
+      amount: number;
+      consumedArtifacts: readonly Readonly<{ instanceId: StateHash; realmEntry: number }>[];
+      currentPower: number;
+      lanceCount: number;
+      lethal: boolean;
+    }>;
+    target: GameUnitRef;
+  }>;
+  remaining: readonly Readonly<{
+    amount: number;
+    choosingSeat: GameSeat;
+    controller: GameSeat | null;
+    operation: 'add' | 'double';
+    owner: GameSeat;
+    source: Readonly<{ instanceId: StateHash; realmEntry: number }>;
+  }>[];
+}>;
+
 type PendingChainMagic = Readonly<{
   cardId: string;
   cardInstanceId: StateHash;
@@ -926,7 +955,7 @@ type PendingDeathriteBatch = Readonly<{
   stage: 'active-order' | 'non-active-order' | 'resolve';
 }>;
 
-type GamePhase = 'allocate' | 'attack' | 'cemetery-summon' | 'chain-magic' | 'trigger-order' | 'ability-choice' | 'defend' | 'discard-card' | 'draw' | 'end-turn-aura' | 'filtered-site-play' | 'genesis' | 'intercept' | 'main' | 'movement' | 'mulligan' | 'random-choice' | 'ranged-step' | 'start-turn' | 'terminal';
+type GamePhase = 'allocate' | 'attack' | 'cemetery-summon' | 'chain-magic' | 'damage-order' | 'trigger-order' | 'ability-choice' | 'defend' | 'discard-card' | 'draw' | 'end-turn-aura' | 'filtered-site-play' | 'genesis' | 'intercept' | 'main' | 'movement' | 'mulligan' | 'random-choice' | 'ranged-step' | 'start-turn' | 'terminal';
 
 type LeapAttackContinuation = Readonly<{
   ally: GameUnitRef;
@@ -1092,6 +1121,7 @@ export type GameState = Readonly<{
   pendingCemeterySummon?: PendingCemeterySummon;
   pendingChainMagic?: PendingChainMagic | null;
   pendingCombat: PendingCombat | null;
+  pendingDamageOrder?: PendingDamageOrder | null;
   pendingDeathrites?: PendingDeathrites | null;
   pendingDiscardCards?: PendingDiscardCards;
   pendingFilteredSitePlay?: PendingFilteredSitePlay;
@@ -1149,6 +1179,7 @@ export type GameObservation = Readonly<{
   activeSeat: GameSeat;
   decisionSeat: GameSeat;
   pendingCombat: PendingCombat | null;
+  pendingDamageOrder?: PendingDamageOrder | null;
   phase: GameState['phase'];
   players: Readonly<Record<GameSeat, ObservedPlayer>>;
   realm: Readonly<{
@@ -1424,6 +1455,7 @@ type GameActionDescriptor =
   | Readonly<{ kind: 'intercept'; unitInstanceId: StateHash }>
   | Readonly<{ kind: 'close-intercept' }>
   | Readonly<{ amount: number; kind: 'allocate-strike'; targetInstanceId: StateHash }>
+  | Readonly<{ kind: 'choose-damage-modifier'; modifierIndex: number }>
   | Readonly<{
     kind: 'activate-area-damage';
     sourceInstanceId: StateHash;

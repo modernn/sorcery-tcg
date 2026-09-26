@@ -30,6 +30,9 @@ mod ability;
 #[cfg(test)]
 mod bearer_strike_tests;
 mod choices;
+mod damage_order;
+#[cfg(test)]
+mod damage_order_tests;
 mod effect;
 #[cfg(test)]
 mod entry_equipment_tests;
@@ -44,6 +47,7 @@ mod trigger_tests;
 mod triggers;
 use ability::{CompiledAbilities, SelectionSpec, SpatialRelation};
 use choices::PendingAbilityChoice;
+use damage_order::{PendingDamageOrder, RangedDamage};
 use effect::{AbilityEntry, EffectFrame, RealmReference};
 use modifiers::{TemporaryModifierKind, TemporaryModifiers};
 use resolution::{SiteGenesisTail, TokenEntryContinuation};
@@ -88,6 +92,7 @@ pub struct Position {
     pending_deathrites: Option<PendingDeathrites>,
     pending_trigger_order: Option<Box<PendingTriggerOrder>>,
     pending_ability_choice: Option<Box<PendingAbilityChoice>>,
+    pending_damage_order: Option<Box<PendingDamageOrder>>,
     pending_genesis_spell: PendingField<PendingGenesisSpell>,
     pending_genesis_spell_order: PendingField<PendingGenesisSpellOrder>,
     pending_genesis_token: PendingField<PendingGenesisToken>,
@@ -1002,6 +1007,7 @@ impl<T> PendingField<T> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Phase {
     AbilityChoice,
+    DamageOrder,
     Allocate,
     Attack,
     CemeterySummon,
@@ -1050,6 +1056,7 @@ impl Phase {
     const fn as_str(self) -> &'static str {
         match self {
             Self::AbilityChoice => "ability-choice",
+            Self::DamageOrder => "damage-order",
             Self::Allocate => "allocate",
             Self::Attack => "attack",
             Self::CemeterySummon => "cemetery-summon",
@@ -1144,7 +1151,7 @@ struct UnitDamageSource {
     lethal: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct StrikeStats {
     amount: u16,
     additive_bonus: u16,
@@ -1841,6 +1848,7 @@ impl Game {
                 pending_deathrites: None,
                 pending_trigger_order: None,
                 pending_ability_choice: None,
+                pending_damage_order: None,
                 pending_genesis_spell: PendingField::Absent,
                 pending_genesis_spell_order: PendingField::Absent,
                 pending_genesis_token: PendingField::Absent,
@@ -2179,7 +2187,7 @@ impl Game {
         if let Some(immobile_areas) = immobile_areas {
             realm["immobileAreas"] = json!(immobile_areas);
         }
-        Ok(json!({
+        let mut view = json!({
             "activeSeat": self.position.active_seat,
             "decisionSeat": self.position.decision_seat,
             "pendingCombat": self
@@ -2198,7 +2206,11 @@ impl Game {
             "terminal": self.terminal_value(),
             "turnNumber": self.position.turn_number,
             "viewer": viewer,
-        }))
+        });
+        if let Some(pending) = &self.position.pending_damage_order {
+            view["pendingDamageOrder"] = pending.value();
+        }
+        Ok(view)
     }
 
     fn observed_player(&self, owner: Seat, viewer: Seat) -> Result<Value, GameError> {
@@ -2361,6 +2373,7 @@ impl Game {
             Phase::ChainMagic => self.append_chain_magic_actions(&mut actions)?,
             Phase::TriggerOrder => self.append_trigger_order_actions(&mut actions)?,
             Phase::AbilityChoice => self.append_ability_choice_actions(&mut actions)?,
+            Phase::DamageOrder => self.append_damage_order_actions(&mut actions)?,
             Phase::Defend => self.append_defend_actions(&mut actions)?,
             Phase::DiscardCard => self.append_discard_card_actions(&mut actions)?,
             Phase::Draw => self.append_draw_actions(&mut actions)?,
@@ -4189,23 +4202,29 @@ impl Game {
         seat: Seat,
         instance_id: &IdentityHash,
     ) -> Result<u16, GameError> {
-        let region = self.combatant_region(kind, seat, instance_id)?;
-        let cells = self.combatant_occupied_cells(kind, seat, instance_id)?;
         let doubles = self
-            .position
-            .artifacts
-            .iter()
-            .filter(|artifact| {
-                self.artifact_doubles_nearby_unit_strikes(artifact)
-                    && self.artifact_location(artifact).is_ok_and(|location| {
-                        location.region == region
-                            && Self::footprints_nearby(cells, std::slice::from_ref(&location.cell))
-                    })
-            })
+            .nearby_unit_strike_sources(kind, seat, instance_id)?
             .count();
         1_u16
             .checked_shl(u32::try_from(doubles).map_err(|_| GameError::IllegalAction)?)
             .ok_or(GameError::IllegalAction)
+    }
+
+    fn nearby_unit_strike_sources(
+        &self,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+    ) -> Result<impl Iterator<Item = &ArtifactPosition>, GameError> {
+        let region = self.combatant_region(kind, seat, instance_id)?;
+        let cells = self.combatant_occupied_cells(kind, seat, instance_id)?;
+        Ok(self.position.artifacts.iter().filter(move |artifact| {
+            self.artifact_doubles_nearby_unit_strikes(artifact)
+                && self.artifact_location(artifact).is_ok_and(|location| {
+                    location.region == region
+                        && Self::footprints_nearby(cells, std::slice::from_ref(&location.cell))
+                })
+        }))
     }
 
     fn nearby_unit_strike_amount(
@@ -10143,6 +10162,9 @@ impl Game {
             _ => None,
         };
         let applied = match &action.descriptor {
+            ActionDescriptor::ChooseDamageModifier { modifier_index } => {
+                self.apply_damage_order_action(*modifier_index, outcomes)
+            }
             ActionDescriptor::ActivateAreaDamage { .. } => {
                 self.apply_area_damage_action(action, outcomes)
             }
@@ -10370,6 +10392,9 @@ impl Game {
             ActionDescriptor::ResolveRandomOutcome { .. } => Err(GameError::IllegalAction),
         };
         applied?;
+        if self.position.pending_damage_order.is_some() {
+            return Ok(());
+        }
         let settlement_start = outcomes.len();
         self.settle_region_occupancy(outcomes)?;
         self.settle_nearby_enemy_stealth(outcomes);
@@ -10428,10 +10453,6 @@ impl Game {
         Ok(())
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one Ranged transaction keeps strike, death, and continuation ordering explicit"
-    )]
     fn apply_ranged_projectile_action(
         &mut self,
         action: &IssuedAction,
@@ -10491,17 +10512,64 @@ impl Game {
             return Ok(());
         };
         let strike = strike.ok_or(GameError::IllegalAction)?;
+        let return_phase = if movement.is_some() {
+            Phase::Movement
+        } else {
+            Phase::Main
+        };
         let target_kind = match target {
             UnitTarget::Avatar { .. } => UnitKind::Avatar,
             UnitTarget::Minion { .. } => UnitKind::Minion,
         };
-        let amount = self.nearby_unit_strike_amount(
-            strike.amount,
-            strike.additive_bonus,
-            target_kind,
-            target.seat(),
-            target.instance_id(),
-        )?;
+        if strike.additive_bonus > 0
+            && self
+                .nearby_unit_strike_sources(target_kind, target.seat(), target.instance_id())?
+                .next()
+                .is_some()
+        {
+            let continuation = RangedDamage {
+                strike,
+                target: target.clone(),
+                shooter: shooter_instance_id.clone(),
+                seat: action.seat,
+                return_phase,
+                step_after: self.shooter_may_step_after_ranged_strike(shooter_instance_id),
+            };
+            self.begin_ranged_damage_order(continuation, outcomes)?;
+        } else {
+            let amount = self.nearby_unit_strike_amount(
+                strike.amount,
+                strike.additive_bonus,
+                target_kind,
+                target.seat(),
+                target.instance_id(),
+            )?;
+            self.finish_ranged_damage(
+                &strike,
+                target,
+                (action.seat, shooter_instance_id),
+                return_phase,
+                amount,
+                outcomes,
+            )?;
+        }
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    fn finish_ranged_damage(
+        &mut self,
+        strike: &StrikeStats,
+        target: &UnitTarget,
+        (seat, shooter_instance_id): (Seat, &IdentityHash),
+        return_phase: Phase,
+        amount: u16,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let target_kind = match target {
+            UnitTarget::Avatar { .. } => UnitKind::Avatar,
+            UnitTarget::Minion { .. } => UnitKind::Minion,
+        };
         outcomes.push("strike-damage-allocated", || {
             json!({
                 "amount": amount,
@@ -10520,16 +10588,11 @@ impl Game {
             },
             outcomes,
         )?;
-        self.consume_strike_artifacts(&strike, shooter_instance_id, outcomes)?;
+        self.consume_strike_artifacts(strike, shooter_instance_id, outcomes)?;
         if strike.lance_count > 0 {
-            self.break_lance(action.seat, shooter_instance_id, outcomes)?;
+            self.break_lance(seat, shooter_instance_id, outcomes)?;
         }
-        self.consume_next_strike_double(
-            UnitKind::Minion,
-            action.seat,
-            shooter_instance_id,
-            outcomes,
-        )?;
+        self.consume_next_strike_double(UnitKind::Minion, seat, shooter_instance_id, outcomes)?;
         let mut dead_minions = if strike.consumed_artifacts.is_empty() {
             Vec::new()
         } else {
@@ -10547,19 +10610,18 @@ impl Game {
                 } else {
                     &[]
                 },
-                if movement.is_some() {
+                if return_phase == Phase::Movement {
                     Phase::Movement
                 } else {
                     Phase::Main
                 },
-                action.seat,
+                seat,
                 outcomes,
             )?;
         }
         if self.position.pending_deathrites.is_none() {
             self.reconcile_projectile_continuations()?;
         }
-        self.position.state_version += 1;
         Ok(())
     }
 
@@ -24200,6 +24262,9 @@ impl Game {
         });
         if let Value::Object(object) = &mut value {
             self.insert_pending_genesis_state(object);
+            if let Some(pending) = &self.position.pending_damage_order {
+                object.insert("pendingDamageOrder".to_owned(), pending.value());
+            }
             if let Some(pending) = &self.position.pending_deathrites {
                 object.insert(
                     "pendingDeathrites".to_owned(),

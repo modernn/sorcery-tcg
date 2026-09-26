@@ -622,6 +622,11 @@ pub enum ActionDescriptor {
         /// Authoritative target identity.
         target_instance_id: IdentityHash,
     },
+    /// Choose one engine-issued damage modifier for the current strike.
+    ChooseDamageModifier {
+        /// Canonical index into the pending modifier choices.
+        modifier_index: u64,
+    },
     /// Commit one source first within the acting player's simultaneous triggers.
     OrderTriggers {
         /// Authoritative trigger source identity.
@@ -1107,6 +1112,9 @@ impl ActionDescriptor {
                 },
                 short_identity(source_instance_id)
             )),
+            Self::ChooseDamageModifier { modifier_index } => {
+                Some(format!("Choose damage modifier {modifier_index}"))
+            }
             Self::ResolveRandomOutcome { .. }
             | Self::ResolveStartTurnTrigger { .. }
             | Self::ResolveEndTurnAuraRandom { .. }
@@ -1155,6 +1163,14 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 },
             ) => compare_json_integers(*left_amount, *right_amount)
                 .then_with(|| left_target.cmp(right_target)),
+            (
+                ActionDescriptor::ChooseDamageModifier {
+                    modifier_index: left,
+                },
+                ActionDescriptor::ChooseDamageModifier {
+                    modifier_index: right,
+                },
+            ) => compare_json_integers(*left, *right),
             (
                 ActionDescriptor::ActivateMana {
                     amount: left_amount,
@@ -2273,54 +2289,55 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::ActivateArtifactDamage { .. } => 1,
         ActionDescriptor::ActivateArtifactDiscardAreaDamage { .. } => 2,
         ActionDescriptor::ActivateArtifactRollDamage { .. } => 3,
-        ActionDescriptor::ActivateArtifactSacrificeControl { .. } => 49,
-        ActionDescriptor::ActivateDiscardToGainControl { .. } => 50,
-        ActionDescriptor::DeclineFilteredSitePlay => 51,
+        ActionDescriptor::ActivateArtifactSacrificeControl { .. } => 50,
+        ActionDescriptor::ActivateDiscardToGainControl { .. } => 51,
+        ActionDescriptor::DeclineFilteredSitePlay => 52,
         ActionDescriptor::ActivateDiscardRandomDamage { .. } => 4,
         ActionDescriptor::ActivateMana { .. } => 5,
         ActionDescriptor::ActivateSiteDestruction { .. } => 6,
         ActionDescriptor::ActivateSparkmage { .. } => 7,
         ActionDescriptor::AllocateStrike { .. } => 8,
+        ActionDescriptor::ChooseDamageModifier { .. } => 16,
         ActionDescriptor::BeginChainMagic { .. } => 9,
         ActionDescriptor::CastArtifact { .. } => 10,
         ActionDescriptor::CastAura { .. } => 11,
         ActionDescriptor::CastMagic { .. } => 12,
-        ActionDescriptor::CloseDefend { .. } => 16,
-        ActionDescriptor::CloseIntercept {} => 17,
-        ActionDescriptor::ContinueBasicMovement { .. } => 18,
-        ActionDescriptor::DeclareAttack { .. } => 19,
-        ActionDescriptor::DeclineAttack => 20,
-        ActionDescriptor::Defend { .. } => 21,
-        ActionDescriptor::Draw { .. } => 22,
-        ActionDescriptor::DrawSite => 23,
-        ActionDescriptor::DrawSpell => 24,
-        ActionDescriptor::DropArtifacts { .. } => 25,
-        ActionDescriptor::EndTurn => 26,
-        ActionDescriptor::ResolveEndTurnAuraMove { .. } => 44,
-        ActionDescriptor::ResolveEndTurnAuraRandom { .. } => 45,
-        ActionDescriptor::ResolveRandomOutcome { .. } => 46,
-        ActionDescriptor::ResolveStartTurnTrigger { .. } => 47,
-        ActionDescriptor::DiscardCard { .. } => 48,
-        ActionDescriptor::ExtendChainMagic { .. } => 27,
-        ActionDescriptor::FlySite { .. } => 28,
-        ActionDescriptor::Intercept { .. } => 29,
-        ActionDescriptor::OrderTriggers { .. } => 30,
+        ActionDescriptor::CloseDefend { .. } => 17,
+        ActionDescriptor::CloseIntercept {} => 18,
+        ActionDescriptor::ContinueBasicMovement { .. } => 19,
+        ActionDescriptor::DeclareAttack { .. } => 20,
+        ActionDescriptor::DeclineAttack => 21,
+        ActionDescriptor::Defend { .. } => 22,
+        ActionDescriptor::Draw { .. } => 23,
+        ActionDescriptor::DrawSite => 24,
+        ActionDescriptor::DrawSpell => 25,
+        ActionDescriptor::DropArtifacts { .. } => 26,
+        ActionDescriptor::EndTurn => 27,
+        ActionDescriptor::ResolveEndTurnAuraMove { .. } => 45,
+        ActionDescriptor::ResolveEndTurnAuraRandom { .. } => 46,
+        ActionDescriptor::ResolveRandomOutcome { .. } => 47,
+        ActionDescriptor::ResolveStartTurnTrigger { .. } => 48,
+        ActionDescriptor::DiscardCard { .. } => 49,
+        ActionDescriptor::ExtendChainMagic { .. } => 28,
+        ActionDescriptor::FlySite { .. } => 29,
+        ActionDescriptor::Intercept { .. } => 30,
+        ActionDescriptor::OrderTriggers { .. } => 31,
         ActionDescriptor::ChooseAbility { .. } => 13,
         ActionDescriptor::ChooseAbilityDraw { .. } => 14,
         ActionDescriptor::ChooseAbilityLocation { .. } => 15,
-        ActionDescriptor::PickUpArtifacts { .. } => 31,
-        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 32,
-        ActionDescriptor::ResolveChainMagic => 33,
-        ActionDescriptor::ResolveGenesisSpell { .. } => 34,
-        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 35,
-        ActionDescriptor::ResolveGenesisToken { .. } => 36,
-        ActionDescriptor::ResolveRangedStep { .. } => 37,
-        ActionDescriptor::Mulligan { .. } => 38,
-        ActionDescriptor::PlaySite { .. } => 39,
-        ActionDescriptor::ShootDamageProjectile { .. } => 40,
-        ActionDescriptor::ShootDragProjectile { .. } => 41,
-        ActionDescriptor::ShootProjectile { .. } => 42,
-        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 43,
+        ActionDescriptor::PickUpArtifacts { .. } => 32,
+        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 33,
+        ActionDescriptor::ResolveChainMagic => 34,
+        ActionDescriptor::ResolveGenesisSpell { .. } => 35,
+        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 36,
+        ActionDescriptor::ResolveGenesisToken { .. } => 37,
+        ActionDescriptor::ResolveRangedStep { .. } => 38,
+        ActionDescriptor::Mulligan { .. } => 39,
+        ActionDescriptor::PlaySite { .. } => 40,
+        ActionDescriptor::ShootDamageProjectile { .. } => 41,
+        ActionDescriptor::ShootDragProjectile { .. } => 42,
+        ActionDescriptor::ShootProjectile { .. } => 43,
+        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 44,
     }
 }
 
@@ -2518,6 +2535,7 @@ pub(crate) fn location_label(location: Location) -> String {
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
+    use std::cmp::Ordering;
 
     use super::{ActionDescriptor, compare_canonical, compare_json_integers, compare_json_strings};
     use crate::canonical::canonical_json;
@@ -2546,6 +2564,27 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn damage_modifier_choice_uses_numeric_canonical_order_and_wire_shape() {
+        let low = ActionDescriptor::ChooseDamageModifier { modifier_index: 2 };
+        let high = ActionDescriptor::ChooseDamageModifier { modifier_index: 10 };
+        let close = ActionDescriptor::CloseDefend {
+            original_target_participates: true,
+        };
+        let end_turn = ActionDescriptor::EndTurn;
+        assert_eq!(
+            serde_json::to_value(&low).unwrap(),
+            json!({"kind": "choose-damage-modifier", "modifierIndex": 2})
+        );
+        assert_eq!(compare_canonical(&low, &high), Ordering::Greater);
+        assert_eq!(compare_canonical(&low, &close), Ordering::Less);
+        assert_eq!(compare_canonical(&low, &end_turn), Ordering::Less);
+        assert_eq!(
+            low.state_independent_label().as_deref(),
+            Some("Choose damage modifier 2")
+        );
     }
 
     const COMBAT_RESPONSE_FIXTURE: &str =
@@ -3000,6 +3039,9 @@ mod tests {
             json!({"kind":"choose-ability-location", "sourceInstanceId":CARD_A, "location":{"cell":"A1","region":"underground"}}),
             json!({"kind":"choose-ability-location", "sourceInstanceId":CARD_A, "location":{"cell":"A1","region":"underwater"}}),
             json!({"kind":"choose-ability-location", "sourceInstanceId":CARD_A, "location":{"cell":"B1","region":"void"}}),
+            json!({"kind":"choose-damage-modifier", "modifierIndex":2}),
+            json!({"kind":"close-defend", "originalTargetParticipates":true}),
+            json!({"kind":"end-turn"}),
             json!({"kind":"choose-ability", "sourceInstanceId":CARD_A,
                 "target":{"instanceId":CASTER_A, "kind":"avatar", "seat":"north"}}),
             json!({"kind":"choose-ability", "sourceInstanceId":CARD_B,
