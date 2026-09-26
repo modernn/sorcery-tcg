@@ -10370,67 +10370,65 @@ function findAirRaiseDeadOpening(
   snowLeopardInstanceId: string;
   southSiteInstanceIds: readonly [string, string];
 }> {
-  // ponytail: bounded opening scan avoids another private seed/config field.
-  for (let offset = 1; offset <= 256; offset += 1) {
-    const built = buildManifest(input, input.config.airSeed + offset, 'air-raise-dead');
-    const session = createGameSession(built.manifest);
-    const airFirst = (left: { cardId: string }, right: { cardId: string }): number => {
-      const isAir = ({ cardId }: { cardId: string }): boolean => {
-        const definition = session.state.cards[cardId];
-        return definition?.cardType === 'site' && definition.elements.includes('air');
-      };
-      return Number(isAir(right)) - Number(isAir(left));
-    };
-    const northSites = [...session.state.players.north.hand.atlas].sort(airFirst);
-    const southSites = [...session.state.players.south.hand.atlas].sort(airFirst);
-    const northDrawnSite = session.state.players.north.atlas[0];
-    const kiteArcherInstanceId = availableMinionInstance(
-      session,
-      'north',
-      input.kiteArcher.stableId,
-      2,
-    );
-    const raiseDeadInstanceId = availableMinionInstance(
-      session,
-      'north',
-      input.raiseDead.stableId,
-      2,
-    );
-    const snowLeopardInstanceId = availableMinionInstance(
-      session,
-      'south',
-      input.stealthTargetMinion.stableId,
-      1,
-    );
-    const isAirSite = ({ cardId }: { cardId: string }): boolean => {
+  // Verified opening fixture; validate its requirements instead of searching on every run.
+  const built = buildManifest(input, 7837, 'air-raise-dead');
+  const session = createGameSession(built.manifest);
+  const airFirst = (left: { cardId: string }, right: { cardId: string }): number => {
+    const isAir = ({ cardId }: { cardId: string }): boolean => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'site' && definition.elements.includes('air');
     };
-    if (northSites.length >= 3
-      && southSites.length >= 2
-      && isAirSite(northSites[0]!)
-      && isAirSite(northSites[1]!)
-      && isAirSite(southSites[0]!)
-      && northDrawnSite
-      && kiteArcherInstanceId
-      && raiseDeadInstanceId
-      && snowLeopardInstanceId) {
-      return {
-        ...built,
-        kiteArcherInstanceId,
-        northSiteInstanceIds: [
-          northSites[0]!.instanceId,
-          northSites[1]!.instanceId,
-          northSites[2]!.instanceId,
-          northDrawnSite.instanceId,
-        ],
-        raiseDeadInstanceId,
-        seed: built.manifest.seed,
-        session,
-        snowLeopardInstanceId,
-        southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
-      };
-    }
+    return Number(isAir(right)) - Number(isAir(left));
+  };
+  const northSites = [...session.state.players.north.hand.atlas].sort(airFirst);
+  const southSites = [...session.state.players.south.hand.atlas].sort(airFirst);
+  const northDrawnSite = session.state.players.north.atlas[0];
+  const kiteArcherInstanceId = availableMinionInstance(
+    session,
+    'north',
+    input.kiteArcher.stableId,
+    2,
+  );
+  const raiseDeadInstanceId = availableMinionInstance(
+    session,
+    'north',
+    input.raiseDead.stableId,
+    2,
+  );
+  const snowLeopardInstanceId = availableMinionInstance(
+    session,
+    'south',
+    input.stealthTargetMinion.stableId,
+    1,
+  );
+  const isAirSite = ({ cardId }: { cardId: string }): boolean => {
+    const definition = session.state.cards[cardId];
+    return definition?.cardType === 'site' && definition.elements.includes('air');
+  };
+  if (northSites.length >= 3
+    && southSites.length >= 2
+    && isAirSite(northSites[0]!)
+    && isAirSite(northSites[1]!)
+    && isAirSite(southSites[0]!)
+    && northDrawnSite
+    && kiteArcherInstanceId
+    && raiseDeadInstanceId
+    && snowLeopardInstanceId) {
+    return {
+      ...built,
+      kiteArcherInstanceId,
+      northSiteInstanceIds: [
+        northSites[0]!.instanceId,
+        northSites[1]!.instanceId,
+        northSites[2]!.instanceId,
+        northDrawnSite.instanceId,
+      ],
+      raiseDeadInstanceId,
+      seed: built.manifest.seed,
+      session,
+      snowLeopardInstanceId,
+      southSiteInstanceIds: [southSites[0]!.instanceId, southSites[1]!.instanceId],
+    };
   }
   throw new Error('private Raise Dead scenario no longer produces its supported opening');
 }
