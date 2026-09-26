@@ -1219,7 +1219,7 @@ fn rule_catalog_1803_killed_enemy_stays_in_cemetery_after_turns_pass() {
 }
 
 #[test]
-fn rule_catalog_1804_second_grant_stacks_sources_without_doubling_twice() {
+fn rule_catalog_1804_second_grant_multiplies_double_strike_and_consumes_both_sources() {
     let encoded = seed_with_two_grants_in_hand_after_setup(1804);
     let KillableCombatSetup {
         mut session,
@@ -1232,10 +1232,29 @@ fn rule_catalog_1804_second_grant_stacks_sources_without_doubling_twice() {
         modifier_sources(unit(&state(&session), &ally_id), "next-strike-double"),
         json!([first["cardInstanceId"], second["cardInstanceId"],])
     );
-    let fight = strike_minion(&mut session, &ally_id, &enemy_id);
-    assert_eq!(strike_allocated_to_target(&fight, &ally_id, &enemy_id), 4);
-    assert!(cemetery_has(&session, "south", &enemy_id));
-    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("stacked double checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized stacked double");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed stacked double");
+    let mut resumed = resume_game_checkpoint(&parsed).expect("resumed stacked double");
+    let fight = strike_minion(&mut resumed, &ally_id, &enemy_id);
+    assert_eq!(fight, strike_minion(&mut session, &ally_id, &enemy_id));
+    assert_eq!(state(&session), state(&resumed));
+    assert_eq!(strike_allocated_to_target(&fight, &ally_id, &enemy_id), 8);
+    assert_eq!(
+        fight
+            .events
+            .iter()
+            .filter(|event| event.event_type == "next-strike-double-consumed")
+            .count(),
+        2
+    );
+    assert!(
+        modifier_sources(unit(&state(&resumed), &ally_id), "next-strike-double")
+            .as_array()
+            .is_some_and(Vec::is_empty)
+    );
+    assert!(cemetery_has(&resumed, "south", &enemy_id));
+    assert_exact_replay(&resumed);
 }
 
 #[test]

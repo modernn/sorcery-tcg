@@ -37148,7 +37148,7 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "A second grant-next-strike-double cast stacks sources without doubling strike damage twice.",
+      "plainLanguage": "Independent next-strike doubling grants multiply: two grants deal four times the base strike damage, and both are consumed.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "grantDoubleDamageToAllyNextStrikeThisTurn"
@@ -37164,7 +37164,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/grant_next_strike_double_rules.rs",
-        "testName": "rule_catalog_1804_second_grant_stacks_sources_without_doubling_twice"
+        "testName": "rule_catalog_1804_second_grant_multiplies_double_strike_and_consumes_both_sources"
       }
     },
     {

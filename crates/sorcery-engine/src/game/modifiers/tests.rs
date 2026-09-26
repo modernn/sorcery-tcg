@@ -429,3 +429,55 @@ fn silence_suppresses_printed_and_granted_movement_without_removing_power() {
         .take(TemporaryModifierKind::Silence);
     assert_eq!(game.minion_basic_movement_steps(&unit, &facts).unwrap(), 4);
 }
+
+#[test]
+fn repeated_strike_doubling_multiplies_damage_but_not_current_power() {
+    for seat in [Seat::North, Seat::South] {
+        for kind in [UnitKind::Avatar, UnitKind::Minion] {
+            let mut game = fixture_game();
+            let instance_id = if kind == UnitKind::Avatar {
+                game.position.players[seat_index(seat)]
+                    .avatar
+                    .card
+                    .instance_id
+                    .clone()
+            } else {
+                let unit = fixture_minion(&game, "north-spell-1", seat, "striker");
+                let instance_id = unit.card.instance_id.clone();
+                game.position.units.push(unit);
+                instance_id
+            };
+            let base = game
+                .combatant_strike_stats(kind, seat, &instance_id)
+                .expect("base strike");
+            assert!(base.amount > 0);
+            for count in 1..=3 {
+                game.temporary_modifiers_mut(kind, seat, &instance_id)
+                    .expect("striker modifiers")
+                    .grant(
+                        TemporaryModifierKind::NextStrikeDouble,
+                        1,
+                        source("same-source"),
+                    );
+                let strike = game
+                    .combatant_strike_stats(kind, seat, &instance_id)
+                    .expect("doubled strike");
+                assert_eq!(strike.amount, base.amount * (1 << count));
+                assert_eq!(strike.current_power, base.current_power);
+            }
+            for _ in 0..16 {
+                game.temporary_modifiers_mut(kind, seat, &instance_id)
+                    .expect("striker modifiers")
+                    .grant(
+                        TemporaryModifierKind::NextStrikeDouble,
+                        1,
+                        source("overflow-source"),
+                    );
+            }
+            assert!(
+                game.combatant_strike_stats(kind, seat, &instance_id)
+                    .is_err()
+            );
+        }
+    }
+}

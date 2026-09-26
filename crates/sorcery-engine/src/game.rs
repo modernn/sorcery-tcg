@@ -12190,35 +12190,35 @@ impl Game {
         let amount = attack
             .checked_add(additive_bonus)
             .ok_or(GameError::IllegalAction)?;
-        let doubled = match kind {
+        let modifiers = match kind {
             UnitKind::Avatar => {
                 let avatar = &self.position.players[seat_index(seat)].avatar;
                 if avatar.card.instance_id != *instance_id {
                     return Err(GameError::IllegalAction);
                 }
-                avatar
-                    .temporary_modifiers
-                    .has(TemporaryModifierKind::NextStrikeDouble)
+                &avatar.temporary_modifiers
             }
-            UnitKind::Minion => self
-                .position
-                .units
-                .iter()
-                .find(|unit| unit.controller == seat && unit.card.instance_id == *instance_id)
-                .ok_or(GameError::IllegalAction)?
-                .temporary_modifiers
-                .has(TemporaryModifierKind::NextStrikeDouble),
+            UnitKind::Minion => {
+                &self
+                    .position
+                    .units
+                    .iter()
+                    .find(|unit| unit.controller == seat && unit.card.instance_id == *instance_id)
+                    .ok_or(GameError::IllegalAction)?
+                    .temporary_modifiers
+            }
         };
-        if doubled && additive_bonus > 0 {
+        if additive_bonus > 0 && modifiers.has(TemporaryModifierKind::NextStrikeDouble) {
             return Err(GameError::UnsupportedMechanic(
                 "additive and doubling strike modifiers require a damage-order choice".to_owned(),
             ));
         }
-        let amount = if doubled {
-            amount.checked_mul(2).ok_or(GameError::IllegalAction)?
-        } else {
-            amount
-        };
+        // Each independently granted replacement applies once, including repeated grants
+        // from the same source. Multiplication leaves generic current power unchanged.
+        let amount = modifiers
+            .sources(TemporaryModifierKind::NextStrikeDouble)
+            .try_fold(amount, |damage, _| damage.checked_mul(2))
+            .ok_or(GameError::IllegalAction)?;
         Ok(StrikeStats {
             amount,
             additive_bonus,

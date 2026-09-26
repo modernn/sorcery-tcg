@@ -132,6 +132,9 @@ Source removal and resulting power-loss deaths settle together with combat death
 Undefended site strikes neither gain the unit-only bonus nor consume its sources.
 Fixed-damage projectile abilities deal their specified damage without strike-only
 modifiers. Ranged projectiles that cause a strike still use the shared strike rules.
+Independent next-strike doubling grants multiply separately: two grants produce
+four times the strike damage, including repeated grants from the same source.
+They leave current power unchanged and are all consumed by the qualifying strike.
 
 Additive bonuses combined with temporary or nearby doubling require controller-owned
 damage-replacement ordering. Until those choices exist, exercised combinations fail
