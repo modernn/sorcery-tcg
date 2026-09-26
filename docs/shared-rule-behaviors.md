@@ -121,8 +121,22 @@ still require minion tokens. Artifact tokens use ordinary artifact positions,
 pickup/drop, bearer relationships, and zone exits. Lower-region or void occupancy
 follows artifact rules rather than minion survival rules. Destruction, sacrifice,
 and return-to-hand banish tokens instead of inserting them into another zone.
-Unsuppressible entry-time equipment and composable bearer strike modifiers are still
-needed before the old Lance counter can be removed or new Lance cards admitted.
+`bearerUnitStrike` composes optional additive damage, first-strike timing, and
+source destruction after the strike. These facts are independent of an artifact's
+other admitted ability. They are evaluated from actual carried artifacts for avatars
+and minions; loose artifacts do not contribute. Strike damage stays separate from
+current power. Each simultaneous strike group retains its contributing source
+incarnations, then consumes marked artifacts after damage even when damage was
+prevented. Normal artifacts enter their owner's cemetery; tokens are banished.
+Source removal and resulting power-loss deaths settle together with combat deaths.
+Undefended site strikes neither gain the unit-only bonus nor consume its sources.
+
+Additive bonuses combined with temporary or nearby doubling require controller-owned
+damage-replacement ordering. Until those choices exist, exercised combinations fail
+explicitly, including combinations using the legacy Lance counter. This is an
+unsupported interaction, not a fixed arithmetic ordering. Unsuppressible entry-time
+equipment, replacement ordering, and full artifact characteristics are still needed
+before the old Lance counter can be removed or new Lance cards admitted.
 
 Token definitions preserve an absent printed mana cost as explicit `null`, distinct
 from a printed zero. Token minions and artifacts may have that absence; tokens cannot

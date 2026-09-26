@@ -101,6 +101,12 @@ type EffectProgram = Readonly<{
   selection?: EffectProgramSelection | null;
 }>;
 
+type BearerUnitStrike = Readonly<{
+  damageBonus?: number;
+  destroyAfterStrike?: true;
+  firstStrike?: true;
+}>;
+
 /** Returns direct token references; callers follow the returned IDs transitively. */
 type TokenRequirement = Readonly<{ cardId: string; kind: 'artifact' | 'minion'; placement?: 'carried' }>;
 
@@ -148,6 +154,26 @@ export type SiteCountQuery = Readonly<{
 
 export type GameCardDefinition =
   | Readonly<{
+    atEndOfControllerTurnUntapNearbyAllies?: never;
+    atEndOfEachTurnSiteControllerLosesLife?: never;
+    atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
+    bearerControllerChoosesExtraRandomOutcome?: never;
+    bearerUnitStrike: BearerUnitStrike;
+    cardType: 'artifact';
+    cannotBeCarried?: true;
+    grantsBearerLethal?: never;
+    grantsBearerPower?: never;
+    manaCost: number | null;
+    nearbyMinionsMustAttackIfAble?: never;
+    nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
+    sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves?: never;
+    tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps?: never;
+    tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
+    tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
+    thresholds: GameThresholds;
+    token?: true;
+  }>
+  | Readonly<{
     attack: number;
     cardType: 'avatar';
     defense: number;
@@ -165,6 +191,7 @@ export type GameCardDefinition =
     cannotBeCarried?: true;
     cardType: 'artifact';
     token?: true;
+    bearerUnitStrike?: BearerUnitStrike;
     grantsBearerLethal?: never;
     grantsBearerPower: 2;
     manaCost: number | null;
@@ -184,6 +211,7 @@ export type GameCardDefinition =
     cannotBeCarried?: true;
     cardType: 'artifact';
     token?: true;
+    bearerUnitStrike?: BearerUnitStrike;
     grantsBearerLethal: true;
     grantsBearerPower?: never;
     manaCost: number | null;
@@ -203,6 +231,7 @@ export type GameCardDefinition =
     cannotBeCarried?: true;
     cardType: 'artifact';
     token?: true;
+    bearerUnitStrike?: BearerUnitStrike;
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
     manaCost: number | null;
@@ -222,6 +251,7 @@ export type GameCardDefinition =
     cannotBeCarried?: true;
     cardType: 'artifact';
     token?: true;
+    bearerUnitStrike?: BearerUnitStrike;
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
     manaCost: number | null;
@@ -241,6 +271,7 @@ export type GameCardDefinition =
     cannotBeCarried?: true;
     cardType: 'artifact';
     token?: true;
+    bearerUnitStrike?: BearerUnitStrike;
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
     manaCost: number | null;
@@ -260,6 +291,7 @@ export type GameCardDefinition =
     cannotBeCarried?: true;
     cardType: 'artifact';
     token?: true;
+    bearerUnitStrike?: BearerUnitStrike;
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
     manaCost: number | null;
@@ -279,6 +311,7 @@ export type GameCardDefinition =
     cannotBeCarried?: true;
     cardType: 'artifact';
     token?: true;
+    bearerUnitStrike?: BearerUnitStrike;
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
     manaCost: number | null;
@@ -298,6 +331,7 @@ export type GameCardDefinition =
     cannotBeCarried?: true;
     cardType: 'artifact';
     token?: true;
+    bearerUnitStrike?: BearerUnitStrike;
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
     manaCost: number | null;
@@ -317,6 +351,7 @@ export type GameCardDefinition =
     cannotBeCarried?: true;
     cardType: 'artifact';
     token?: true;
+    bearerUnitStrike?: BearerUnitStrike;
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
     manaCost: number | null;
@@ -336,6 +371,7 @@ export type GameCardDefinition =
     cannotBeCarried?: true;
     cardType: 'artifact';
     token?: true;
+    bearerUnitStrike?: BearerUnitStrike;
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
     manaCost: number | null;
@@ -355,6 +391,7 @@ export type GameCardDefinition =
     cannotBeCarried?: true;
     cardType: 'artifact';
     token?: true;
+    bearerUnitStrike?: BearerUnitStrike;
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
     manaCost: number | null;
@@ -374,6 +411,7 @@ export type GameCardDefinition =
     cannotBeCarried?: true;
     cardType: 'artifact';
     token?: true;
+    bearerUnitStrike?: BearerUnitStrike;
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
     manaCost: number | null;
@@ -1468,6 +1506,7 @@ function requireCardId(value: string, path: string): void {
 
 const SUPPORTED_CARD_FIELDS = {
   artifact: new Set(`
+    bearerUnitStrike
     atEndOfControllerTurnUntapNearbyAllies
     atEndOfEachTurnSiteControllerLosesLife
     cannotBeCarried
@@ -1853,6 +1892,29 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
     return;
   }
   if (card.cardType === 'artifact') {
+    if (card.bearerUnitStrike !== undefined) {
+      const modifier = card.bearerUnitStrike;
+      if (modifier === null || typeof modifier !== 'object' || Array.isArray(modifier)) {
+        throw new RangeError(`${path}.bearerUnitStrike must be a nonempty object`);
+      }
+      const unknown = Object.keys(modifier).find((key) => !['damageBonus', 'firstStrike', 'destroyAfterStrike'].includes(key));
+      if (unknown) throw new RangeError(`${path}.bearerUnitStrike.${unknown} is unsupported`);
+      if (modifier.damageBonus === undefined && modifier.firstStrike === undefined
+        && modifier.destroyAfterStrike === undefined) {
+        throw new RangeError(`${path}.bearerUnitStrike must be nonempty`);
+      }
+      if (modifier.damageBonus !== undefined
+        && (!Number.isSafeInteger(modifier.damageBonus)
+          || modifier.damageBonus < 1 || modifier.damageBonus > MAX_COMBAT_STAT)) {
+        throw new RangeError(`${path}.bearerUnitStrike.damageBonus must be a safe integer between 1 and ${MAX_COMBAT_STAT}`);
+      }
+      if (modifier.firstStrike !== undefined && modifier.firstStrike !== true) {
+        throw new RangeError(`${path}.bearerUnitStrike.firstStrike must be true`);
+      }
+      if (modifier.destroyAfterStrike !== undefined && modifier.destroyAfterStrike !== true) {
+        throw new RangeError(`${path}.bearerUnitStrike.destroyAfterStrike must be true`);
+      }
+    }
     if (card.cannotBeCarried !== undefined && card.cannotBeCarried !== true) {
       throw new RangeError(`${path}.cannotBeCarried must be true`);
     }
@@ -1943,7 +2005,7 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
       + Number(card.nearbyStrikesAgainstUnitsDealDoubleDamage === true);
     if (exclusiveArtifactEffects > 1
       || (exclusiveArtifactEffects === 1 && maskArtifactEffects > 0)
-      || (exclusiveArtifactEffects === 0 && maskArtifactEffects === 0)) {
+      || (exclusiveArtifactEffects === 0 && maskArtifactEffects === 0 && card.bearerUnitStrike === undefined)) {
       throw new RangeError(`${path} must define exactly one supported Artifact effect`);
     }
     if (card.manaCost === null) {
@@ -3117,6 +3179,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
         : card.cardType === 'artifact'
           ? {
             cardType: 'artifact' as const,
+            ...(card.bearerUnitStrike !== undefined
+              ? { bearerUnitStrike: { ...card.bearerUnitStrike } }
+              : {}),
             ...(card.cannotBeCarried === true ? { cannotBeCarried: true as const } : {}),
             ...(card.atEndOfControllerTurnUntapNearbyAllies === true
               ? { atEndOfControllerTurnUntapNearbyAllies: true as const }
@@ -3162,10 +3227,12 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                                   tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps:
                                     true as const,
                                 }
-                                : {
-                                  tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath:
-                                    4 as const,
-                                }),
+                                : card.tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath === 4
+                                  ? {
+                                    tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath:
+                                      4 as const,
+                                  }
+                                  : { bearerUnitStrike: { ...card.bearerUnitStrike } }),
             manaCost: card.manaCost,
             thresholds: { ...card.thresholds },
             ...(card.token === true ? { token: true as const } : {}),

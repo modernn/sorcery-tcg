@@ -27,6 +27,8 @@ use crate::facts::{
 use crate::prng::PrngState;
 
 mod ability;
+#[cfg(test)]
+mod bearer_strike_tests;
 mod choices;
 mod effect;
 mod modifiers;
@@ -1136,9 +1138,11 @@ struct UnitDamageSource {
     lethal: bool,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct StrikeStats {
     amount: u16,
+    additive_bonus: u16,
+    consumed_artifacts: Vec<effect::RealmReference>,
     current_power: u16,
     lance_count: u8,
     lethal: bool,
@@ -1424,7 +1428,8 @@ fn unsupported_selfplay_artifact(facts: &ArtifactFacts) -> Option<&'static str> 
 /// The Artifact effects the realm cannot yet honor, named by their authoring field.
 const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static str> {
     match effect {
-        ArtifactEffect::AtEndOfControllerTurnUntapNearbyAllies
+        ArtifactEffect::PassiveModifiers
+        | ArtifactEffect::AtEndOfControllerTurnUntapNearbyAllies
         | ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_)
         | ArtifactEffect::AtStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn(_)
         | ArtifactEffect::GrantsBearerLethal
@@ -1443,7 +1448,8 @@ const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static 
 const fn artifact_effect_supported(effect: ArtifactEffect) -> bool {
     matches!(
         effect,
-        ArtifactEffect::AtEndOfControllerTurnUntapNearbyAllies
+        ArtifactEffect::PassiveModifiers
+            | ArtifactEffect::AtEndOfControllerTurnUntapNearbyAllies
             | ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_)
             | ArtifactEffect::AtStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn(_)
             | ArtifactEffect::GrantsBearerLethal
@@ -4191,12 +4197,20 @@ impl Game {
     fn nearby_unit_strike_amount(
         &self,
         amount: u16,
+        additive_bonus: u16,
         kind: UnitKind,
         seat: Seat,
         instance_id: &IdentityHash,
     ) -> Result<u16, GameError> {
+        let multiplier = self.nearby_unit_strike_multiplier(kind, seat, instance_id)?;
+        if additive_bonus > 0 && multiplier > 1 {
+            return Err(GameError::UnsupportedMechanic(
+                "additive and nearby doubling strike modifiers require a damage-order choice"
+                    .to_owned(),
+            ));
+        }
         amount
-            .checked_mul(self.nearby_unit_strike_multiplier(kind, seat, instance_id)?)
+            .checked_mul(multiplier)
             .ok_or(GameError::IllegalAction)
     }
 
@@ -10438,8 +10452,12 @@ impl Game {
                 unit.controller == action.seat && unit.card.instance_id == *shooter_instance_id
             })
             .ok_or(GameError::IllegalAction)?;
-        let strike =
-            self.combatant_strike_stats(UnitKind::Minion, action.seat, shooter_instance_id)?;
+        let strike = hit
+            .as_ref()
+            .map(|_| {
+                self.combatant_strike_stats(UnitKind::Minion, action.seat, shooter_instance_id)
+            })
+            .transpose()?;
         self.position.units[shooter_index].tapped = true;
         if let Some(pending) = self.position.pending_basic_movement.as_pending_mut() {
             pending.ranged_strike_used = true;
@@ -10458,12 +10476,14 @@ impl Game {
             self.position.state_version += 1;
             return Ok(());
         };
+        let strike = strike.ok_or(GameError::IllegalAction)?;
         let target_kind = match target {
             UnitTarget::Avatar { .. } => UnitKind::Avatar,
             UnitTarget::Minion { .. } => UnitKind::Minion,
         };
         let amount = self.nearby_unit_strike_amount(
             strike.amount,
+            strike.additive_bonus,
             target_kind,
             target.seat(),
             target.instance_id(),
@@ -10486,6 +10506,7 @@ impl Game {
             },
             outcomes,
         )?;
+        self.consume_strike_artifacts(&strike, shooter_instance_id, outcomes)?;
         if strike.lance_count > 0 {
             self.break_lance(action.seat, shooter_instance_id, outcomes)?;
         }
@@ -10495,15 +10516,18 @@ impl Game {
             shooter_instance_id,
             outcomes,
         )?;
-        if damage.minion_died || damage.avatar_defeated {
-            let target_instance_id = target.instance_id().clone();
+        let mut dead_minions = if strike.consumed_artifacts.is_empty() {
+            Vec::new()
+        } else {
+            self.static_power_death_ids()?
+        };
+        if damage.minion_died {
+            dead_minions.push(target.instance_id().clone());
+        }
+        if !dead_minions.is_empty() || damage.avatar_defeated {
             let target_seat = target.seat();
             self.begin_minion_deaths(
-                if damage.minion_died {
-                    std::slice::from_ref(&target_instance_id)
-                } else {
-                    &[]
-                },
+                &dead_minions,
                 if damage.avatar_defeated {
                     std::slice::from_ref(&target_seat)
                 } else {
@@ -10763,6 +10787,7 @@ impl Game {
         };
         let allocated = self.nearby_unit_strike_amount(
             amount,
+            0,
             target_kind,
             target.seat(),
             target.instance_id(),
@@ -12137,8 +12162,25 @@ impl Game {
         } else {
             0
         };
-        let amount = attack
+        let mut additive_bonus = 0_u16;
+        let mut consumed_artifacts = Vec::new();
+        for artifact in &self.position.artifacts {
+            if artifact.carried_by(kind, seat, instance_id)
+                && let Some(modifier) = self.artifact_facts(artifact)?.bearer_unit_strike
+            {
+                additive_bonus = additive_bonus
+                    .checked_add(u16::from(modifier.damage_bonus))
+                    .ok_or(GameError::IllegalAction)?;
+                if modifier.destroy_after_strike {
+                    consumed_artifacts.push(effect::RealmReference::from_card(&artifact.card));
+                }
+            }
+        }
+        additive_bonus = additive_bonus
             .checked_add(u16::from(lance_count))
+            .ok_or(GameError::IllegalAction)?;
+        let amount = attack
+            .checked_add(additive_bonus)
             .ok_or(GameError::IllegalAction)?;
         let doubled = match kind {
             UnitKind::Avatar => {
@@ -12159,6 +12201,11 @@ impl Game {
                 .temporary_modifiers
                 .has(TemporaryModifierKind::NextStrikeDouble),
         };
+        if doubled && additive_bonus > 0 {
+            return Err(GameError::UnsupportedMechanic(
+                "additive and doubling strike modifiers require a damage-order choice".to_owned(),
+            ));
+        }
         let amount = if doubled {
             amount.checked_mul(2).ok_or(GameError::IllegalAction)?
         } else {
@@ -12166,6 +12213,8 @@ impl Game {
         };
         Ok(StrikeStats {
             amount,
+            additive_bonus,
+            consumed_artifacts,
             current_power: damage_source.current_power,
             lance_count,
             lethal: damage_source.lethal,
@@ -12179,14 +12228,24 @@ impl Game {
         instance_id: &IdentityHash,
         attacking: bool,
     ) -> Result<bool, GameError> {
+        // This ability belongs to the artifact; bearer silence does not silence its source.
+        let carried_first = self.position.artifacts.iter().any(|artifact| {
+            artifact.carried_by(kind, seat, instance_id)
+                && self.artifact_facts(artifact).is_ok_and(|facts| {
+                    facts
+                        .bearer_unit_strike
+                        .is_some_and(|modifier| modifier.first_strike)
+                })
+        });
         if kind == UnitKind::Avatar {
             let avatar = &self.position.players[seat_index(seat)].avatar;
             if avatar.card.instance_id != *instance_id {
                 return Err(GameError::IllegalAction);
             }
-            return Ok(avatar
-                .temporary_modifiers
-                .has(TemporaryModifierKind::FirstStrike));
+            return Ok(carried_first
+                || avatar
+                    .temporary_modifiers
+                    .has(TemporaryModifierKind::FirstStrike));
         }
         let unit = self
             .position
@@ -12198,16 +12257,17 @@ impl Game {
         else {
             return Err(GameError::IllegalAction);
         };
-        Ok(!self.minion_abilities_lost(unit)
-            && (unit.carried_lance_count > 0
-                || unit
-                    .temporary_modifiers
-                    .has(TemporaryModifierKind::FirstStrike)
-                || if attacking {
-                    facts.strikes_first_while_attacking
-                } else {
-                    facts.strikes_first_while_defending
-                }))
+        Ok(carried_first
+            || !self.minion_abilities_lost(unit)
+                && (unit.carried_lance_count > 0
+                    || unit
+                        .temporary_modifiers
+                        .has(TemporaryModifierKind::FirstStrike)
+                    || if attacking {
+                        facts.strikes_first_while_attacking
+                    } else {
+                        facts.strikes_first_while_defending
+                    }))
     }
 
     fn temporary_modifiers_mut(
@@ -12255,6 +12315,34 @@ impl Game {
                     "sourceInstanceId": instance_id,
                 })
             });
+        }
+        Ok(())
+    }
+
+    fn consume_strike_artifacts(
+        &mut self,
+        strike: &StrikeStats,
+        bearer: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        for source in &strike.consumed_artifacts {
+            if self
+                .position
+                .artifacts
+                .iter()
+                .any(|artifact| source.matches(&artifact.card))
+            {
+                outcomes.push("artifact-consumed-after-strike", || {
+                    json!({
+                        "instanceId": source.instance_id(), "bearerInstanceId": bearer,
+                    })
+                });
+                self.destroy_artifact_without_settlement(
+                    source.instance_id(),
+                    source.instance_id(),
+                    outcomes,
+                )?;
+            }
         }
         Ok(())
     }
@@ -12619,6 +12707,7 @@ impl Game {
                 Ok((
                     self.nearby_unit_strike_amount(
                         strike.amount,
+                        strike.additive_bonus,
                         attacker_kind,
                         attacking_seat,
                         &attacker_id,
@@ -12662,6 +12751,7 @@ impl Game {
                     target.instance_id(),
                     self.nearby_unit_strike_amount(
                         allocation.amount,
+                        attacker.additive_bonus,
                         kind,
                         target.seat(),
                         target.instance_id(),
@@ -12686,6 +12776,9 @@ impl Game {
         if lost_stealth {
             self.revert_stealth_bound_controls(outcomes)?;
         }
+        if attacker_can_strike {
+            self.consume_strike_artifacts(&attacker, &attacker_id, outcomes)?;
+        }
         if attacker_can_strike && attacker.lance_count > 0 {
             self.break_lance(attacking_seat, &attacker_id, outcomes)?;
         }
@@ -12693,12 +12786,21 @@ impl Game {
             self.consume_next_strike_double(attacker_kind, attacking_seat, &attacker_id, outcomes)?;
         }
         for (kind, target, strike) in &return_sources {
+            self.consume_strike_artifacts(strike, target.instance_id(), outcomes)?;
             if strike.lance_count > 0 {
                 self.break_lance(target.seat(), target.instance_id(), outcomes)?;
             }
             self.consume_next_strike_double(*kind, target.seat(), target.instance_id(), outcomes)?;
         }
-        let mut dead_minions = Vec::new();
+        let consumed_equipment = attacker_can_strike && !attacker.consumed_artifacts.is_empty()
+            || return_sources
+                .iter()
+                .any(|(_, _, strike)| !strike.consumed_artifacts.is_empty());
+        let mut dead_minions = if consumed_equipment {
+            self.static_power_death_ids()?
+        } else {
+            Vec::new()
+        };
         if attacker_damage.minion_died {
             dead_minions.push(attacker_id);
         }
@@ -13109,14 +13211,8 @@ impl Game {
         Ok((sources, corpses))
     }
 
-    fn settle_static_power_deaths(
-        &mut self,
-        outcomes: &mut OutcomeLog<'_>,
-    ) -> Result<(), GameError> {
-        if self.position.terminal.is_some() || self.position.pending_deathrites.is_some() {
-            return Ok(());
-        }
-        let deaths = self
+    fn static_power_death_ids(&self) -> Result<Vec<IdentityHash>, GameError> {
+        Ok(self
             .position
             .units
             .iter()
@@ -13129,7 +13225,17 @@ impl Game {
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .flatten()
-            .collect::<Vec<_>>();
+            .collect::<Vec<_>>())
+    }
+
+    fn settle_static_power_deaths(
+        &mut self,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        if self.position.terminal.is_some() || self.position.pending_deathrites.is_some() {
+            return Ok(());
+        }
+        let deaths = self.static_power_death_ids()?;
         if deaths.is_empty() {
             return Ok(());
         }
@@ -15494,6 +15600,20 @@ impl Game {
         source_instance_id: &IdentityHash,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        self.destroy_artifact_without_settlement(
+            target_artifact_instance_id,
+            source_instance_id,
+            outcomes,
+        )?;
+        self.settle_static_power_deaths(outcomes)
+    }
+
+    fn destroy_artifact_without_settlement(
+        &mut self,
+        target_artifact_instance_id: &IdentityHash,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
         let artifact = self.take_targeted_artifact(target_artifact_instance_id)?;
         let owner = artifact.card.owner;
         let card_id = self.rules.cards[usize::from(artifact.card.card_id.0)]
@@ -15520,7 +15640,6 @@ impl Game {
                 })
             });
         }
-        self.settle_static_power_deaths(outcomes)?;
         Ok(())
     }
 
@@ -21875,13 +21994,12 @@ impl Game {
             Self::emit_leap_magic_resolved(continuation, outcomes);
             return Ok(());
         }
-        let amount = self
-            .combatant_strike_stats(
-                striker_kind,
-                continuation.ally.seat(),
-                continuation.ally.instance_id(),
-            )?
-            .amount;
+        let strike = self.combatant_strike_stats(
+            striker_kind,
+            continuation.ally.seat(),
+            continuation.ally.instance_id(),
+        )?;
+        let amount = strike.amount;
         let allocations: Vec<_> = enemies
             .iter()
             .map(|enemy| StrikeAllocation {
@@ -21896,6 +22014,7 @@ impl Game {
             };
             let allocated = self.nearby_unit_strike_amount(
                 amount,
+                strike.additive_bonus,
                 enemy_kind,
                 enemy.seat(),
                 enemy.instance_id(),
@@ -22760,10 +22879,17 @@ impl Game {
             .find(|unit| unit.card.instance_id == *source_instance_id)
             .cloned()
             .ok_or(GameError::IllegalAction)?;
-        let (attack, damage_source) =
-            self.combatant_damage_stats(UnitKind::Minion, source.controller, source_instance_id)?;
-        let targets = self
-            .units_sharing_footprint(&source, true)
+        let target_units = self.units_sharing_footprint(&source, true);
+        if target_units.is_empty() {
+            return Ok(());
+        }
+        let strike =
+            self.combatant_strike_stats(UnitKind::Minion, source.controller, source_instance_id)?;
+        let damage_source = UnitDamageSource {
+            current_power: strike.current_power,
+            lethal: strike.lethal,
+        };
+        let targets = target_units
             .into_iter()
             .map(|(instance_id, kind, seat)| {
                 let status = if kind == UnitKind::Minion {
@@ -22771,7 +22897,13 @@ impl Game {
                 } else {
                     None
                 };
-                let allocated = self.nearby_unit_strike_amount(attack, kind, seat, &instance_id)?;
+                let allocated = self.nearby_unit_strike_amount(
+                    strike.amount,
+                    strike.additive_bonus,
+                    kind,
+                    seat,
+                    &instance_id,
+                )?;
                 Ok((instance_id, kind, seat, status, allocated))
             })
             .collect::<Result<Vec<_>, GameError>>()?;
@@ -22801,6 +22933,21 @@ impl Game {
             }
             if result.avatar_defeated && !defeated_avatars.contains(&seat) {
                 defeated_avatars.push(seat);
+            }
+        }
+        {
+            self.consume_strike_artifacts(&strike, source_instance_id, outcomes)?;
+            if strike.lance_count > 0 {
+                self.break_lance(source.controller, source_instance_id, outcomes)?;
+            }
+            self.consume_next_strike_double(
+                UnitKind::Minion,
+                source.controller,
+                source_instance_id,
+                outcomes,
+            )?;
+            if !strike.consumed_artifacts.is_empty() {
+                dead_minions.extend(self.static_power_death_ids()?);
             }
         }
         if !dead_minions.is_empty() || !defeated_avatars.is_empty() {

@@ -48,6 +48,50 @@ test('conjure-token admits and canonicalizes token artifacts with null mana cost
   });
 });
 
+test('artifact bearerUnitStrike admits modifier-only and composes with a legacy effect', () => {
+  const modifierOnly = createGameManifest(input(
+    { count: 1, destination: 'source', op: 'conjure-token', token: 'token' },
+    { bearerUnitStrike: { damageBonus: 7, destroyAfterStrike: true }, cardType: 'artifact', manaCost: null,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 }, token: true },
+  ));
+  assert.deepEqual(modifierOnly.cards.token, {
+    bearerUnitStrike: { damageBonus: 7, destroyAfterStrike: true }, cardType: 'artifact', manaCost: null,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 }, token: true,
+  });
+  const composed = createGameManifest(input(
+    { count: 1, destination: 'source', op: 'conjure-token', token: 'token' },
+    { bearerControllerChoosesExtraRandomOutcome: true,
+      bearerUnitStrike: { firstStrike: true }, cardType: 'artifact', manaCost: null,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 }, token: true },
+  ));
+  assert.deepEqual(composed.cards.token, {
+    bearerControllerChoosesExtraRandomOutcome: true,
+    bearerUnitStrike: { firstStrike: true }, cardType: 'artifact', manaCost: null,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 }, token: true,
+  });
+});
+
+test('artifact bearerUnitStrike rejects empty, unknown, and invalid modifier values', () => {
+  const base = { cardType: 'artifact' as const, manaCost: 1,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 } };
+  assert.throws(() => createGameManifest(input(
+    { count: 1, destination: 'source', op: 'conjure-token', token: 'token' },
+    { ...base, bearerUnitStrike: {} },
+  )), /bearerUnitStrike must be nonempty/);
+  assert.throws(() => createGameManifest(input(
+    { count: 1, destination: 'source', op: 'conjure-token', token: 'token' },
+    { ...base, bearerUnitStrike: { damageBonus: undefined } } as never,
+  )), /bearerUnitStrike must be nonempty/);
+  assert.throws(() => createGameManifest(input(
+    { count: 1, destination: 'source', op: 'conjure-token', token: 'token' },
+    { ...base, bearerUnitStrike: { extra: true } } as never,
+  )), /bearerUnitStrike\.extra is unsupported/);
+  assert.throws(() => createGameManifest(input(
+    { count: 1, destination: 'source', op: 'conjure-token', token: 'token' },
+    { ...base, bearerUnitStrike: { damageBonus: 101 } },
+  )), /damageBonus must be/);
+});
+
 test('carried conjure-token preserves explicit placement', () => {
   const manifest = createGameManifest(input(
     { count: 1, destination: 'target', op: 'conjure-token', placement: 'carried', token: 'token' },
@@ -147,4 +191,18 @@ test('mixed summon and conjure operations cannot share one token ID', () => {
       { count: 1, destination: 'source', op: 'conjure-token', token: 'token' },
     ] } } as never),
   } }), /token minion/);
+});
+
+test('bearer strike cloning retains an independent rolling artifact ability', () => {
+  const token = {
+    bearerUnitStrike: { damageBonus: 2 }, cardType: 'artifact' as const,
+    manaCost: null, tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath: 4 as const,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 }, token: true as const,
+  };
+  const manifest = createGameManifest(input(
+    { count: 1, destination: 'source', op: 'conjure-token', token: 'token' }, token,
+  ));
+  assert.deepEqual(manifest.cards.token, token);
+  token.bearerUnitStrike.damageBonus = 4;
+  assert.equal((manifest.cards.token as Extract<GameCardDefinition, { cardType: 'artifact' }>).bearerUnitStrike?.damageBonus, 2);
 });

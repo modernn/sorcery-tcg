@@ -211,6 +211,8 @@ pub enum ArtifactEffect {
     AtEndOfEachTurnSiteControllerLosesLife(u8),
     AtStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn(u8),
     BearerControllerChoosesExtraRandomOutcome,
+    /// The artifact has only composable bearer modifiers and no standalone effect.
+    PassiveModifiers,
     GrantsBearerLethal,
     GrantsBearerPowerTwo,
     NearbyMinionsMustAttackIfAble,
@@ -221,9 +223,18 @@ pub enum ArtifactEffect {
     TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour,
 }
 
+/// Composable modifiers applied when this artifact's bearer strikes a unit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BearerUnitStrike {
+    pub damage_bonus: u8,
+    pub first_strike: bool,
+    pub destroy_after_strike: bool,
+}
+
 /// Artifact facts.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ArtifactFacts {
+    pub bearer_unit_strike: Option<BearerUnitStrike>,
     pub cannot_be_carried: bool,
     pub effect: ArtifactEffect,
     /// Printed cost; absence is only admitted for generated tokens.
@@ -890,6 +901,7 @@ const ARTIFACT_FIELDS: &[&str] = &[
     "atEndOfEachTurnSiteControllerLosesLife",
     "atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn",
     "bearerControllerChoosesExtraRandomOutcome",
+    "bearerUnitStrike",
     "cannotBeCarried",
     "cardType",
     "grantsBearerLethal",
@@ -1341,6 +1353,10 @@ fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFac
     let token = true_only(object, "token", path)?;
     let nearby_must_attack = true_only(object, "nearbyMinionsMustAttackIfAble", path)?;
     let nearby_double = true_only(object, "nearbyStrikesAgainstUnitsDealDoubleDamage", path)?;
+    let bearer_unit_strike = object
+        .get("bearerUnitStrike")
+        .map(|value| parse_bearer_unit_strike(value, path))
+        .transpose()?;
     let exclusive = [
         true_only(object, "atEndOfControllerTurnUntapNearbyAllies", path)?
             .then_some(ArtifactEffect::AtEndOfControllerTurnUntapNearbyAllies),
@@ -1420,7 +1436,8 @@ fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFac
             "competing artifact effects are unsupported",
         ));
     }
-    if exclusive_count == 0 && !nearby_must_attack && !nearby_double {
+    if exclusive_count == 0 && !nearby_must_attack && !nearby_double && bearer_unit_strike.is_none()
+    {
         return Err(FactError::new(
             path,
             "must define exactly one supported effect",
@@ -1430,10 +1447,13 @@ fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFac
         effect
     } else if nearby_must_attack {
         ArtifactEffect::NearbyMinionsMustAttackIfAble
-    } else {
+    } else if nearby_double {
         ArtifactEffect::NearbyStrikesAgainstUnitsDealDoubleDamage
+    } else {
+        ArtifactEffect::PassiveModifiers
     };
     Ok(ArtifactFacts {
+        bearer_unit_strike,
         cannot_be_carried: true_only(object, "cannotBeCarried", path)?,
         effect,
         mana_cost: match object.get("manaCost") {
@@ -1448,6 +1468,32 @@ fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFac
         token,
         nearby_strikes_against_units_deal_double_damage: nearby_double,
         thresholds: parse_thresholds(object, path)?,
+    })
+}
+
+fn parse_bearer_unit_strike(value: &Value, path: &str) -> Result<BearerUnitStrike, FactError> {
+    let object = object(value, &format!("{path}.bearerUnitStrike"))?;
+    let nested_path = format!("{path}.bearerUnitStrike");
+    reject_unknown(
+        object,
+        &["damageBonus", "firstStrike", "destroyAfterStrike"],
+        &nested_path,
+    )?;
+    let damage_bonus =
+        optional_bounded_integer(object, "damageBonus", 1, MAX_COMBAT_STAT, &nested_path)?
+            .map_or(0, compact_u8);
+    let first_strike = true_only(object, "firstStrike", &nested_path)?;
+    let destroy_after_strike = true_only(object, "destroyAfterStrike", &nested_path)?;
+    if damage_bonus == 0 && !first_strike && !destroy_after_strike {
+        return Err(FactError::new(
+            nested_path,
+            "must define at least one bearer unit-strike modifier",
+        ));
+    }
+    Ok(BearerUnitStrike {
+        damage_bonus,
+        first_strike,
+        destroy_after_strike,
     })
 }
 

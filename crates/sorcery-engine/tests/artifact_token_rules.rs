@@ -388,3 +388,86 @@ fn artifacts_conjured_carried_attach_without_pickup_and_replay_for_both_seats() 
         assert_replay(&session);
     }
 }
+
+#[test]
+fn carried_strike_sources_modify_one_unit_strike_then_banish_with_exact_replay() {
+    let mut input: Value = serde_json::from_str(&manifest()).unwrap();
+    input.as_object_mut().unwrap().remove("manifestId");
+    input["cards"]["token"]
+        .as_object_mut()
+        .unwrap()
+        .remove("grantsBearerPower");
+    input["cards"]["token"]["bearerUnitStrike"] = json!({
+        "damageBonus":1,"firstStrike":true,"destroyAfterStrike":true
+    });
+    input["cards"]["conjure"]["effectProgram"]["effects"] = json!([
+        {"op":"conjure-token","token":"token","count":2,"destination":"source","placement":"carried"}
+    ]);
+    let encoded = selfplay_manifest_with(9107, |m| *m = input);
+    let mut session = ready_manifest("north", &encoded);
+    accept_where(&mut session, |d| {
+        d["kind"] == "cast-magic" && d["cardId"] == "conjure"
+    });
+    accept_where(&mut session, |d| {
+        d["kind"] == "play-site" && d["cell"] == "C3"
+    });
+    accept_where(&mut session, |d| d["kind"] == "end-turn");
+    accept_where(&mut session, |d| {
+        d["kind"] == "draw" && d["zone"] == "atlas"
+    });
+    accept_where(&mut session, |d| {
+        d["kind"] == "play-site" && d["cell"] == "C2"
+    });
+    for cell in ["C3", "C2"] {
+        accept_where(&mut session, |d| d["kind"] == "end-turn");
+        accept_where(&mut session, |d| {
+            d["kind"] == "draw" && d["zone"] == "atlas"
+        });
+        accept_where(&mut session, |d| {
+            d["kind"] == "move-and-attack" && d["to"]["cell"] == cell
+        });
+        accept_where(&mut session, |d| d["kind"] == "decline-attack");
+    }
+    accept_where(&mut session, |d| d["kind"] == "end-turn");
+    accept_where(&mut session, |d| {
+        d["kind"] == "draw" && d["zone"] == "atlas"
+    });
+    accept_where(&mut session, |d| {
+        d["kind"] == "move-and-attack" && d["to"]["cell"] == "C2"
+    });
+    accept_where(&mut session, |d| {
+        d["kind"] == "declare-attack" && d["target"]["kind"] == "avatar"
+    });
+    assert_replay(&session);
+    let (_, receipt) = accept_where(&mut session, |d| {
+        d["kind"] == "close-defend" && d["originalTargetParticipates"] == true
+    });
+    let damage = receipt
+        .events
+        .iter()
+        .filter(|e| e.event_type == "damage-dealt")
+        .map(|e| (e.payload["seat"].clone(), e.payload["amount"].clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        damage,
+        vec![(json!("south"), json!(3)), (json!("north"), json!(1))]
+    );
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .filter(|e| e.event_type == "artifact-consumed-after-strike")
+            .count(),
+        2
+    );
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .filter(|e| e.event_type == "artifact-banished")
+            .count(),
+        2
+    );
+    assert!(state(&session)["realm"].get("artifacts").is_none());
+    assert_replay(&session);
+}
