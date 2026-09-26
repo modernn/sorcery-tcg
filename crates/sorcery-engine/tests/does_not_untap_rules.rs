@@ -44,6 +44,15 @@ fn freeze() -> Value {
     })
 }
 
+fn freeze_until_damaged() -> Value {
+    json!({
+        "cardType": "magic",
+        "disableTargetMinionWithinTwoStepsUntilDamaged": true,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn dummy() -> Value {
     json!({
         "attack": 1,
@@ -91,7 +100,7 @@ fn stay_tapped_manifest() -> String {
     sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
 }
 
-fn disabled_untap_manifest(seed: u32) -> String {
+fn disabled_untap_manifest(seed: u32, until_damaged: bool) -> String {
     let mut value = json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "does-not-untap-disabled" }))
@@ -101,7 +110,7 @@ fn disabled_untap_manifest(seed: u32) -> String {
         },
         "cards": {
             "north-avatar": avatar(),
-            "north-freeze": freeze(),
+            "north-freeze": if until_damaged { freeze_until_damaged() } else { freeze() },
             "north-site": site(),
             "north-sleeper": sleeper(),
             "south-avatar": avatar(),
@@ -138,7 +147,7 @@ fn disabled_untap_manifest(seed: u32) -> String {
 
 fn disabled_opening_manifest() -> String {
     (1..=4096)
-        .map(disabled_untap_manifest)
+        .map(|seed| disabled_untap_manifest(seed, false))
         .find(|candidate| {
             let opening = state(&Session::new(candidate).expect("does-not-untap candidate"));
             let hand = opening["players"]["north"]["hand"]["spellbook"]
@@ -148,6 +157,20 @@ fn disabled_opening_manifest() -> String {
                 && hand.iter().any(|card| card["cardId"] == "north-freeze")
         })
         .expect("bounded seed opening with a sleeper and Freeze")
+}
+
+fn disabled_until_damaged_opening_manifest() -> String {
+    (1..=4096)
+        .map(|seed| disabled_untap_manifest(seed, true))
+        .find(|candidate| {
+            let opening = state(&Session::new(candidate).expect("does-not-untap candidate"));
+            let hand = opening["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("north opening spellbook");
+            hand.iter().any(|card| card["cardId"] == "north-sleeper")
+                && hand.iter().any(|card| card["cardId"] == "north-freeze")
+        })
+        .expect("bounded seed opening with a sleeper and until-damaged Freeze")
 }
 
 fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
@@ -277,7 +300,7 @@ fn rule_catalog_0308_does_not_untap_during_the_controllers_start_phase() {
 }
 
 #[test]
-fn rule_catalog_0309_disable_suppresses_the_does_not_untap_replacement() {
+fn rule_catalog_0309_freeze_expiry_restores_the_does_not_untap_replacement() {
     let mut session =
         Session::new(&disabled_opening_manifest()).expect("valid Disabled does-not-untap session");
     let instance_id = summon_and_tap_sleeper(&mut session);
@@ -298,7 +321,9 @@ fn rule_catalog_0309_disable_suppresses_the_does_not_untap_replacement() {
     south_plays_and_ends(&mut session);
     let after = state(&session);
     assert_eq!(after["phase"], "draw");
-    assert_eq!(unit(&after, "north-sleeper")["tapped"], false);
+    // Freeze expires before the controller's Start Phase untap.  The printed
+    // does-not-untap replacement is therefore active again when untap runs.
+    assert_eq!(unit(&after, "north-sleeper")["tapped"], true);
     assert!(
         unit(&after, "north-sleeper")["disableEffects"]
             .as_array()
@@ -307,5 +332,24 @@ fn rule_catalog_0309_disable_suppresses_the_does_not_untap_replacement() {
     );
     assert_eq!(unit(&after, "north-sleeper")["instanceId"], instance_id);
     assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0309_active_disable_still_suppresses_the_replacement() {
+    let mut session = Session::new(&disabled_until_damaged_opening_manifest())
+        .expect("valid until-damaged does-not-untap session");
+    let instance_id = summon_and_tap_sleeper(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-freeze"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == instance_id
+    });
+    south_plays_and_ends(&mut session);
+    let after = state(&session);
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(unit(&after, "north-sleeper")["tapped"], false);
+    assert_eq!(unit(&after, "north-sleeper")["disabledUntilDamaged"], true);
     assert_exact_replay(&session);
 }

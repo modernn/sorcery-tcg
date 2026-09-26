@@ -14,7 +14,7 @@ use sorcery_engine::checkpoint::{
     create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
     serialize_game_checkpoint,
 };
-use sorcery_engine::contract::{ActionRequest, Receipt};
+use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::session::{Session, StepResult};
 
 fn avatar() -> Value {
@@ -54,7 +54,8 @@ fn ordered_magic(legacy_flag: bool) -> Value {
                     "alliedOnly": true,
                 },
                 {
-                    "op": "grant-this-turn",
+                    "op": "grant",
+                    "duration": "this-turn",
                     "recipients": "chosen",
                     "modifier": "movement",
                     "amount": 1,
@@ -71,6 +72,10 @@ fn ordered_magic(legacy_flag: bool) -> Value {
 }
 
 fn finish_manifest(mut manifest: Value) -> String {
+    manifest
+        .as_object_mut()
+        .expect("manifest object")
+        .remove("manifestId");
     manifest["manifestId"] = json!(identity_hash(&manifest).expect("synthetic manifest identity"));
     canonical_json(&manifest).expect("canonical synthetic manifest")
 }
@@ -113,6 +118,19 @@ fn manifest(seed: u32, empty_atlas: bool, legacy_flag: bool) -> String {
         "schemaVersion": 1,
         "seed": seed,
     }))
+}
+
+fn manifest_until_next_turn(seed: u32) -> String {
+    let mut raw: Value =
+        serde_json::from_str(&manifest(seed, false, false)).expect("ordered-program manifest JSON");
+    raw["cards"]["north-program"]["effectProgram"]["effects"][2]["duration"] =
+        json!("until-your-next-turn");
+    raw["cards"]["north-program"]["effectProgram"]["effects"][2]["modifier"] = json!("power");
+    raw["cards"]["north-program"]["effectProgram"]["effects"][2]["amount"] = json!(2);
+    raw.as_object_mut()
+        .expect("manifest object")
+        .remove("manifestId");
+    finish_manifest(raw)
 }
 
 fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
@@ -326,6 +344,73 @@ fn ordered_program_empty_chosen_deck_ends_before_later_grant() {
             .expect("terminal actions")
             .is_empty()
     );
+}
+
+#[test]
+fn ordered_program_until_next_turn_grant_survives_opponent_turn_and_expires_at_own_start() {
+    for (owner, seat, cell) in [("north", Seat::North, "C4"), ("south", Seat::South, "C1")] {
+        let mut manifest: Value = serde_json::from_str(&manifest_until_next_turn(4205)).unwrap();
+        if seat == Seat::South {
+            let north = manifest["decks"]["north"].take();
+            manifest["decks"]["north"] = manifest["decks"]["south"].take();
+            manifest["decks"]["south"] = north;
+            manifest["firstSeat"] = json!("south");
+        }
+        let mut session = Session::new(&finish_manifest(manifest)).unwrap();
+        keep(&mut session);
+        keep(&mut session);
+        accept_where(&mut session, |d| {
+            d["kind"] == "play-site" && d["cell"] == cell
+        });
+        let (source_id, _) = cast_program(&mut session);
+        choose_draw(&mut session, &source_id, "spellbook");
+        let (_, grant) = accept_where(&mut session, |d| {
+            d["kind"] == "choose-ability"
+                && d["sourceInstanceId"] == source_id
+                && d["target"]["kind"] == "avatar"
+                && d["target"]["seat"] == owner
+        });
+        assert!(event_types(&grant).contains(&"power-granted"));
+        let avatar = |session: &Session| {
+            session.public_view(seat).unwrap()["players"][owner]["avatar"].clone()
+        };
+        assert_eq!(avatar(&session)["attack"], 3);
+        assert_eq!(avatar(&session)["defense"], 3);
+        assert_eq!(
+            modifier_rows(&avatar(&session), "power")[0]["expiresAtSeat"],
+            owner
+        );
+        assert!(
+            state(&session)["players"][owner]["cemetery"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|card| card["instanceId"] == source_id)
+        );
+        assert_checkpoint_and_replay(&session);
+
+        let (_, own_end) = accept_where(&mut session, |d| d["kind"] == "end-turn");
+        assert!(!event_types(&own_end).contains(&"power-expired"));
+        assert_eq!(avatar(&session)["attack"], 3);
+        assert_checkpoint_and_replay(&session);
+        accept_where(&mut session, |d| {
+            d["kind"] == "draw" && d["zone"] == "atlas"
+        });
+        accept_where(&mut session, |d| d["kind"] == "play-site");
+        let (_, opponent_end) = accept_where(&mut session, |d| d["kind"] == "end-turn");
+        let events = event_types(&opponent_end);
+        let index = |kind| events.iter().position(|event| *event == kind).unwrap();
+        assert!(index("turn-ended") < index("power-expired"));
+        assert!(index("power-expired") < index("turn-started"));
+        assert_eq!(avatar(&session)["attack"], 1);
+        assert_eq!(avatar(&session)["defense"], 1);
+        assert!(modifier_rows(&avatar(&session), "power").is_empty());
+        let (_, draw) = accept_where(&mut session, |d| {
+            d["kind"] == "draw" && d["zone"] == "atlas"
+        });
+        assert!(!event_types(&draw).contains(&"power-expired"));
+        assert_checkpoint_and_replay(&session);
+    }
 }
 
 #[test]

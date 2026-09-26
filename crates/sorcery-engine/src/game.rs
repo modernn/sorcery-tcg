@@ -23769,23 +23769,12 @@ impl Game {
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
         let next_seat = other_seat(seat);
-        let next_mana = self
-            .position
-            .sites
-            .iter()
-            .flatten()
-            .filter(|site| site.controller == next_seat)
-            .count();
-        let next_mana = u16::try_from(next_mana).map_err(|_| GameError::IllegalAction)?;
         for player in &mut self.position.players {
             if player.air_thresholds_cast_this_turn.is_some() {
                 player.air_thresholds_cast_this_turn = Some(0);
             }
         }
         self.position.players[seat_index(seat)].mana = 0;
-        let next_player = &mut self.position.players[seat_index(next_seat)];
-        next_player.avatar.tapped = false;
-        next_player.mana = next_mana;
         let disabled_units: Vec<_> = self
             .position
             .units
@@ -23864,39 +23853,8 @@ impl Game {
         }
         self.resolve_end_of_controller_turn_untap_nearby_allies(seat, outcomes)?;
         self.revert_temporary_controls(outcomes)?;
-        let stay_tapped: BTreeSet<_> = self
-            .position
-            .units
-            .iter()
-            .zip(&disabled_units)
-            .filter_map(|(unit, disabled)| {
-                if unit.controller != next_seat || *disabled || !unit.tapped {
-                    return None;
-                }
-                matches!(
-                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
-                    CardFacts::Minion(facts)
-                        if facts.does_not_untap_during_controllers_start_phase
-                )
-                .then(|| unit.card.instance_id.clone())
-            })
-            .collect();
-        let mut expired_modifiers = Vec::new();
-        for (index, player) in self.position.players.iter_mut().enumerate() {
-            let controller = if index == 0 { Seat::North } else { Seat::South };
-            for modifier in player.avatar.temporary_modifiers.drain() {
-                expired_modifiers.push((
-                    player.avatar.card.instance_id.clone(),
-                    controller,
-                    modifier,
-                ));
-            }
-        }
         for (unit, gains_stealth) in self.position.units.iter_mut().zip(end_turn_stealth_gained) {
             unit.damage = 0;
-            for modifier in unit.temporary_modifiers.drain() {
-                expired_modifiers.push((unit.card.instance_id.clone(), unit.controller, modifier));
-            }
             if unit.controller == seat {
                 if gains_stealth {
                     unit.stealthed = true;
@@ -23907,16 +23865,10 @@ impl Game {
                     );
                 }
                 unit.summoning_sickness = false;
-            } else if unit.controller == next_seat && !stay_tapped.contains(&unit.card.instance_id)
-            {
-                unit.tapped = false;
             }
         }
+        let expired_modifiers = self.take_expired_modifiers(None);
         self.settle_nearby_enemy_stealth(outcomes);
-        for unit in &mut self.position.units {
-            unit.disable_effects
-                .retain(|effect| effect.expires_at_seat != next_seat);
-        }
         let counted_auras = self.count_controller_turn_on_auras(seat);
         let expired_aura_ids: BTreeSet<_> = counted_auras
             .iter()
@@ -23932,31 +23884,15 @@ impl Game {
                 self.position.auras.push(aura);
             }
         }
-        self.position.immobile_areas.retain(|area| {
-            area.expires_at_seat != Some(next_seat)
-                && !expired_aura_ids.contains(&area.source_instance_id)
-        });
+        self.position
+            .immobile_areas
+            .retain(|area| !expired_aura_ids.contains(&area.source_instance_id));
         let ended_turn = self.position.turn_number;
         self.position.turn_number += 1;
         self.position.active_seat = next_seat;
         self.position.decision_seat = next_seat;
         self.activate_pending_player_control(next_seat, outcomes);
-        for (instance_id, controller, modifier) in expired_modifiers {
-            outcomes.push(modifier.kind.expiration_event(), || {
-                let mut value = json!({
-                    "instanceId": instance_id,
-                    "seat": controller,
-                    "sourceInstanceId": modifier.source_instance_id,
-                });
-                if matches!(
-                    modifier.kind,
-                    TemporaryModifierKind::Movement | TemporaryModifierKind::Power
-                ) {
-                    value["amount"] = json!(modifier.amount);
-                }
-                value
-            });
-        }
+        Self::emit_expired_modifiers(expired_modifiers, outcomes);
         for (instance_id, controller, _, count) in &counted_auras {
             outcomes.push("aura-turn-counted", || {
                 json!({
@@ -23984,6 +23920,16 @@ impl Game {
             "turn-ended",
             || json!({ "seat": seat, "turnNumber": ended_turn }),
         );
+        // Next-turn effects end before untapping or discovering Start Phase triggers.
+        for unit in &mut self.position.units {
+            unit.disable_effects
+                .retain(|effect| effect.expires_at_seat != next_seat);
+        }
+        self.position
+            .immobile_areas
+            .retain(|area| area.expires_at_seat != Some(next_seat));
+        let expired_next_turn = self.take_expired_modifiers(Some(next_seat));
+        Self::emit_expired_modifiers(expired_next_turn, outcomes);
         for (instance_id, controller, source_instance_id) in expired_disable_effects {
             outcomes.push("minion-disable-expired", || {
                 json!({
@@ -23993,6 +23939,37 @@ impl Game {
                 })
             });
         }
+        let stay_tapped: BTreeSet<_> = self
+            .position
+            .units
+            .iter()
+            .filter(|unit| {
+                unit.controller == next_seat && unit.tapped && !self.minion_abilities_lost(unit)
+            })
+            .filter(|unit| {
+                matches!(
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
+                    CardFacts::Minion(facts) if facts.does_not_untap_during_controllers_start_phase
+                )
+            })
+            .map(|unit| unit.card.instance_id.clone())
+            .collect();
+        for unit in &mut self.position.units {
+            if unit.controller == next_seat && !stay_tapped.contains(&unit.card.instance_id) {
+                unit.tapped = false;
+            }
+        }
+        let next_mana = self
+            .position
+            .sites
+            .iter()
+            .flatten()
+            .filter(|site| site.controller == next_seat)
+            .count();
+        let next_mana = u16::try_from(next_mana).map_err(|_| GameError::IllegalAction)?;
+        let next_player = &mut self.position.players[seat_index(next_seat)];
+        next_player.avatar.tapped = false;
+        next_player.mana = next_mana;
         self.settle_nearby_enemy_stealth(outcomes);
         let turn_number = self.position.turn_number;
         outcomes.push("turn-started", || {

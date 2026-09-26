@@ -44,6 +44,7 @@ type EffectProgramLocationSelection = Readonly<{
 }>;
 type EffectProgramSelection = EffectProgramUnitSelection | EffectProgramLocationSelection;
 type EffectProgramRecipients = 'target' | 'chosen' | 'location' | 'other-units-here' | 'surface-minions';
+type EffectDuration = 'this-turn' | 'until-your-next-turn';
 type EffectProgramModifier =
   | 'airborne' | 'charge' | 'first-strike' | 'lethal' | 'next-strike-double'
   | 'movement' | 'power' | 'ranged' | 'silence';
@@ -60,9 +61,10 @@ type EffectProgramEffect =
   }>
   | Readonly<{
     amount: number;
-    op: 'grant-this-turn';
+    op: 'grant';
     modifier: EffectProgramModifier;
     recipients: EffectProgramRecipients;
+    duration: EffectDuration;
   }>
   | Readonly<{ op: 'draw-card' }>;
 type EffectProgram = Readonly<{
@@ -677,6 +679,7 @@ export type TemporaryModifier = Readonly<{
   kind: 'airborne' | 'charge' | 'first-strike' | 'lethal' | 'next-strike-double'
     | 'movement' | 'power' | 'ranged' | 'silence';
   sourceInstanceId: StateHash;
+  expiresAtSeat?: GameSeat;
 }>;
 
 type UnitInstance = Readonly<CardInstance & {
@@ -1505,6 +1508,14 @@ function validateEffectProgram(program: unknown, path: string): asserts program 
     }
     const value = effect as Record<string, unknown>;
     if (typeof value.op !== 'string') throw new RangeError(`${effectPath}.op must be a string`);
+    if (value.op === 'grant-this-turn') {
+      throw new RangeError(`${effectPath}.op grant-this-turn is obsolete; use grant`);
+    }
+    if (value.op === 'grant'
+      && value.duration !== 'this-turn'
+      && value.duration !== 'until-your-next-turn') {
+      throw new RangeError(`${effectPath}.duration must be this-turn or until-your-next-turn`);
+    }
   });
 }
 
@@ -3084,8 +3095,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               cardType: 'magic' as const,
               ...(card.effectProgram !== undefined
                 ? { effectProgram: cloneEffectProgram(card.effectProgram) }
-                : {}),
-              ...(card.burrowAllMinionsAndArtifactsAtTargetLandSite === true
+                : card.burrowAllMinionsAndArtifactsAtTargetLandSite === true
                 ? { burrowAllMinionsAndArtifactsAtTargetLandSite: true as const }
                 : card.discardSiteAsAdditionalCost === true
                   ? {

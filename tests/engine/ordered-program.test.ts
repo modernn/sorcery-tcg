@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { canonicalJson } from '../../src/authority/canonical-json.ts';
+import { RustSessionClient } from '../../src/engine/rust-engine.ts';
 
 import {
   createGameManifest,
@@ -62,7 +64,13 @@ test('ordered effect programs preserve selection, operations, and nested relatio
       relation: 'nearby' as const,
       kind: 'minion' as const,
     },
-    { amount: 2, modifier: 'power' as const, op: 'grant-this-turn' as const, recipients: 'chosen' as const },
+    {
+      amount: 2,
+      duration: 'this-turn' as const,
+      modifier: 'power' as const,
+      op: 'grant' as const,
+      recipients: 'chosen' as const,
+    },
     { op: 'draw-card' as const },
   ];
   const effectProgram = {
@@ -84,6 +92,19 @@ test('ordered effect programs preserve selection, operations, and nested relatio
   });
   assert.equal(stored.effectProgram.effects.length, 3);
   assert.deepEqual(stored.effectProgram.effects[1], effects[1]);
+  assert.deepEqual(Object.keys(stored).sort(), ['cardType', 'effectProgram', 'manaCost', 'thresholds']);
+});
+
+test('authored programs from the deck manifest boundary are admitted by Rust', async () => {
+  const manifest = createGameManifest(input({ effects: [{ op: 'draw-card' }] }));
+  const client = await RustSessionClient.start();
+  try {
+    await client.newSession(canonicalJson(manifest));
+    assert.ok((await client.legalActions('north')).length > 0);
+    assert.equal(await client.verifyReplay(), true);
+  } finally {
+    await client.close();
+  }
 });
 
 test('effect programs cannot be mixed with legacy Magic effects', () => {
@@ -98,4 +119,17 @@ test('effect programs cannot be mixed with legacy Magic effects', () => {
     },
   };
   assert.throws(() => createGameManifest(mixed), /cannot be mixed with legacy Magic effects/);
+});
+
+test('effect programs require a supported grant duration', () => {
+  assert.throws(
+    () => createGameManifest(input({ effects: [{ amount: 1, modifier: 'power', op: 'grant', recipients: 'chosen' }] } as never)),
+    /duration must be this-turn or until-your-next-turn/,
+  );
+  assert.throws(
+    () => createGameManifest(input({
+      effects: [{ amount: 1, modifier: 'power', op: 'grant-this-turn', recipients: 'chosen' }],
+    } as never)),
+    /grant-this-turn is obsolete/,
+  );
 });

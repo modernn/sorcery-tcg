@@ -55,10 +55,11 @@ impl AbilityProgram {
                     validate_relation(spec.relation)?;
                     previous_choice = Some(*spec);
                 }
-                Effect::GrantThisTurn {
+                Effect::Grant {
                     recipients,
                     modifier,
                     amount,
+                    duration: _,
                 } => {
                     self.validate_recipients(*recipients, previous_choice, &path)?;
                     validate_grant(
@@ -298,6 +299,16 @@ pub enum TemporaryModifierKind {
     Silence,
 }
 
+/// How long an authored temporary modifier remains active.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EffectDuration {
+    /// Expires at the end of the current turn.
+    ThisTurn,
+    /// Expires at the source controller's next turn, before untapping.
+    UntilYourNextTurn,
+}
+
 /// One executable operation in an ordered ability program.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "op", rename_all = "kebab-case", deny_unknown_fields)]
@@ -324,13 +335,15 @@ pub enum Effect {
     /// Performs an ordinary unit choice.
     ChooseUnit(UnitChoiceSpec),
     /// Grants a temporary modifier to a recipient cohort.
-    GrantThisTurn {
+    Grant {
         /// The cohort receiving the modifier.
         recipients: UnitSet,
         /// The modifier to grant.
         modifier: TemporaryModifierKind,
         /// The modifier amount.
         amount: u16,
+        /// The modifier duration.
+        duration: EffectDuration,
     },
     /// Draws one card from either deck according to runtime rules.
     DrawCard,
@@ -359,6 +372,26 @@ mod tests {
             serde_json::to_value(program).expect("serialize program")["effects"][0]["alliedOnly"],
             true
         );
+    }
+
+    #[test]
+    fn grant_requires_an_explicit_supported_duration() {
+        let grant = serde_json::json!({
+            "op": "grant", "recipients": "surface-minions", "modifier": "power", "amount": 1,
+        });
+        assert!(serde_json::from_value::<Effect>(grant.clone()).is_err());
+        for duration in ["this-turn", "until-your-next-turn"] {
+            let mut valid = grant.clone();
+            valid["duration"] = serde_json::json!(duration);
+            let effect: Effect = serde_json::from_value(valid.clone()).unwrap();
+            assert_eq!(serde_json::to_value(effect).unwrap(), valid);
+        }
+        let mut invalid = grant.clone();
+        invalid["duration"] = serde_json::json!("permanent");
+        assert!(serde_json::from_value::<Effect>(invalid).is_err());
+        let mut obsolete = grant;
+        obsolete["op"] = serde_json::json!("grant-this-turn");
+        assert!(serde_json::from_value::<Effect>(obsolete).is_err());
     }
 
     #[test]
@@ -410,10 +443,11 @@ mod tests {
                 relation: SpatialRelation::Anywhere,
             }),
             optional_selection: false,
-            effects: vec![Effect::GrantThisTurn {
+            effects: vec![Effect::Grant {
                 recipients: UnitSet::Target,
                 modifier: TemporaryModifierKind::Airborne,
                 amount: 1,
+                duration: EffectDuration::ThisTurn,
             }]
             .into_boxed_slice(),
         };
@@ -425,10 +459,11 @@ mod tests {
         let unbound = AbilityProgram {
             selection: None,
             optional_selection: false,
-            effects: vec![Effect::GrantThisTurn {
+            effects: vec![Effect::Grant {
                 recipients: UnitSet::Target,
                 modifier: TemporaryModifierKind::Power,
                 amount: 1,
+                duration: EffectDuration::ThisTurn,
             }]
             .into_boxed_slice(),
         };
@@ -440,10 +475,11 @@ mod tests {
                 relation: SpatialRelation::Anywhere,
             }),
             optional_selection: false,
-            effects: vec![Effect::GrantThisTurn {
+            effects: vec![Effect::Grant {
                 recipients: UnitSet::Target,
                 modifier: TemporaryModifierKind::Charge,
                 amount: 2,
+                duration: EffectDuration::ThisTurn,
             }]
             .into_boxed_slice(),
         };
@@ -455,10 +491,11 @@ mod tests {
                 relation: SpatialRelation::Anywhere,
             }),
             optional_selection: false,
-            effects: vec![Effect::GrantThisTurn {
+            effects: vec![Effect::Grant {
                 recipients: UnitSet::Target,
                 modifier: TemporaryModifierKind::Power,
                 amount: 256,
+                duration: EffectDuration::ThisTurn,
             }]
             .into_boxed_slice(),
         };
@@ -467,10 +504,11 @@ mod tests {
         let silence = AbilityProgram {
             selection: None,
             optional_selection: false,
-            effects: vec![Effect::GrantThisTurn {
+            effects: vec![Effect::Grant {
                 recipients: UnitSet::SurfaceMinions,
                 modifier: TemporaryModifierKind::Silence,
                 amount: 1,
+                duration: EffectDuration::ThisTurn,
             }]
             .into_boxed_slice(),
         };

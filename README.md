@@ -126,6 +126,18 @@ warmups, three samples, and an identical-result hash check. It reports median ga
 per second. The best worker count depends on game length, CPU contention, and memory;
 swap capacity alone is not a throughput estimate.
 
+To isolate manifest admission and immutable-rule compilation from full games:
+
+```sh
+BENCHMARK_SETUP_SAMPLES=5 CARGO_BUILD_JOBS=2 cargo run --release --locked \
+  -p sorcery-engine --bin engine-benchmark -- --setup-scaling
+```
+
+This compares 14 and 802 referenced synthetic definitions over three seeds, reports
+per-manifest constructor times, and checks identical four-job results with one and
+two workers. It measures setup separately so additional caching can be judged against
+its contribution to total game time.
+
 ## Search, checkpoint, and replay
 
 The repository's [Sorcery playtesting skill](skills/sorcery-playtest/SKILL.md) records

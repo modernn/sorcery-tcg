@@ -566,17 +566,25 @@ impl Game {
                     self.begin_ability_draw_choice(frame);
                     return Ok(());
                 }
-                Effect::GrantThisTurn {
+                Effect::Grant {
                     recipients,
                     modifier,
                     amount,
+                    duration,
                 } => {
+                    let expires_at_seat = match duration {
+                        crate::ability::EffectDuration::ThisTurn => None,
+                        crate::ability::EffectDuration::UntilYourNextTurn => {
+                            Some(frame.source.controller)
+                        }
+                    };
                     for (id, kind, seat) in self.effect_recipients(&frame, recipients)? {
                         self.grant_unit_modifier(
                             (id, kind, seat),
                             modifier,
                             amount,
                             &frame.source.instance_id,
+                            expires_at_seat,
                             outcomes,
                         )?;
                     }

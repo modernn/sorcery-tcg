@@ -29380,7 +29380,7 @@ test('RULE-04 end-turn controller life loss reduces the Avatar and can open Deat
   await run(2, 0, true);
 });
 
-test('RULE-04 a minion can skip its controller Start Phase untap unless Disabled', async () => {
+test('RULE-04 Freeze suppresses a minion replacement until expiry, then the printed replacement resumes', async () => {
   const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
   const avatar = {
     attack: 1,
@@ -29542,9 +29542,9 @@ test('RULE-04 a minion can skip its controller Start Phase untap unless Disabled
       true,
     );
     await southTurn(ctx);
-    const after = ctx.state.realm.units.find((unit) => unit.instanceId === sleeperId);
-    assert.equal(after?.tapped, false);
-    assert.equal(after?.disableEffects?.length ?? 0, 0);
+    const afterFreezeExpiry = ctx.state.realm.units.find((unit) => unit.instanceId === sleeperId);
+    assert.equal(afterFreezeExpiry?.tapped, true);
+    assert.equal(afterFreezeExpiry?.disableEffects?.length ?? 0, 0);
     assert.equal(ctx.state.terminal.status, 'active');
     assert.equal(await ctx.verifyReplay(), true);
   });

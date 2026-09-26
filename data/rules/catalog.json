@@ -6683,7 +6683,7 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "Disable suppresses the Start Phase doesn't-untap replacement. A frozen copy untaps with the rest of the controller's minions, then Freeze expires at the caster's next turn start.",
+      "plainLanguage": "Freeze suppresses a minion's Start Phase doesn't-untap replacement while Disable is active. When Freeze expires at the caster's next turn start, the replacement resumes before that minion's untap; a Disable-until-damaged effect continues suppressing it while active.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "doesNotUntapDuringControllersStartPhase"
@@ -6696,7 +6696,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/does_not_untap_rules.rs",
-        "testName": "rule_catalog_0309_disable_suppresses_the_does_not_untap_replacement"
+        "testName": "rule_catalog_0309_freeze_expiry_restores_the_does_not_untap_replacement"
       }
     },
     {

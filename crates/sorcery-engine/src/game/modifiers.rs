@@ -38,16 +38,61 @@ impl TemporaryModifierKind {
 }
 
 impl Game {
+    pub(super) fn take_expired_modifiers(
+        &mut self,
+        expires_at_seat: Option<Seat>,
+    ) -> Vec<(IdentityHash, Seat, TemporaryModifier)> {
+        let mut expired = Vec::new();
+        for (index, player) in self.position.players.iter_mut().enumerate() {
+            let seat = if index == 0 { Seat::North } else { Seat::South };
+            for modifier in player.avatar.temporary_modifiers.expire(expires_at_seat) {
+                expired.push((player.avatar.card.instance_id.clone(), seat, modifier));
+            }
+        }
+        for unit in &mut self.position.units {
+            for modifier in unit.temporary_modifiers.expire(expires_at_seat) {
+                expired.push((unit.card.instance_id.clone(), unit.controller, modifier));
+            }
+        }
+        expired
+    }
+
+    pub(super) fn emit_expired_modifiers(
+        expired: Vec<(IdentityHash, Seat, TemporaryModifier)>,
+        outcomes: &mut OutcomeLog<'_>,
+    ) {
+        for (instance_id, controller, modifier) in expired {
+            outcomes.push(modifier.kind.expiration_event(), || {
+                let mut value = json!({
+                    "instanceId": instance_id,
+                    "seat": controller,
+                    "sourceInstanceId": modifier.source_instance_id,
+                });
+                if matches!(
+                    modifier.kind,
+                    TemporaryModifierKind::Movement | TemporaryModifierKind::Power
+                ) {
+                    value["amount"] = json!(modifier.amount);
+                }
+                if let Some(seat) = modifier.expires_at_seat {
+                    value["expiresAtSeat"] = json!(seat);
+                }
+                value
+            });
+        }
+    }
+
     pub(super) fn grant_unit_modifier(
         &mut self,
         (instance_id, kind, seat): (IdentityHash, UnitKind, Seat),
         modifier: TemporaryModifierKind,
         amount: u16,
         source: &IdentityHash,
+        expires_at_seat: Option<Seat>,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
         self.temporary_modifiers_mut(kind, seat, &instance_id)?
-            .grant(modifier, amount, source.clone());
+            .grant_until(modifier, amount, source.clone(), expires_at_seat);
         outcomes.push(modifier.grant_event(), || {
             let mut value =
                 json!({"instanceId": instance_id, "seat": seat, "sourceInstanceId": source});
@@ -56,6 +101,9 @@ impl Game {
                 TemporaryModifierKind::Movement | TemporaryModifierKind::Power
             ) {
                 value["amount"] = json!(amount);
+            }
+            if let Some(expiry_seat) = expires_at_seat {
+                value["expiresAtSeat"] = json!(expiry_seat);
             }
             value
         });
@@ -70,6 +118,9 @@ pub(super) struct TemporaryModifier {
     pub(super) kind: TemporaryModifierKind,
     pub(super) amount: u16,
     pub(super) source_instance_id: IdentityHash,
+    /// Absent means this End Phase; otherwise expires before that seat next untaps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) expires_at_seat: Option<Seat>,
 }
 
 /// Sparse, duplicate-preserving temporary effects for one object.
@@ -91,10 +142,21 @@ impl TemporaryModifiers {
         amount: u16,
         source_instance_id: IdentityHash,
     ) {
+        self.grant_until(kind, amount, source_instance_id, None);
+    }
+
+    pub(super) fn grant_until(
+        &mut self,
+        kind: TemporaryModifierKind,
+        amount: u16,
+        source_instance_id: IdentityHash,
+        expires_at_seat: Option<Seat>,
+    ) {
         self.entries.push(TemporaryModifier {
             kind,
             amount,
             source_instance_id,
+            expires_at_seat,
         });
     }
 
@@ -134,8 +196,14 @@ impl TemporaryModifiers {
             .collect()
     }
 
-    pub(super) fn drain(&mut self) -> impl Iterator<Item = TemporaryModifier> + '_ {
-        self.entries.drain(..)
+    /// Removes only grants ending at this phase boundary, preserving record order.
+    pub(super) fn expire(
+        &mut self,
+        expires_at_seat: Option<Seat>,
+    ) -> impl Iterator<Item = TemporaryModifier> + '_ {
+        self.entries.extract_if(.., move |modifier| {
+            modifier.expires_at_seat == expires_at_seat
+        })
     }
 
     #[cfg(test)]
@@ -151,7 +219,7 @@ impl TemporaryModifiers {
 
 #[cfg(test)]
 mod collection_tests {
-    use super::{TemporaryModifierKind, TemporaryModifiers};
+    use super::{Seat, TemporaryModifierKind, TemporaryModifiers};
     use crate::canonical::IdentityHash;
 
     fn source(hex: char) -> IdentityHash {
@@ -206,6 +274,39 @@ mod collection_tests {
 
         modifiers.grant(TemporaryModifierKind::Movement, u16::MAX, source('c'));
         assert!(modifiers.amount(TemporaryModifierKind::Movement).is_err());
+    }
+
+    #[test]
+    fn expiry_preserves_other_boundaries_and_serialized_order() {
+        let mut modifiers = TemporaryModifiers::new();
+        for (amount, boundary) in [
+            (1, Some(Seat::North)),
+            (2, None),
+            (4, Some(Seat::South)),
+            (8, Some(Seat::North)),
+        ] {
+            modifiers.grant_until(TemporaryModifierKind::Power, amount, source('a'), boundary);
+        }
+        let encoded = serde_json::to_value(&modifiers).unwrap();
+        assert!(encoded[1].get("expiresAtSeat").is_none());
+        let mut restored: TemporaryModifiers = serde_json::from_value(encoded).unwrap();
+        assert_eq!(restored, modifiers);
+        let amounts = |entries: Vec<_>| {
+            entries
+                .into_iter()
+                .map(|m: super::TemporaryModifier| m.amount)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(amounts(restored.expire(None).collect()), [2]);
+        assert_eq!(restored.amount(TemporaryModifierKind::Power), Ok(13));
+        assert_eq!(
+            amounts(restored.expire(Some(Seat::North)).collect()),
+            [1, 8]
+        );
+        assert_eq!(restored.amount(TemporaryModifierKind::Power), Ok(4));
+        assert_eq!(amounts(restored.expire(Some(Seat::South)).collect()), [4]);
+        assert!(restored.is_empty());
+        assert_eq!(modifiers.amount(TemporaryModifierKind::Power), Ok(15));
     }
 }
 

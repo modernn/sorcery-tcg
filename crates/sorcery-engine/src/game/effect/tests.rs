@@ -117,7 +117,7 @@ fn install(game: &mut Game, effects: Vec<Effect>) -> CardId {
     let selection = effects.iter().find_map(|effect| match effect {
         Effect::Damage { recipients, .. }
         | Effect::Untap { recipients }
-        | Effect::GrantThisTurn { recipients, .. } => match recipients {
+        | Effect::Grant { recipients, .. } => match recipients {
             UnitSet::Target => Some(SelectionSpec::Unit {
                 kind: None,
                 relation: SpatialRelation::Anywhere,
@@ -1589,7 +1589,8 @@ fn empty_second_choice_does_not_reuse_first_chosen_unit() {
         &mut game,
         vec![
             Effect::ChooseUnit(spec),
-            Effect::GrantThisTurn {
+            Effect::Grant {
+                duration: crate::ability::EffectDuration::ThisTurn,
                 recipients: UnitSet::Chosen,
                 modifier: TemporaryModifierKind::Movement,
                 amount: 1,
@@ -1598,7 +1599,8 @@ fn empty_second_choice_does_not_reuse_first_chosen_unit() {
                 kind: Some(UnitKind::Minion),
                 ..spec
             }),
-            Effect::GrantThisTurn {
+            Effect::Grant {
+                duration: crate::ability::EffectDuration::ThisTurn,
                 recipients: UnitSet::Chosen,
                 modifier: TemporaryModifierKind::Power,
                 amount: 2,

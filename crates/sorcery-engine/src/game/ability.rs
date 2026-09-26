@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use crate::ability::TemporaryModifierKind;
 pub(super) use crate::ability::{
     AbilityProgram, Effect, SelectionSpec, SpatialRelation, UnitChoiceSpec, UnitSet,
 };
+use crate::ability::{EffectDuration, TemporaryModifierKind};
 use crate::action::DeckZone;
 use crate::facts::{ArtifactEffect, CardFacts, MagicEffect, MinionFacts};
 
@@ -96,7 +96,8 @@ fn ally_grant(
             allied_only: true,
             optional: false,
         }),
-        Effect::GrantThisTurn {
+        Effect::Grant {
+            duration: EffectDuration::ThisTurn,
             recipients: UnitSet::Chosen,
             modifier,
             amount,
@@ -306,7 +307,7 @@ mod tests {
         let facts = magic(&json!({"effectProgram": {"effects": [
             {"op": "draw-card"},
             {"op": "choose-unit", "relation": "anywhere", "alliedOnly": true},
-            {"op": "grant-this-turn", "recipients": "chosen", "modifier": "movement", "amount": 1}
+            {"op": "grant", "duration": "this-turn", "recipients": "chosen", "modifier": "movement", "amount": 1}
         ]}}));
         let compiled = CompiledAbilities::from_facts(&facts);
         let crate::facts::CardFacts::Magic(facts) = facts else {

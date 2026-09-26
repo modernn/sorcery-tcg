@@ -18,6 +18,8 @@ const FIXTURE_JSON: &str =
 const MAX_SAMPLES: u32 = 10_000;
 const MAX_GAMES_PER_SAMPLE: u32 = 10_000;
 const MAX_SEARCH_HORIZON: u32 = 32;
+const MAX_SETUP_SAMPLES: u32 = 1_000;
+const SETUP_SEEDS: [u32; 3] = [31, 37, 43];
 
 type BenchmarkResult<T> = Result<T, Box<dyn Error>>;
 
@@ -68,6 +70,19 @@ struct BenchmarkConfiguration {
     paired_rollouts_per_sample: u32,
 }
 
+struct SetupWorkload {
+    label: &'static str,
+    cards_per_zone: usize,
+    card_definition_count: usize,
+    manifests: Vec<String>,
+}
+
+struct SetupSample {
+    game_duration: Duration,
+    session_duration: Duration,
+    manifests: u32,
+}
+
 fn main() -> BenchmarkResult<()> {
     if cfg!(debug_assertions) {
         return Err(io::Error::other(
@@ -77,6 +92,15 @@ fn main() -> BenchmarkResult<()> {
     }
     if std::env::args().any(|arg| arg == "--worker-scaling") {
         let report = worker_scaling_report()?;
+        let stdout = io::stdout();
+        let mut output = stdout.lock();
+        serde_json::to_writer(&mut output, &report)?;
+        writeln!(output)?;
+        return Ok(());
+    }
+    if std::env::args().any(|arg| arg == "--setup-scaling") {
+        let samples = positive_integer("BENCHMARK_SETUP_SAMPLES", 5, MAX_SETUP_SAMPLES)?;
+        let report = setup_scaling_report(samples)?;
         let stdout = io::stdout();
         let mut output = stdout.lock();
         serde_json::to_writer(&mut output, &report)?;
@@ -132,6 +156,273 @@ fn main() -> BenchmarkResult<()> {
     serde_json::to_writer(&mut output, &report)?;
     writeln!(output)?;
     Ok(())
+}
+
+fn setup_scaling_report(sample_count: u32) -> BenchmarkResult<Value> {
+    let workloads = [
+        setup_workload("small", 3, 3)?,
+        setup_workload("large", 200, 200)?,
+    ];
+    for workload in &workloads {
+        black_box(setup_sample(workload)?);
+    }
+    let samples = workloads
+        .iter()
+        .map(|workload| {
+            let measurements = (0..sample_count)
+                .map(|_| setup_sample(workload))
+                .collect::<BenchmarkResult<Vec<_>>>()?;
+            Ok((workload, measurements))
+        })
+        .collect::<BenchmarkResult<Vec<_>>>()?;
+    let variants = samples
+        .into_iter()
+        .map(|(workload, measurements)| setup_summary(workload, &measurements))
+        .collect::<Vec<_>>();
+    let batch = batch_setup_summary(workloads.last().expect("large setup workload"))?;
+    Ok(json!({
+        "benchmarkVersion": 1,
+        "mode": "setup-scaling",
+        "sampleCount": sample_count,
+        "seedCount": SETUP_SEEDS.len(),
+        "largeBatch": batch,
+        "variants": variants,
+    }))
+}
+
+fn setup_workload(
+    label: &'static str,
+    atlas_count: usize,
+    spellbook_count: usize,
+) -> BenchmarkResult<SetupWorkload> {
+    let manifests = SETUP_SEEDS
+        .into_iter()
+        .map(|seed| setup_manifest_json(atlas_count, spellbook_count, seed))
+        .collect::<BenchmarkResult<Vec<_>>>()?;
+    Ok(SetupWorkload {
+        label,
+        cards_per_zone: atlas_count.max(spellbook_count),
+        card_definition_count: 2 + 2 * (atlas_count + spellbook_count),
+        manifests,
+    })
+}
+
+fn setup_manifest_json(
+    atlas_count: usize,
+    spellbook_count: usize,
+    seed: u32,
+) -> BenchmarkResult<String> {
+    let mut cards = serde_json::Map::new();
+    let north_atlas = setup_cards(&mut cards, "north", "site", atlas_count, false);
+    let south_atlas = setup_cards(&mut cards, "south", "site", atlas_count, false);
+    let north_spellbook = setup_cards(&mut cards, "north", "spell", spellbook_count, true);
+    let south_spellbook = setup_cards(&mut cards, "south", "spell", spellbook_count, true);
+    let mut manifest = json!({
+        "authority": {
+            "contentHash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "mode": "synthetic",
+            "revisionId": "synthetic-setup-scaling-v1",
+        },
+        "cards": cards,
+        "decks": {
+            "north": {
+                "atlas": north_atlas,
+                "avatar": "north-avatar",
+                "spellbook": north_spellbook,
+            },
+            "south": {
+                "atlas": south_atlas,
+                "avatar": "south-avatar",
+                "spellbook": south_spellbook,
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    cards.insert(
+        "north-avatar".to_owned(),
+        json!({
+            "attack": 1,
+            "cardType": "avatar",
+            "defense": 1,
+            "drawSpell": false,
+            "life": 2,
+        }),
+    );
+    cards.insert(
+        "south-avatar".to_owned(),
+        json!({
+            "attack": 1,
+            "cardType": "avatar",
+            "defense": 1,
+            "drawSpell": false,
+            "life": 2,
+        }),
+    );
+    manifest["cards"] = Value::Object(cards);
+    manifest["manifestId"] = json!(identity_hash(&manifest)?);
+    Ok(canonical_json(&manifest)?)
+}
+
+fn setup_cards(
+    cards: &mut serde_json::Map<String, Value>,
+    seat: &str,
+    kind: &str,
+    count: usize,
+    authored: bool,
+) -> Vec<String> {
+    (1..=count)
+        .map(|index| {
+            let card_id = format!("{seat}-{kind}-{index}");
+            let definition = if kind == "site" {
+                json!({"cardType": "site", "elements": ["earth"]})
+            } else if authored && index == 1 {
+                json!({
+                    "cardType": "magic",
+                    "effectProgram": {
+                        "effects": [
+                            {
+                                "alliedOnly": true,
+                                "kind": "minion",
+                                "op": "choose-unit",
+                                "optional": false,
+                                "relation": "anywhere",
+                            },
+                            {
+                                "amount": 2,
+                                "duration": "this-turn",
+                                "modifier": "power",
+                                "op": "grant",
+                                "recipients": "chosen",
+                            },
+                            {"op": "draw-card"},
+                        ],
+                        "optionalSelection": false,
+                        "selection": {
+                            "kind": "unit",
+                            "relation": "anywhere",
+                            "unitKind": "minion",
+                        },
+                    },
+                    "manaCost": 1,
+                    "thresholds": {"air": 0, "earth": 1, "fire": 0, "water": 0},
+                })
+            } else {
+                json!({
+                    "attack": 5,
+                    "cardType": "minion",
+                    "defense": 1,
+                    "manaCost": 1,
+                    "thresholds": {"air": 0, "earth": 1, "fire": 0, "water": 0},
+                })
+            };
+            cards.insert(card_id.clone(), definition);
+            card_id
+        })
+        .collect()
+}
+
+fn setup_sample(workload: &SetupWorkload) -> BenchmarkResult<SetupSample> {
+    let started = Instant::now();
+    for manifest in &workload.manifests {
+        black_box(Game::from_manifest_json(manifest)?);
+    }
+    let game_duration = started.elapsed();
+    let started = Instant::now();
+    for manifest in &workload.manifests {
+        black_box(Session::new(manifest)?);
+    }
+    Ok(SetupSample {
+        game_duration,
+        session_duration: started.elapsed(),
+        manifests: u32::try_from(workload.manifests.len())?,
+    })
+}
+
+fn setup_summary(workload: &SetupWorkload, samples: &[SetupSample]) -> Value {
+    let mut game_ms = samples
+        .iter()
+        .map(|sample| sample.game_duration.as_secs_f64() * 1_000.0)
+        .collect::<Vec<_>>();
+    let mut session_ms = samples
+        .iter()
+        .map(|sample| sample.session_duration.as_secs_f64() * 1_000.0)
+        .collect::<Vec<_>>();
+    game_ms.sort_by(f64::total_cmp);
+    session_ms.sort_by(f64::total_cmp);
+    let manifests = samples.first().map_or(0, |sample| sample.manifests);
+    let manifest_count = f64::from(manifests);
+    json!({
+        "label": workload.label,
+        "cardsPerZone": workload.cards_per_zone,
+        "cardDefinitionCount": workload.card_definition_count,
+        "manifestCount": manifests,
+        "gameFromManifestJsonMedianMs": round(*percentile(&game_ms, 50)),
+        "gameFromManifestJsonMedianPerManifestMs": round(*percentile(&game_ms, 50) / manifest_count),
+        "sessionNewMedianMs": round(*percentile(&session_ms, 50)),
+        "sessionNewMedianPerManifestMs": round(*percentile(&session_ms, 50) / manifest_count),
+        "gameFromManifestJsonSamplesMs": game_ms.into_iter().map(round).collect::<Vec<_>>(),
+        "sessionNewSamplesMs": session_ms.into_iter().map(round).collect::<Vec<_>>(),
+    })
+}
+
+fn batch_setup_summary(workload: &SetupWorkload) -> BenchmarkResult<Value> {
+    const JOB_COUNT: usize = 4;
+    const WORKERS: [usize; 2] = [1, 2];
+    const REPEATS: usize = 3;
+    let policy = baseline_policy(&workload.manifests[0])?;
+    let deck_id = policy.deck_id();
+    let jobs = (0..JOB_COUNT)
+        .map(|index| BatchJob {
+            manifest_json: &workload.manifests[index % workload.manifests.len()],
+            north_deck_id: deck_id,
+            north_policy: &policy,
+            south_deck_id: deck_id,
+            south_policy: &policy,
+        })
+        .collect::<Vec<_>>();
+    let mut deterministic_hash = None;
+    let mut measurements = Vec::with_capacity(WORKERS.len());
+    for workers in WORKERS {
+        let warmup_hash = identity_hash(&serde_json::to_value(black_box(run_game_batch(
+            &jobs, workers,
+        )?))?)?;
+        if let Some(expected) = &deterministic_hash {
+            if expected != &warmup_hash {
+                return Err(io::Error::other("setup batch changed with worker count").into());
+            }
+        } else {
+            deterministic_hash = Some(warmup_hash);
+        }
+        let mut durations = Vec::with_capacity(REPEATS);
+        let mut repeat_hashes = Vec::with_capacity(REPEATS);
+        for _ in 0..REPEATS {
+            let started = Instant::now();
+            let results = run_game_batch(&jobs, workers)?;
+            durations.push(started.elapsed().as_secs_f64() * 1_000.0);
+            let result_hash = identity_hash(&serde_json::to_value(black_box(results))?)?;
+            if deterministic_hash.as_ref() != Some(&result_hash) {
+                return Err(io::Error::other("setup batch result was not deterministic").into());
+            }
+            repeat_hashes.push(result_hash);
+        }
+        durations.sort_by(f64::total_cmp);
+        measurements.push(json!({
+            "workers": workers,
+            "medianMs": round(durations[REPEATS / 2]),
+            "samplesMs": durations.into_iter().map(round).collect::<Vec<_>>(),
+            "resultHashes": repeat_hashes,
+        }));
+    }
+    Ok(json!({
+        "cardsPerZone": workload.cards_per_zone,
+        "jobs": JOB_COUNT,
+        "repeats": REPEATS,
+        "deterministicResultHash": deterministic_hash,
+        "workers": measurements,
+    }))
 }
 
 fn worker_scaling_report() -> BenchmarkResult<Value> {

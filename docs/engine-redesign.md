@@ -378,9 +378,12 @@ validates the program once at admission and shares that immutable allocation wit
 compiled card definition. Both authored and migrated legacy abilities use the same
 effect-frame runner; there is no second interpreter in TypeScript. The boundary
 preserves the program and Rust supplies all executable choices.
+Deck manifest normalization treats an authored program as the complete effect;
+it cannot fall through to a legacy effect default. A cross-language admission test
+covers that deck-only path.
 
 The initial operations are `damage`, `untap`, fixed-deck `draw`, `draw-card`,
-`choose-unit`, and `grant-this-turn`. A declared target uses `selection`; an ordinary
+`choose-unit`, and `grant`. A declared target uses `selection`; an ordinary
 choice uses a `choose-unit` operation at its actual position in the sequence. Unqualified
 ordinary choices span regions, while declared targets and nearby choices retain their
 regional restrictions. A new choice clears the previous chosen object, including when
@@ -407,6 +410,20 @@ declaration and must not be approximated by independent `draw-card` instructions
 Authored Silence and next-strike replacements remain rejected. Airborne, Lethal, and
 Ranged grants require minion-only recipients.
 
+Each `grant` specifies `duration: "this-turn"` or `duration: "until-your-next-turn"`.
+The latter records the source controller at resolution, independently of the recipient
+or the later location of the source card. Shared modifier storage retains separate
+records for overlapping grants. End Phase removes this-turn records after healing
+minion damage. Start Phase removes records expiring for the incoming player before
+untapping, mana generation, and start triggers. The same ordering applies to expiring
+disable effects, so an ability suppressed by Freeze can resume before untapping.
+An active disable still suppresses a printed restriction on untapping.
+
+The earlier authored `grant-this-turn` opcode is rejected; local authored bindings must
+migrate to `grant` with an explicit duration. Existing legacy fact inputs compile to
+`this-turn` without changing their contract. Historical manifests and replays retain
+their original engine build; do not rewrite historical evidence to fit the new schema.
+
 Legacy Charge, First Strike, Movement-plus-draw, Power, and Power-plus-draw inputs now
 compile to ordinary choice and grant instructions in this runner. Their separate
 recipient enumeration and execution branches are deleted. A cast pays its costs and
@@ -425,8 +442,11 @@ Binding admission and direct rule probes remain separate from full deck eligibil
 
 Separate immutable compiled rules from per-match seed/deck configuration. Current
 rules contexts are shared among cloned positions, but include manifest/seed identity
-and are reconstructed for each batch job. A common compiled catalog should be reused
-across independent seeded jobs without copying all 1,100 definitions into every request.
+and are reconstructed for each batch job. Reusing a common compiled catalog across
+independent seeded jobs remains a profiling-driven option. A setup benchmark with
+802 referenced synthetic definitions measured roughly 6.5 ms per Session construction
+against roughly 0.84 seconds per recorded batch job on this machine. Since only part of
+setup could be reused, this measurement does not justify a new cache or validation path.
 Within a batch job, initial setup now happens once: its game clone supplies the rollout
 and the retained session records the selected actions. Final replay verification still
 reconstructs the manifest independently. This removes redundant setup without a cache

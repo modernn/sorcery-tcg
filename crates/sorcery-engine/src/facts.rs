@@ -1505,7 +1505,7 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
                     ..
                 } | crate::ability::Effect::Untap {
                     recipients: crate::ability::UnitSet::OtherUnitsHere
-                } | crate::ability::Effect::GrantThisTurn {
+                } | crate::ability::Effect::Grant {
                     recipients: crate::ability::UnitSet::OtherUnitsHere,
                     ..
                 }
