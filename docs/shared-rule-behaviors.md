@@ -255,3 +255,9 @@ Currently admitted minions use their complete bound subtype lists. Future
 subtype-changing effects must extend this shared membership query before being
 admitted; this does not yet support subtype grants from equipment or global
 subtype transformations.
+
+End-of-controller-turn untapping and Stealth gains check the same ability-loss
+predicate as continuous nearby enemy Stealth removal. Both Disabled and Silence
+suppress these special abilities. End-turn eligibility is captured before
+expiring temporary Silence, so expiry does not retroactively trigger a removed
+ability during that end phase.

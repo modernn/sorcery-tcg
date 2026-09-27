@@ -6339,7 +6339,7 @@ impl Game {
                 .iter()
                 .enumerate()
                 .filter(|(_, source)| {
-                    if self.minion_is_disabled(source) {
+                    if self.minion_abilities_lost(source) {
                         return false;
                     }
                     let CardFacts::Minion(facts) =
@@ -24235,19 +24235,19 @@ impl Game {
             }
         }
         self.position.players[seat_index(seat)].mana = 0;
-        let disabled_units: Vec<_> = self
+        let lost_abilities: Vec<_> = self
             .position
             .units
             .iter()
-            .map(|unit| self.minion_is_disabled(unit))
+            .map(|unit| self.minion_abilities_lost(unit))
             .collect();
         let end_turn_stealth_gained: Vec<_> = self
             .position
             .units
             .iter()
-            .zip(&disabled_units)
-            .map(|(unit, disabled)| {
-                if unit.controller != seat || *disabled || unit.stealthed {
+            .zip(&lost_abilities)
+            .map(|(unit, abilities_lost)| {
+                if unit.controller != seat || *abilities_lost || unit.stealthed {
                     return false;
                 }
                 let CardFacts::Minion(facts) =
@@ -24266,9 +24266,9 @@ impl Game {
             .position
             .units
             .iter()
-            .zip(&disabled_units)
-            .filter_map(|(unit, disabled)| {
-                if unit.controller != seat || !unit.tapped || *disabled {
+            .zip(&lost_abilities)
+            .filter_map(|(unit, abilities_lost)| {
+                if unit.controller != seat || !unit.tapped || *abilities_lost {
                     return None;
                 }
                 matches!(

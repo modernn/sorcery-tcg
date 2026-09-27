@@ -552,3 +552,54 @@ fn recipient_subtype_names_are_strictly_validated() {
         assert!(crate::facts::parse_card_definition("invalid", &card).is_err());
     }
 }
+
+#[test]
+fn silenced_end_turn_abilities_do_not_trigger_before_silence_expires() {
+    for silenced in [false, true] {
+        let mut game = fixture(&json!({"takesLessDamage":1}));
+        let id = add_minion(&mut game, false, Seat::North, "C3", Region::Surface);
+        let card_id = game.position.units[0].card.card_id;
+        let CardFacts::Minion(facts) =
+            &mut Arc::get_mut(&mut game.rules).unwrap().cards[usize::from(card_id.0)].facts
+        else {
+            panic!("minion")
+        };
+        facts.untaps_at_end_of_controller_turn = true;
+        facts.end_turn_stealth = Some(EndTurnStealth::Always);
+        game.position.units[0].tapped = true;
+        if silenced {
+            game.position.units[0]
+                .temporary_modifiers
+                .grant(TemporaryModifierKind::Silence, 1, id);
+        }
+        game.finish_end_turn_cleanup(Seat::North, &mut OutcomeLog::Ignore)
+            .unwrap();
+        assert_eq!(game.position.units[0].tapped, silenced);
+        assert_eq!(game.position.units[0].stealthed, !silenced);
+    }
+}
+
+#[test]
+fn silenced_provider_does_not_remove_enemy_stealth_until_its_ability_returns() {
+    let mut game = fixture(&json!({"takesLessDamage":1}));
+    let provider = add_minion(&mut game, true, Seat::North, "C3", Region::Surface);
+    add_minion(&mut game, false, Seat::South, "C3", Region::Surface);
+    let card_id = game.position.units[0].card.card_id;
+    let CardFacts::Minion(facts) =
+        &mut Arc::get_mut(&mut game.rules).unwrap().cards[usize::from(card_id.0)].facts
+    else {
+        panic!("minion")
+    };
+    facts.nearby_enemies_permanently_lose_stealth = true;
+    game.position.units[0]
+        .temporary_modifiers
+        .grant(TemporaryModifierKind::Silence, 1, provider);
+    game.position.units[1].stealthed = true;
+    game.settle_nearby_enemy_stealth(&mut OutcomeLog::Ignore);
+    assert!(game.position.units[1].stealthed);
+    game.position.units[0]
+        .temporary_modifiers
+        .take(TemporaryModifierKind::Silence);
+    game.settle_nearby_enemy_stealth(&mut OutcomeLog::Ignore);
+    assert!(!game.position.units[1].stealthed);
+}
