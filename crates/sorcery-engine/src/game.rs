@@ -63,7 +63,7 @@ use effect::{AbilityEntry, EffectFrame, RealmReference};
 use effect_strikes::EffectStrikes;
 use modifiers::{TemporaryModifierKind, TemporaryModifiers};
 use resolution::{SiteGenesisTail, TokenEntryContinuation};
-use trigger_order::{TriggerBatch, TriggerOrderStage, TriggerSource};
+use trigger_order::{TriggerBatch, TriggerIdentity, TriggerOrderStage, TriggerSource};
 use triggers::{GenesisTrigger, PendingTriggerOrder};
 
 /// Frozen public engine version bound into every admitted manifest.
@@ -774,14 +774,12 @@ struct PendingDeathriteSource {
 type PendingDeathriteBatch = TriggerBatch<PendingDeathriteSource>;
 
 impl TriggerSource for PendingDeathriteSource {
-    fn controller(&self) -> Seat {
-        self.controller
-    }
-    fn trigger_instance_id(&self) -> &IdentityHash {
-        &self.instance_id
-    }
-    fn source_instance_id(&self) -> &IdentityHash {
-        &self.instance_id
+    fn identity(&self) -> TriggerIdentity<'_> {
+        TriggerIdentity {
+            controller: self.controller,
+            trigger_instance_id: &self.instance_id,
+            source_instance_id: &self.instance_id,
+        }
     }
 }
 

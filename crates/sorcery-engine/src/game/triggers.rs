@@ -4,7 +4,7 @@ use super::effect::{EffectFrame, EffectSource};
 use super::{
     AbilityEntry, ActionDescriptor, CardFacts, CardId, EngineRandomDraw, Game, GameError,
     IdentityHash, IssuedAction, OutcomeLog, Phase, ResolutionContinuation, Seat, TriggerBatch,
-    TriggerOrderStage, TriggerSource, UnitTarget, Value, json,
+    TriggerIdentity, TriggerOrderStage, TriggerSource, UnitTarget, Value, json,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -32,14 +32,13 @@ impl GenesisTrigger {
 }
 
 impl TriggerSource for GenesisTrigger {
-    fn controller(&self) -> Seat {
-        self.source().controller
-    }
-    fn trigger_instance_id(&self) -> &IdentityHash {
-        &self.source().instance_id
-    }
-    fn source_instance_id(&self) -> &IdentityHash {
-        &self.source().instance_id
+    fn identity(&self) -> TriggerIdentity<'_> {
+        let source = self.source();
+        TriggerIdentity {
+            controller: source.controller,
+            trigger_instance_id: &source.instance_id,
+            source_instance_id: &source.instance_id,
+        }
     }
     fn needs_declaration(&self) -> bool {
         matches!(self, Self::Compiled(frame) if frame.declaration_pending)
@@ -151,7 +150,7 @@ impl Game {
             } else {
                 Phase::TriggerOrder
             };
-            self.position.decision_seat = sources[0].controller();
+            self.position.decision_seat = sources[0].identity().controller;
             self.position.pending_trigger_order = Some(pending);
             return Ok(());
         }
@@ -238,7 +237,7 @@ impl Game {
                         .compiled_ability(source.card_id(), AbilityEntry::Genesis)
                         .ok_or(GameError::IllegalAction)?;
                     for choice in self.selection_choices(
-                        source.controller(),
+                        source.identity().controller,
                         source.source().region,
                         &source.source().cells,
                         ability.selection,
@@ -246,21 +245,25 @@ impl Game {
                         if let Some(target) = choice.target {
                             self.push_ability_choice(
                                 actions,
-                                source.source_instance_id(),
+                                source.identity().source_instance_id,
                                 Some(target),
                             );
                         }
                     }
                     if ability.optional_selection {
-                        self.push_ability_choice(actions, source.source_instance_id(), None);
+                        self.push_ability_choice(
+                            actions,
+                            source.identity().source_instance_id,
+                            None,
+                        );
                     }
                 } else {
                     self.push_trigger_order_action(
                         actions,
-                        source.trigger_instance_id(),
-                        source.source_instance_id(),
+                        source.identity().trigger_instance_id,
+                        source.identity().source_instance_id,
                         source.card_id(),
-                        source.controller(),
+                        source.identity().controller,
                     )?;
                 }
             }
@@ -318,9 +321,9 @@ impl Game {
             .pending_order()
             .ok_or(GameError::IllegalAction)?
             .iter()
-            .find(|source| source.source_instance_id() == source_instance_id)
+            .find(|source| source.identity().source_instance_id == source_instance_id)
             .ok_or(GameError::IllegalAction)?;
-        if !source.needs_declaration() || source.controller() != seat {
+        if !source.needs_declaration() || source.identity().controller != seat {
             return Err(GameError::IllegalAction);
         }
         let ability = self.rules.cards[usize::from(source.card_id().0)]
@@ -331,7 +334,7 @@ impl Game {
                 "Genesis declaration requires a compiled ability".to_owned(),
             ))?;
         let choices = self.selection_choices(
-            source.controller(),
+            source.identity().controller,
             source.source().region,
             &source.source().cells,
             ability.selection,
@@ -354,7 +357,7 @@ impl Game {
             .pending_order()
             .ok_or(GameError::IllegalAction)?
             .iter()
-            .position(|source| source.source_instance_id() == source_instance_id)
+            .position(|source| source.identity().source_instance_id == source_instance_id)
             .ok_or(GameError::IllegalAction)?;
         let trigger = match pending.batch.stage {
             TriggerOrderStage::ActiveOrder => pending.batch.active_remaining.get_mut(source),
@@ -401,8 +404,8 @@ impl Game {
                 .and_then(|pending| pending.batch.pending_order())
                 .is_some_and(|sources| {
                     sources.iter().any(|source| {
-                        source.source_instance_id() == source_instance_id
-                            && source.trigger_instance_id() == trigger_instance_id
+                        source.identity().source_instance_id == source_instance_id
+                            && source.identity().trigger_instance_id == trigger_instance_id
                             && !source.needs_declaration()
                     })
                 })

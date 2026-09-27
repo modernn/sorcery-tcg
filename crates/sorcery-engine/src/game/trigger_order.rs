@@ -1,12 +1,16 @@
 use super::{GameError, IdentityHash, Seat};
 
+/// Borrowed ordering identity shared by all trigger-source families.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct TriggerIdentity<'a> {
+    pub(super) controller: Seat,
+    pub(super) trigger_instance_id: &'a IdentityHash,
+    pub(super) source_instance_id: &'a IdentityHash,
+}
+
 /// A trigger source that can be ordered by its controller.
 pub(super) trait TriggerSource {
-    fn controller(&self) -> Seat;
-    /// Stable identity of this particular trigger occurrence.
-    fn trigger_instance_id(&self) -> &IdentityHash;
-    /// Realm object whose ability produced the occurrence.
-    fn source_instance_id(&self) -> &IdentityHash;
+    fn identity(&self) -> TriggerIdentity<'_>;
     fn needs_declaration(&self) -> bool {
         false
     }
@@ -36,7 +40,7 @@ impl<T: TriggerSource> TriggerBatch<T> {
         }
         let (active, non_active): (Vec<_>, Vec<_>) = sources
             .into_iter()
-            .partition(|source| source.controller() == active_seat);
+            .partition(|source| source.identity().controller == active_seat);
         let active_needs_order =
             active.len() > 1 || active.first().is_some_and(TriggerSource::needs_declaration);
         let non_active_needs_order = non_active.len() > 1
@@ -120,7 +124,7 @@ impl<T: TriggerSource> TriggerBatch<T> {
         }
         let index = remaining
             .iter()
-            .position(|source| source.trigger_instance_id() == trigger_instance_id)
+            .position(|source| source.identity().trigger_instance_id == trigger_instance_id)
             .ok_or(GameError::IllegalAction)?;
         if remaining[index].needs_declaration() {
             return Err(GameError::IllegalAction);
@@ -153,16 +157,12 @@ mod tests {
     }
 
     impl TriggerSource for Source {
-        fn controller(&self) -> Seat {
-            self.controller
-        }
-
-        fn trigger_instance_id(&self) -> &IdentityHash {
-            &self.occurrence_id
-        }
-
-        fn source_instance_id(&self) -> &IdentityHash {
-            &self.provider_id
+        fn identity(&self) -> TriggerIdentity<'_> {
+            TriggerIdentity {
+                controller: self.controller,
+                trigger_instance_id: &self.occurrence_id,
+                source_instance_id: &self.provider_id,
+            }
         }
     }
 
@@ -197,7 +197,8 @@ mod tests {
             &[active_first, active_second]
         );
         let chosen = batch.pending_order().unwrap()[0]
-            .trigger_instance_id()
+            .identity()
+            .trigger_instance_id
             .clone();
         batch.commit(&chosen).unwrap();
         assert_eq!(batch.stage, TriggerOrderStage::NonActiveOrder);
@@ -224,8 +225,8 @@ mod tests {
         )
         .unwrap();
 
-        batch.commit(second.trigger_instance_id()).unwrap();
-        batch.commit(first.trigger_instance_id()).unwrap();
+        batch.commit(second.identity().trigger_instance_id).unwrap();
+        batch.commit(first.identity().trigger_instance_id).unwrap();
         assert_eq!(batch.stage, TriggerOrderStage::Resolve);
         assert_eq!(batch.resolving, vec![non_active, second, first, third]);
     }
@@ -239,12 +240,12 @@ mod tests {
 
         let unknown = source(Seat::South, 9);
         assert!(matches!(
-            batch.commit(unknown.trigger_instance_id()),
+            batch.commit(unknown.identity().trigger_instance_id),
             Err(GameError::IllegalAction)
         ));
-        batch.commit(first.trigger_instance_id()).unwrap();
+        batch.commit(first.identity().trigger_instance_id).unwrap();
         assert!(matches!(
-            batch.commit(first.trigger_instance_id()),
+            batch.commit(first.identity().trigger_instance_id),
             Err(GameError::IllegalAction)
         ));
     }
@@ -265,7 +266,7 @@ mod tests {
         let mut batch =
             TriggerBatch::new(vec![first.clone(), second.clone()], Seat::North).unwrap();
 
-        batch.commit(second.trigger_instance_id()).unwrap();
+        batch.commit(second.identity().trigger_instance_id).unwrap();
 
         assert_eq!(batch.stage, TriggerOrderStage::Resolve);
         assert_eq!(batch.resolving, vec![second, first]);
