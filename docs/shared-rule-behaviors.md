@@ -275,7 +275,9 @@ non-Water counts while retaining printed Water production, with a minimum of
 one. Site suppression zeros the full vector; Silence and Disabled suppress
 minion abilities that remove site production or supply additional affinity.
 Private ingestion validates explicit production against the source site's
-printed counts, separately from non-site casting requirements.
+printed counts, separately from non-site casting requirements. Repeated source
+production requires explicit counts; omitting them cannot silently fall back
+to single-affinity production.
 
 Sites that cannot be modified retain their printed classification, affinity, and
 abilities under terrain overlays, including water-only flooding and ability

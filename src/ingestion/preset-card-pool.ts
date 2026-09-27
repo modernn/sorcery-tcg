@@ -38,8 +38,9 @@ export function assertPrintedCardFacts(
     }
   }
   if (source.cardType === 'site' && definition.cardType === 'site'
-    && definition.siteAffinity !== undefined
-    && canonicalJson(definition.siteAffinity as JsonValue) !== canonicalJson(source.thresholds as JsonValue)) {
+    && (definition.siteAffinity === undefined
+      ? Object.values(source.thresholds).some((count) => count > 1)
+      : canonicalJson(definition.siteAffinity as JsonValue) !== canonicalJson(source.thresholds as JsonValue))) {
     throw new Error(`${context} differs from source thresholds: ${source.stableId}`);
   }
 }

@@ -83,7 +83,7 @@ test('preset ingestion rejects changed printed scalars and null-to-zero token co
     /preset binding differs from source manaCost: token/);
 });
 
-test('preset ingestion checks explicit site affinity against source production while allowing legacy omission', () => {
+test('preset ingestion requires repeated site affinity while allowing single-affinity legacy omission', () => {
   const source = {
     ...authority.cards.find((card) => card.stableId === 'site')!,
     stableId: 'repeated-site',
@@ -100,7 +100,15 @@ test('preset ingestion checks explicit site affinity against source production w
     () => assertPrintedCardFacts(source, { ...repeatedSite, siteAffinity: { ...source.thresholds, fire: 1 } }, 'preset binding'),
     /preset binding differs from source thresholds: repeated-site/,
   );
-  assert.doesNotThrow(() => assertPrintedCardFacts(source, { cardType: 'site', elements: ['fire'] }, 'legacy preset binding'));
+  assert.throws(
+    () => assertPrintedCardFacts(source, { cardType: 'site', elements: ['fire'] }, 'legacy preset binding'),
+    /legacy preset binding differs from source thresholds: repeated-site/,
+  );
+  assert.doesNotThrow(() => assertPrintedCardFacts(
+    { ...source, thresholds: { ...source.thresholds, fire: 1 } },
+    { cardType: 'site', elements: ['fire'] },
+    'legacy preset binding',
+  ));
 });
 
 test('reviewed local bindings require exact source identity, complete review and matching printed stats', () => {

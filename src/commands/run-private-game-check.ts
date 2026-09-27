@@ -9858,11 +9858,14 @@ function findAirborneOpening(
   southSiteInstanceIds: readonly [string, string, string];
 }> {
   const movementTwo = mode === 'movement-two';
-  const seed = movementTwo ? input.config.movementTwoSeed : input.config.airborneSeed;
-  const built = buildManifest(input, seed, mode);
-  const session = createGameSession(built.manifest);
-  const sites = (seat: GameSeat) => session.state.players[seat].hand.atlas;
-  const northSites = sites('north');
+  const baseSeed = movementTwo ? input.config.movementTwoSeed : input.config.airborneSeed;
+  // ponytail: bounded seed scan keeps this private diagnostic reproducible while deck lists evolve.
+  for (let offset = 0; offset <= 256; offset += 1) {
+    const seed = baseSeed + offset;
+    const built = buildManifest(input, seed, mode);
+    const session = createGameSession(built.manifest);
+    const sites = (seat: GameSeat) => session.state.players[seat].hand.atlas;
+    const northSites = sites('north');
     const southSites = sites('south');
     const northSiteInstanceIds = northSites.map(({ instanceId }) => instanceId);
     const southSiteInstanceIds = southSites.map(({ instanceId }) => instanceId);
@@ -9903,8 +9906,9 @@ function findAirborneOpening(
         session,
         southSiteInstanceIds: southSiteInstanceIds as [string, string, string],
       };
+    }
   }
-  throw new Error(`private ${movementTwo ? 'Movement +2' : 'Airborne'} scenario seed ${seed} no longer produces its supported opening`);
+  throw new Error(`private ${movementTwo ? 'Movement +2' : 'Airborne'} scenario found no supported opening in its bounded seed scan`);
 }
 
 function findAirVoidwalkOpening(
