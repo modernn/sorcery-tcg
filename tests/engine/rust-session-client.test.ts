@@ -87,3 +87,22 @@ test('Rust session client defaults to v1 and explicitly opts into v2 policy beha
     await Promise.all([legacy.close(), improved.close()]);
   }
 });
+
+test('Rust session client forwards counterfactual workers without changing the default report', async () => {
+  const client = await RustSessionClient.start();
+  try {
+    await client.newSession(canonicalJson(createSyntheticDemoManifest(31) as never));
+    const serial = await client.runCounterfactual({ maxContinuationDecisions: 0 });
+    const parallel = await client.runCounterfactual({
+      maxContinuationDecisions: 0,
+      workers: 2,
+    });
+    assert.deepEqual(parallel, serial);
+    await assert.rejects(
+      client.runCounterfactual({ maxContinuationDecisions: 0, workers: 0 }),
+      /counterfactual workers must be 1-8/,
+    );
+  } finally {
+    await client.close();
+  }
+});

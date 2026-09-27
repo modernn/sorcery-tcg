@@ -95,6 +95,7 @@ export class RustGameSessionHandle {
   /** Expands every engine-issued root action, then follows the baseline policy. */
   async runCounterfactual(input: Readonly<{
     maxContinuationDecisions: number;
+    workers?: number;
   }>): Promise<JsonValue> {
     return this.client.runCounterfactual(input);
   }

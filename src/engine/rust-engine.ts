@@ -507,9 +507,11 @@ export class RustSessionClient {
 
   async runCounterfactual(input: Readonly<{
     maxContinuationDecisions: number;
+    workers?: number;
   }>): Promise<JsonValue> {
     const payload = await this.call('runCounterfactual', {
       maxContinuationDecisions: input.maxContinuationDecisions,
+      ...(input.workers === undefined ? {} : { workers: input.workers }),
     });
     if (!isRecord(payload) || payload.result === undefined) {
       throw new Error('Rust session runCounterfactual result was invalid');

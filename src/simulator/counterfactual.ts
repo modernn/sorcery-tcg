@@ -8,6 +8,7 @@ import {
 import { withResumedRustSession } from '../engine/rust-session-helpers.ts';
 
 const MAX_CONTINUATION_ACTIONS = 32;
+const MAX_WORKERS = 8;
 
 type Terminal = Extract<GameTerminal, { status: 'finished' }>;
 
@@ -45,17 +46,25 @@ export type CounterfactualReport = Readonly<{
 export async function runCounterfactualRollouts(
   root: GameSession,
   maxContinuationDecisions = MAX_CONTINUATION_ACTIONS,
+  workers?: number,
 ): Promise<CounterfactualReport> {
   if (!Number.isSafeInteger(maxContinuationDecisions)
     || maxContinuationDecisions < 0
     || maxContinuationDecisions > MAX_CONTINUATION_ACTIONS) {
     throw new RangeError(`maxContinuationDecisions must be 0-${MAX_CONTINUATION_ACTIONS}`);
   }
+  if (workers !== undefined
+    && (!Number.isSafeInteger(workers) || workers < 1 || workers > MAX_WORKERS)) {
+    throw new RangeError(`workers must be 1-${MAX_WORKERS}`);
+  }
   return withResumedRustSession(
     root.manifest,
     createGameCheckpoint(root) as unknown as JsonValue,
     async (handle) => deepFreeze(
-      await handle.runCounterfactual({ maxContinuationDecisions }),
+      await handle.runCounterfactual({
+        maxContinuationDecisions,
+        ...(workers === undefined ? {} : { workers }),
+      }),
     ) as CounterfactualReport,
   );
 }

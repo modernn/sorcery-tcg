@@ -18,7 +18,17 @@ test('counterfactual rollouts cover every root choice reproducibly without scori
 
     const first = await runCounterfactualRollouts(session, 2);
     const second = await runCounterfactualRollouts(session, 2);
+    const serialWorkers = await runCounterfactualRollouts(session, 2, 1);
+    const parallelWorkers = await runCounterfactualRollouts(session, 2, 2);
     assert.equal(canonicalJson(first as unknown as JsonValue), canonicalJson(second as unknown as JsonValue));
+    assert.equal(
+      canonicalJson(serialWorkers as unknown as JsonValue),
+      canonicalJson(parallelWorkers as unknown as JsonValue),
+    );
+    await assert.rejects(
+      runCounterfactualRollouts(session, 2, 0),
+      /workers must be 1-8/,
+    );
     assert.equal(first.status, 'complete');
     assert.equal(first.rootActionCount, 2);
     assert.deepEqual(first.branches.map(({ rootActionId }) => rootActionId),
