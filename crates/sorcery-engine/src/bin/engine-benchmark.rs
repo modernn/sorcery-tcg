@@ -495,6 +495,7 @@ fn worker_scaling_report() -> BenchmarkResult<Value> {
         "jobCount": JOB_COUNT,
         "repeats": REPEATS,
         "logicalCpuCount": std::thread::available_parallelism()?.get(),
+        "peakRssBytes": peak_rss_bytes(),
         "workers": samples,
         "deterministicResultHash": baseline_hash,
     }))
