@@ -100,11 +100,11 @@ impl PolicyFeature {
     /// Every supported feature, in the baseline selector order.
     pub const ALL: [Self; 9] = [
         Self::KeepMulligan,
+        Self::BeneficialTactic,
         Self::PlaySite,
         Self::SummonMinion,
         Self::PreferredDraw,
         Self::PoweredMovement,
-        Self::BeneficialTactic,
         Self::MoveTowardEnemy,
         Self::EndTurn,
         Self::CanonicalFallback,
@@ -380,6 +380,7 @@ fn select_feature<'a>(
         PolicyFeature::PoweredMovement => select_powered_movement(observation, actions),
         PolicyFeature::BeneficialTactic => beneficial_tactic_index(
             observation.seat(),
+            observation.air_thresholds_cast_this_turn(),
             actions.iter().map(IssuedAction::descriptor),
         )
         .and_then(|index| actions.get(index)),
@@ -393,18 +394,24 @@ fn select_feature<'a>(
 
 fn beneficial_tactic_index<'a>(
     seat: Seat,
+    air_thresholds_cast_this_turn: u16,
     descriptors: impl Iterator<Item = &'a ActionDescriptor>,
 ) -> Option<usize> {
     descriptors
         .enumerate()
         .filter_map(|(index, descriptor)| {
-            beneficial_tactic_rank(seat, descriptor).map(|rank| (rank, index))
+            beneficial_tactic_rank(seat, air_thresholds_cast_this_turn, descriptor)
+                .map(|rank| (rank, index))
         })
         .min_by_key(|(rank, _)| *rank)
         .map(|(_, index)| index)
 }
 
-fn beneficial_tactic_rank(seat: Seat, descriptor: &ActionDescriptor) -> Option<u8> {
+fn beneficial_tactic_rank(
+    seat: Seat,
+    air_thresholds_cast_this_turn: u16,
+    descriptor: &ActionDescriptor,
+) -> Option<u8> {
     match descriptor {
         ActionDescriptor::ShootProjectile {
             hit: Some(target), ..
@@ -426,6 +433,16 @@ fn beneficial_tactic_rank(seat: Seat, descriptor: &ActionDescriptor) -> Option<u
             choice: GenesisTokenChoice::PayOneMana,
             ..
         } => Some(3),
+        ActionDescriptor::CastMagic {
+            target: Some(target),
+            ..
+        }
+        | ActionDescriptor::BeginChainMagic { target, .. }
+            if target.seat() != seat =>
+        {
+            Some(4)
+        }
+        ActionDescriptor::ActivateSparkmage { .. } if air_thresholds_cast_this_turn > 0 => Some(5),
         _ => None,
     }
 }
@@ -649,11 +666,11 @@ pub fn baseline_policy_snapshot(
             "atlasReserve": 3,
             "featurePriority": [
                 "keep-mulligan",
+                "beneficial-tactic",
                 "play-site",
                 "summon-minion",
                 "preferred-draw",
                 "powered-movement",
-                "beneficial-tactic",
                 "move-toward-enemy",
                 "end-turn",
                 "canonical-fallback"
@@ -734,7 +751,7 @@ mod tests {
     use crate::contract::Seat;
     use crate::game::{IssuedAction, SeatObservation};
 
-    use super::{PolicyFeature, beneficial_tactic_index, select_feature};
+    use super::{PolicyFeature, baseline_policy_snapshot, beneficial_tactic_index, select_feature};
 
     fn move_toward(unit: IdentityHash, from: &str, to: &str) -> IssuedAction {
         let from_cell = Cell::parse(from).expect("from cell");
@@ -862,25 +879,146 @@ mod tests {
         ];
 
         assert_eq!(
-            beneficial_tactic_index(Seat::North, actions.iter()),
+            beneficial_tactic_index(Seat::North, 1, actions.iter()),
             Some(7)
         );
         assert_eq!(
-            beneficial_tactic_index(Seat::North, actions[..7].iter()),
+            beneficial_tactic_index(Seat::North, 1, actions[..7].iter()),
             Some(6)
         );
         assert_eq!(
-            beneficial_tactic_index(Seat::North, actions[..6].iter()),
+            beneficial_tactic_index(Seat::North, 1, actions[..6].iter()),
             Some(5)
         );
         assert_eq!(
-            beneficial_tactic_index(Seat::North, actions[..5].iter()),
+            beneficial_tactic_index(Seat::North, 1, actions[..5].iter()),
             Some(4)
         );
         assert_eq!(
-            beneficial_tactic_index(Seat::North, actions[..4].iter()),
-            None
+            beneficial_tactic_index(Seat::North, 1, actions[..4].iter()),
+            Some(2)
         );
+    }
+
+    #[test]
+    fn beneficial_tactics_use_generic_magic_and_sparkmage_actions_in_canonical_order() {
+        let magic = ActionDescriptor::CastMagic {
+            ally: None,
+            ally_destination: None,
+            ally_destination_cells: None,
+            ally_strike_location: None,
+            card_id: "synthetic-magic".to_owned(),
+            card_instance_id: identity('c'),
+            caster_instance_id: identity('d'),
+            cemetery_minion_instance_id: None,
+            cemetery_card_instance_ids: Vec::new(),
+            discard_card_instance_id: None,
+            discard_site_instance_id: None,
+            draw_zone: None,
+            target: Some(target(Seat::South)),
+            target_artifact_instance_id: None,
+            target_aura_instance_id: None,
+            target_location: None,
+            target_site_instance_id: None,
+            tempted_destination: None,
+            tempted_enemy: None,
+        };
+        let sparkmage = ActionDescriptor::ActivateSparkmage {
+            source_instance_id: identity('e'),
+            target_location: Location {
+                cell: Cell::parse("C2").expect("C2"),
+                region: Region::Surface,
+            },
+        };
+
+        assert_eq!(
+            beneficial_tactic_index(
+                Seat::North,
+                1,
+                [magic.clone(), ActionDescriptor::EndTurn].iter()
+            ),
+            Some(0)
+        );
+        assert_eq!(
+            beneficial_tactic_index(
+                Seat::North,
+                1,
+                [sparkmage.clone(), ActionDescriptor::EndTurn].iter()
+            ),
+            Some(0)
+        );
+        assert_eq!(
+            beneficial_tactic_index(
+                Seat::North,
+                0,
+                [sparkmage, ActionDescriptor::EndTurn].iter()
+            ),
+            None,
+            "zero-damage Sparkmage activations are not beneficial"
+        );
+        assert_eq!(
+            beneficial_tactic_index(Seat::North, 1, [magic.clone(), magic].iter()),
+            Some(0),
+            "equal-ranked actions preserve their canonical input order"
+        );
+    }
+
+    #[test]
+    fn baseline_policy_selects_generic_tactics_before_a_legal_summon() {
+        let observation = SeatObservation::for_test(
+            Seat::North,
+            Location {
+                cell: Cell::parse("C1").expect("C1"),
+                region: Region::Surface,
+            },
+            Vec::new(),
+            1,
+        );
+        let summon = IssuedAction::for_test(
+            ActionDescriptor::SummonMinion {
+                card_id: "synthetic-minion".to_owned(),
+                card_instance_id: identity('1'),
+                caster_instance_id: identity('2'),
+                cell: Cell::parse("C4").expect("C4"),
+                cells: None,
+                mana_cost: 1,
+                payment_mode: None,
+                region: None,
+                sacrificed_minion_instance_ids: None,
+            },
+            Seat::North,
+        );
+        let sparkmage = IssuedAction::for_test(
+            ActionDescriptor::ActivateSparkmage {
+                source_instance_id: identity('3'),
+                target_location: Location {
+                    cell: Cell::parse("C2").expect("C2"),
+                    region: Region::Surface,
+                },
+            },
+            Seat::North,
+        );
+        let policy =
+            baseline_policy_snapshot(&identity('a'), "sorcery-core-v1").expect("baseline policy");
+
+        let play_site = IssuedAction::for_test(
+            ActionDescriptor::PlaySite {
+                card_id: "synthetic-site".to_owned(),
+                card_instance_id: identity('4'),
+                cell: Cell::parse("B4").expect("B4"),
+                create_rubble_at: None,
+                genesis_token_choice: None,
+            },
+            Seat::North,
+        );
+        let actions = [summon, play_site, sparkmage];
+        let selected = policy
+            .select_action(&observation, &actions)
+            .expect("selected generic tactic");
+        assert!(matches!(
+            selected.descriptor(),
+            ActionDescriptor::ActivateSparkmage { .. }
+        ));
     }
 
     #[test]
@@ -895,6 +1033,7 @@ mod tests {
         assert_eq!(
             beneficial_tactic_index(
                 Seat::North,
+                1,
                 [
                     drag(true, Some(target(Seat::South))),
                     drag(false, Some(target(Seat::South)))
@@ -904,7 +1043,11 @@ mod tests {
             Some(1)
         );
         assert_eq!(
-            beneficial_tactic_index(Seat::North, [drag(true, Some(target(Seat::South)))].iter()),
+            beneficial_tactic_index(
+                Seat::North,
+                1,
+                [drag(true, Some(target(Seat::South)))].iter()
+            ),
             None
         );
     }
@@ -917,7 +1060,7 @@ mod tests {
             cell: Cell::parse("C1").expect("C1"),
             region: Region::Surface,
         };
-        let observation = SeatObservation::for_test(Seat::North, enemy, vec![powered.clone()]);
+        let observation = SeatObservation::for_test(Seat::North, enemy, vec![powered.clone()], 0);
         let mixed = [
             move_toward(ordinary, "C4", "C3"),
             move_toward(powered.clone(), "B4", "B3"),

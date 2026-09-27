@@ -150,6 +150,7 @@ enum TemporaryControlExpiry {
 /// Public information required by a deterministic policy for one acting seat.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SeatObservation {
+    air_thresholds_cast_this_turn: u16,
     atlas_remaining: usize,
     enemy_avatar: Location,
     /// Observer-controlled Avatar and minion identities that currently have a
@@ -160,6 +161,12 @@ pub struct SeatObservation {
 }
 
 impl SeatObservation {
+    /// Returns the public Air-threshold count available to Sparkmage this turn.
+    #[must_use]
+    pub const fn air_thresholds_cast_this_turn(&self) -> u16 {
+        self.air_thresholds_cast_this_turn
+    }
+
     /// Returns the observing seat.
     #[must_use]
     pub const fn seat(&self) -> Seat {
@@ -197,8 +204,10 @@ impl SeatObservation {
         seat: Seat,
         enemy_avatar: Location,
         powered_unit_instance_ids: Vec<IdentityHash>,
+        air_thresholds_cast_this_turn: u16,
     ) -> Self {
         Self {
+            air_thresholds_cast_this_turn,
             atlas_remaining: 0,
             enemy_avatar,
             powered_unit_instance_ids,
@@ -2093,6 +2102,7 @@ impl Game {
         }
         powered_unit_instance_ids.sort();
         SeatObservation {
+            air_thresholds_cast_this_turn: player.air_thresholds_cast_this_turn.unwrap_or(0),
             atlas_remaining: player.atlas.len(),
             enemy_avatar: Location {
                 cell: enemy.avatar.location,

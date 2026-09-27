@@ -12,11 +12,11 @@ const HASH_C: &str = "sha256:ccccccccccccccccccccccccccccccccccccccccccccccccccc
 fn feature_names() -> Value {
     json!([
         "keep-mulligan",
+        "beneficial-tactic",
         "play-site",
         "summon-minion",
         "preferred-draw",
         "powered-movement",
-        "beneficial-tactic",
         "move-toward-enemy",
         "end-turn",
         "canonical-fallback"
