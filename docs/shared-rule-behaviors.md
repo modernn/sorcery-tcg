@@ -17,6 +17,11 @@ current wording, rulings, or engine support. Keep the authority revision pinned;
 do not silently replace it with newer API metadata. Unreleased previews are outside
 the current work scope.
 
+The [official Codex](https://sorcerytcg.com/codex) defines the global rule model.
+Card review discovers declarative inputs to that model; repeated wording is not a
+substitute for the Codex's timing and ordering rules. The ignored authority snapshot
+records the exact Codex revision used for an implementation cycle.
+
 Private behavior inventories and the exact identity-comparison receipt are under
 `.local/authority/binding-cycles/`. The existing `mechanic-workload` classifier is
 only a review queue. Lexical overlap must never admit a card or imply that all of
@@ -38,6 +43,38 @@ its behavior is implemented.
   replacement ordering. Never implement these by editing printed base stats.
 - Composition: ordered effects, optional choices, repetition, and dependencies on
   an earlier result. Preserve the continuation across checkpoints and replay.
+
+## Codex-derived engine kernel
+
+The shared kernel follows the official [Storyline](https://sorcerytcg.com/codex/081fc13c-49fb-4893-90c1-1ba5324e6241),
+[Target](https://sorcerytcg.com/codex/98943611-2a6f-4756-ad9b-a7d6598e9729),
+[Replacement Effect](https://sorcerytcg.com/codex/68c087c1-84f7-41f3-b44b-fb1753fce12e),
+[Prevention Effect](https://sorcerytcg.com/codex/05a7fdfc-6427-42d7-9ec6-9cefa7036fc9), and
+[Ongoing Effect](https://sorcerytcg.com/codex/e598f1a7-a876-431c-a414-33e1893cd4d8)
+entries:
+
+1. Propose an action from engine-issued legal actions, declare its complete costs
+   and targets, and reject it before commitment when those declarations are illegal.
+2. Add a spell, activated ability, or triggered ability to an interruptible
+   storyline. Preserve the source realm incarnation and declared targets.
+3. At resolution start, revalidate targets. Ignore an unresolved event whose realm
+   source has left, except when that event already started and split into child
+   events.
+4. Split a resolving event at realm entry or exit, movement, and explicit sequential
+   wording. Newly triggered events interrupt the remaining children. Resolve
+   simultaneous-trigger ordering through explicit player choices.
+5. Apply replacement effects immediately before the event they replace, then apply
+   damage prevention. Neither uses the storyline.
+6. Between storyline events, reevaluate all ongoing effects using the official
+   layer, timestamp, and dependency order before checking whether minions die.
+7. When the storyline empties, enumerate any currently legal
+   [Mandatory Actions](https://sorcerytcg.com/codex/af65379e-7a9a-4d6f-9a9e-99f1434575e8)
+   before ordinary main-phase actions.
+
+Typed card facts describe selectors, predicates, parameters, durations, and usage
+limits consumed by this kernel. They must not create a parallel timing path. If the
+kernel cannot express reviewed wording, record the missing global primitive before
+adding another card fact.
 
 Prioritize selectors and counts, reusable event triggers, zone transfers/casting,
 temporary grants, and carrying. The private inventory finds these across multiple
