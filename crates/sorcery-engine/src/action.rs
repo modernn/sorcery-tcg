@@ -627,10 +627,13 @@ pub enum ActionDescriptor {
         /// Canonical index into the pending modifier choices.
         modifier_index: u64,
     },
-    /// Commit one source first within the acting player's simultaneous triggers.
+    /// Commit one occurrence first within the acting player's simultaneous triggers.
     OrderTriggers {
         /// Authoritative trigger source identity.
         source_instance_id: IdentityHash,
+        /// Stable identity when this occurrence differs from its source.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trigger_instance_id: Option<IdentityHash>,
     },
     /// Select a unit for an ability, or decline when the engine offers that branch.
     ChooseAbility {
@@ -1757,26 +1760,35 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         ActionDescriptor::ExtendChainMagic { target: right },
                     ) => compare_unit_targets(left, right),
                     (
-                        ActionDescriptor::Intercept {
+                        ActionDescriptor::OrderTriggers {
+                            source_instance_id: left_source,
+                            trigger_instance_id: left_trigger,
+                        },
+                        ActionDescriptor::OrderTriggers {
+                            source_instance_id: right_source,
+                            trigger_instance_id: right_trigger,
+                        },
+                    ) => left_source
+                        .cmp(right_source)
+                        .then_with(|| match (left_trigger, right_trigger) {
+                            (Some(left), Some(right)) => left.cmp(right),
+                            (Some(_), None) => Ordering::Less,
+                            (None, Some(_)) => Ordering::Greater,
+                            (None, None) => Ordering::Equal,
+                        }),
+                    (
+                        ActionDescriptor::ContinueBasicMovement {
                             unit_instance_id: left,
                         },
-                        ActionDescriptor::Intercept {
+                        ActionDescriptor::ContinueBasicMovement {
                             unit_instance_id: right,
                         },
                     )
                     | (
-                        ActionDescriptor::OrderTriggers {
-                            source_instance_id: left,
-                        },
-                        ActionDescriptor::OrderTriggers {
-                            source_instance_id: right,
-                        },
-                    )
-                    | (
-                        ActionDescriptor::ContinueBasicMovement {
+                        ActionDescriptor::Intercept {
                             unit_instance_id: left,
                         },
-                        ActionDescriptor::ContinueBasicMovement {
+                        ActionDescriptor::Intercept {
                             unit_instance_id: right,
                         },
                     )
@@ -3047,6 +3059,8 @@ mod tests {
             json!({"kind":"choose-ability", "sourceInstanceId":CARD_B,
                 "target":{"instanceId":CASTER_B, "kind":"minion", "seat":"south"}}),
             json!({"kind":"order-triggers", "sourceInstanceId":CARD_A}),
+            json!({"kind":"order-triggers", "sourceInstanceId":CARD_A,
+                "triggerInstanceId":CARD_B}),
         ]
         .map(typed_descriptor);
         for left in &actions {

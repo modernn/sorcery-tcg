@@ -1879,9 +1879,11 @@ fn trigger_order_descriptors_and_action_ids_should_match_typescript() {
         [
             ActionDescriptor::OrderTriggers {
                 source_instance_id: first,
+                ..
             },
             ActionDescriptor::OrderTriggers {
                 source_instance_id: second,
+                ..
             },
         ] if first < second
     ));

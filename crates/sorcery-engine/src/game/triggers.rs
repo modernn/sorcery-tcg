@@ -35,7 +35,10 @@ impl TriggerSource for GenesisTrigger {
     fn controller(&self) -> Seat {
         self.source().controller
     }
-    fn instance_id(&self) -> &IdentityHash {
+    fn trigger_instance_id(&self) -> &IdentityHash {
+        &self.source().instance_id
+    }
+    fn source_instance_id(&self) -> &IdentityHash {
         &self.source().instance_id
     }
     fn needs_declaration(&self) -> bool {
@@ -217,6 +220,7 @@ impl Game {
                 self.push_trigger_order_action(
                     actions,
                     &source.instance_id,
+                    &source.instance_id,
                     source.unit.card.card_id,
                     source.controller,
                 )?;
@@ -240,16 +244,21 @@ impl Game {
                         ability.selection,
                     ) {
                         if let Some(target) = choice.target {
-                            self.push_ability_choice(actions, source.instance_id(), Some(target));
+                            self.push_ability_choice(
+                                actions,
+                                source.source_instance_id(),
+                                Some(target),
+                            );
                         }
                     }
                     if ability.optional_selection {
-                        self.push_ability_choice(actions, source.instance_id(), None);
+                        self.push_ability_choice(actions, source.source_instance_id(), None);
                     }
                 } else {
                     self.push_trigger_order_action(
                         actions,
-                        source.instance_id(),
+                        source.trigger_instance_id(),
+                        source.source_instance_id(),
                         source.card_id(),
                         source.controller(),
                     )?;
@@ -262,6 +271,7 @@ impl Game {
     fn push_trigger_order_action(
         &self,
         actions: &mut Vec<IssuedAction>,
+        trigger_instance_id: &IdentityHash,
         instance_id: &IdentityHash,
         card_id: CardId,
         controller: Seat,
@@ -273,6 +283,8 @@ impl Game {
             actions,
             ActionDescriptor::OrderTriggers {
                 source_instance_id: instance_id.clone(),
+                trigger_instance_id: (trigger_instance_id != instance_id)
+                    .then(|| trigger_instance_id.clone()),
             },
             format!(
                 "Order {} first within your triggers",
@@ -306,7 +318,7 @@ impl Game {
             .pending_order()
             .ok_or(GameError::IllegalAction)?
             .iter()
-            .find(|source| source.instance_id() == source_instance_id)
+            .find(|source| source.source_instance_id() == source_instance_id)
             .ok_or(GameError::IllegalAction)?;
         if !source.needs_declaration() || source.controller() != seat {
             return Err(GameError::IllegalAction);
@@ -342,7 +354,7 @@ impl Game {
             .pending_order()
             .ok_or(GameError::IllegalAction)?
             .iter()
-            .position(|source| source.instance_id() == source_instance_id)
+            .position(|source| source.source_instance_id() == source_instance_id)
             .ok_or(GameError::IllegalAction)?;
         let trigger = match pending.batch.stage {
             TriggerOrderStage::ActiveOrder => pending.batch.active_remaining.get_mut(source),
@@ -353,8 +365,9 @@ impl Game {
         let GenesisTrigger::Compiled(frame) = trigger else {
             return Err(GameError::IllegalAction);
         };
+        let trigger_instance_id = frame.source.instance_id.clone();
         self.declare_effect_target(frame, target)?;
-        pending.batch.commit(source_instance_id)?;
+        pending.batch.commit(&trigger_instance_id)?;
         Self::emit_ability_choice(seat, source_instance_id, target, outcomes);
         self.drive_trigger_batch(pending, outcomes)?;
         self.position.state_version += 1;
@@ -364,12 +377,20 @@ impl Game {
     pub(super) fn apply_trigger_order_action(
         &mut self,
         seat: Seat,
-        instance_id: &IdentityHash,
+        source_instance_id: &IdentityHash,
+        trigger_instance_id: Option<&IdentityHash>,
         outcomes: &mut OutcomeLog<'_>,
         random_draws: Option<&mut Vec<EngineRandomDraw>>,
     ) -> Result<(), GameError> {
+        let trigger_instance_id = trigger_instance_id.unwrap_or(source_instance_id);
         if self.position.pending_deathrites.is_some() {
-            return self.apply_deathrite_order_action(seat, instance_id, outcomes, random_draws);
+            return self.apply_deathrite_order_action(
+                seat,
+                source_instance_id,
+                trigger_instance_id,
+                outcomes,
+                random_draws,
+            );
         }
         if self.position.phase != Phase::TriggerOrder
             || seat != self.position.decision_seat
@@ -380,7 +401,9 @@ impl Game {
                 .and_then(|pending| pending.batch.pending_order())
                 .is_some_and(|sources| {
                     sources.iter().any(|source| {
-                        source.instance_id() == instance_id && !source.needs_declaration()
+                        source.source_instance_id() == source_instance_id
+                            && source.trigger_instance_id() == trigger_instance_id
+                            && !source.needs_declaration()
                     })
                 })
         {
@@ -391,11 +414,14 @@ impl Game {
             .pending_trigger_order
             .take()
             .ok_or(GameError::IllegalAction)?;
-        pending.batch.commit(instance_id)?;
-        outcomes.push(
-            "trigger-order-committed",
-            || json!({"seat":seat,"sourceInstanceId":instance_id}),
-        );
+        pending.batch.commit(trigger_instance_id)?;
+        outcomes.push("trigger-order-committed", || {
+            let mut payload = json!({"seat":seat,"sourceInstanceId":source_instance_id});
+            if trigger_instance_id != source_instance_id {
+                payload["triggerInstanceId"] = json!(trigger_instance_id);
+            }
+            payload
+        });
         self.drive_trigger_batch(pending, outcomes)?;
         self.position.state_version += 1;
         Ok(())

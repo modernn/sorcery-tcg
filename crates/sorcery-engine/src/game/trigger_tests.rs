@@ -154,7 +154,7 @@ fn order_action(game: &Game, instance_id: &str) -> super::IssuedAction {
         .find(|action| {
             matches!(
                 &action.descriptor,
-                ActionDescriptor::OrderTriggers { source_instance_id }
+                ActionDescriptor::OrderTriggers { source_instance_id, .. }
                     if source_instance_id.as_str() == instance_id
             )
         })

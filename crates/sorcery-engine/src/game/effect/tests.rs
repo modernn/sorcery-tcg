@@ -867,7 +867,7 @@ fn damage_cohort_orders_deathrites_then_resumes_draw_and_magic_cleanup() {
         .find(|action| {
             matches!(
                 &action.descriptor,
-                ActionDescriptor::OrderTriggers { source_instance_id }
+                ActionDescriptor::OrderTriggers { source_instance_id, .. }
                     if source_instance_id == &first_id || source_instance_id == &second_id
             )
         })

@@ -3,7 +3,10 @@ use super::{GameError, IdentityHash, Seat};
 /// A trigger source that can be ordered by its controller.
 pub(super) trait TriggerSource {
     fn controller(&self) -> Seat;
-    fn instance_id(&self) -> &IdentityHash;
+    /// Stable identity of this particular trigger occurrence.
+    fn trigger_instance_id(&self) -> &IdentityHash;
+    /// Realm object whose ability produced the occurrence.
+    fn source_instance_id(&self) -> &IdentityHash;
     fn needs_declaration(&self) -> bool {
         false
     }
@@ -103,7 +106,7 @@ impl<T: TriggerSource> TriggerBatch<T> {
         }
     }
 
-    pub(super) fn commit(&mut self, source_instance_id: &IdentityHash) -> Result<(), GameError> {
+    pub(super) fn commit(&mut self, trigger_instance_id: &IdentityHash) -> Result<(), GameError> {
         let active_stage = self.stage == TriggerOrderStage::ActiveOrder;
         let (committed, remaining) = if active_stage {
             (&mut self.active_order, &mut self.active_remaining)
@@ -117,7 +120,7 @@ impl<T: TriggerSource> TriggerBatch<T> {
         }
         let index = remaining
             .iter()
-            .position(|source| source.instance_id() == source_instance_id)
+            .position(|source| source.trigger_instance_id() == trigger_instance_id)
             .ok_or(GameError::IllegalAction)?;
         if remaining[index].needs_declaration() {
             return Err(GameError::IllegalAction);
@@ -145,7 +148,8 @@ mod tests {
     #[derive(Clone, Debug, Eq, PartialEq)]
     struct Source {
         controller: Seat,
-        instance_id: IdentityHash,
+        provider_id: IdentityHash,
+        occurrence_id: IdentityHash,
     }
 
     impl TriggerSource for Source {
@@ -153,8 +157,12 @@ mod tests {
             self.controller
         }
 
-        fn instance_id(&self) -> &IdentityHash {
-            &self.instance_id
+        fn trigger_instance_id(&self) -> &IdentityHash {
+            &self.occurrence_id
+        }
+
+        fn source_instance_id(&self) -> &IdentityHash {
+            &self.provider_id
         }
     }
 
@@ -162,7 +170,8 @@ mod tests {
         let digest = format!("sha256:{number:02x}{:0>62}", "");
         Source {
             controller,
-            instance_id: IdentityHash::parse(&digest).unwrap(),
+            provider_id: IdentityHash::parse(&digest).unwrap(),
+            occurrence_id: IdentityHash::parse(&digest).unwrap(),
         }
     }
 
@@ -187,7 +196,9 @@ mod tests {
             batch.pending_order().unwrap(),
             &[active_first, active_second]
         );
-        let chosen = batch.pending_order().unwrap()[0].instance_id().clone();
+        let chosen = batch.pending_order().unwrap()[0]
+            .trigger_instance_id()
+            .clone();
         batch.commit(&chosen).unwrap();
         assert_eq!(batch.stage, TriggerOrderStage::NonActiveOrder);
         assert_eq!(
@@ -213,8 +224,8 @@ mod tests {
         )
         .unwrap();
 
-        batch.commit(second.instance_id()).unwrap();
-        batch.commit(first.instance_id()).unwrap();
+        batch.commit(second.trigger_instance_id()).unwrap();
+        batch.commit(first.trigger_instance_id()).unwrap();
         assert_eq!(batch.stage, TriggerOrderStage::Resolve);
         assert_eq!(batch.resolving, vec![non_active, second, first, third]);
     }
@@ -228,13 +239,35 @@ mod tests {
 
         let unknown = source(Seat::South, 9);
         assert!(matches!(
-            batch.commit(unknown.instance_id()),
+            batch.commit(unknown.trigger_instance_id()),
             Err(GameError::IllegalAction)
         ));
-        batch.commit(first.instance_id()).unwrap();
+        batch.commit(first.trigger_instance_id()).unwrap();
         assert!(matches!(
-            batch.commit(first.instance_id()),
+            batch.commit(first.trigger_instance_id()),
             Err(GameError::IllegalAction)
         ));
+    }
+
+    #[test]
+    fn two_occurrences_from_one_source_remain_independently_orderable() {
+        let shared_source = source(Seat::North, 1).provider_id;
+        let first = Source {
+            controller: Seat::North,
+            provider_id: shared_source.clone(),
+            occurrence_id: source(Seat::North, 2).occurrence_id,
+        };
+        let second = Source {
+            controller: Seat::North,
+            provider_id: shared_source,
+            occurrence_id: source(Seat::North, 3).occurrence_id,
+        };
+        let mut batch =
+            TriggerBatch::new(vec![first.clone(), second.clone()], Seat::North).unwrap();
+
+        batch.commit(second.trigger_instance_id()).unwrap();
+
+        assert_eq!(batch.stage, TriggerOrderStage::Resolve);
+        assert_eq!(batch.resolving, vec![second, first]);
     }
 }

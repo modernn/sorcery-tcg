@@ -1539,6 +1539,7 @@ type GameActionDescriptor =
   | Readonly<{
     kind: 'order-triggers';
     sourceInstanceId: StateHash;
+    triggerInstanceId?: StateHash;
   }>
   | Readonly<{
     kind: 'choose-ability';

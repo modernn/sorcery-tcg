@@ -761,7 +761,10 @@ impl TriggerSource for PendingDeathriteSource {
     fn controller(&self) -> Seat {
         self.controller
     }
-    fn instance_id(&self) -> &IdentityHash {
+    fn trigger_instance_id(&self) -> &IdentityHash {
+        &self.instance_id
+    }
+    fn source_instance_id(&self) -> &IdentityHash {
         &self.instance_id
     }
 }
@@ -10502,13 +10505,16 @@ impl Game {
                 unit_instance_id,
                 outcomes,
             ),
-            ActionDescriptor::OrderTriggers { source_instance_id } => self
-                .apply_trigger_order_action(
-                    action.seat,
-                    source_instance_id,
-                    outcomes,
-                    random_draws,
-                ),
+            ActionDescriptor::OrderTriggers {
+                source_instance_id,
+                trigger_instance_id,
+            } => self.apply_trigger_order_action(
+                action.seat,
+                source_instance_id,
+                trigger_instance_id.as_ref(),
+                outcomes,
+                random_draws,
+            ),
             ActionDescriptor::ChooseAbilityLocation {
                 source_instance_id,
                 location,
@@ -13913,11 +13919,13 @@ impl Game {
         &mut self,
         seat: Seat,
         source_instance_id: &IdentityHash,
+        trigger_instance_id: &IdentityHash,
         outcomes: &mut OutcomeLog<'_>,
         random_draws: Option<&mut Vec<EngineRandomDraw>>,
     ) -> Result<(), GameError> {
         if self.position.phase != Phase::TriggerOrder
             || seat != self.position.decision_seat
+            || source_instance_id != trigger_instance_id
             || !self
                 .pending_deathrite_order()?
                 .iter()
@@ -27239,7 +27247,7 @@ pub mod catalog_proofs {
             .find(|action| {
                 matches!(
                     &action.descriptor,
-                    ActionDescriptor::OrderTriggers { source_instance_id }
+                    ActionDescriptor::OrderTriggers { source_instance_id, .. }
                         if source_instance_id.as_str() == source_ids[0]
                 )
             })
@@ -27307,7 +27315,7 @@ pub mod catalog_proofs {
             .find(|action| {
                 matches!(
                     &action.descriptor,
-                    ActionDescriptor::OrderTriggers { source_instance_id }
+                    ActionDescriptor::OrderTriggers { source_instance_id, .. }
                         if source_instance_id.as_str() == source_ids[0]
                 )
             })

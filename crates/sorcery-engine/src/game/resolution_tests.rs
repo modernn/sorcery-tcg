@@ -381,7 +381,7 @@ fn simultaneous_genesis_resumes_after_nested_deathrite_ordering() {
         .unwrap()
         .into_iter()
         .find(|action| {
-            matches!(&action.descriptor, ActionDescriptor::OrderTriggers { source_instance_id }
+            matches!(&action.descriptor, ActionDescriptor::OrderTriggers { source_instance_id, .. }
             if *source_instance_id == survivor)
         })
         .unwrap();
