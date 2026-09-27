@@ -94,7 +94,9 @@ test('site entry effect accepts and clones only the closed Stealth effect', () =
     cardType: 'site', elements: ['air'],
     siteEntryEffect: 'grantStealthToEnteringMinion', siteEntryUsage: 'firstEntry',
   }));
-  assert.equal(first.cards.site?.siteEntryUsage, 'firstEntry');
+  const firstSite = first.cards.site;
+  assert(firstSite?.cardType === 'site');
+  assert.equal(firstSite.siteEntryUsage, 'firstEntry');
   assert.throws(
     () => createGameManifest(input(minion(), {
       cardType: 'site', elements: ['air'], siteEntryUsage: 'firstEntry',
