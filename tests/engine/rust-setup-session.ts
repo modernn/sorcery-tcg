@@ -55,8 +55,8 @@ export class SetupCtx {
   }
 
   /** Selects one engine-issued action with the shared baseline deterministic policy. */
-  async selectPolicyAction(): Promise<GameLegalAction> {
-    return this.handle.selectPolicyAction();
+  async selectPolicyAction(policyBehaviorVersion?: 1 | 2): Promise<GameLegalAction> {
+    return this.handle.selectPolicyAction(policyBehaviorVersion);
   }
 
   /** Finds one legal action for the active or specified seat. */

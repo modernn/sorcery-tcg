@@ -12,6 +12,7 @@ use crate::checkpoint::{
 use crate::contract::{ActionRequest, Seat};
 use crate::novelty::NoveltyStep;
 use crate::novelty_dispatch::ForcedNoveltyInput;
+use crate::policy::{DRAW_SITE_POLICY_BEHAVIOR_VERSION, LEGACY_POLICY_BEHAVIOR_VERSION};
 use crate::session::{Session, StepResult};
 
 const SCHEMA_VERSION: u8 = 1;
@@ -68,7 +69,7 @@ impl SessionJsonService {
             "new" => self.new_session(request.id, &request.params),
             "legalActions" => self.legal_actions(request.id, &request.params),
             "step" => self.step(request.id, &request.params),
-            "selectPolicyAction" => self.select_policy_action(request.id),
+            "selectPolicyAction" => self.select_policy_action(request.id, &request.params),
             "probeNovelty" => self.probe_novelty(request.id, &request.params),
             "runNoveltyRollout" => self.run_novelty_rollout(request.id, &request.params),
             "runNoveltyFromForcedAction" => {
@@ -183,11 +184,15 @@ impl SessionJsonService {
         }
     }
 
-    fn select_policy_action(&self, id: u64) -> RpcResponse {
+    fn select_policy_action(&self, id: u64, params: &Value) -> RpcResponse {
         let Some(session) = &self.session else {
             return error_response(id, "session-json process has no active session");
         };
-        match session.select_baseline_policy_action() {
+        let policy_behavior_version = match parse_policy_behavior_version(params) {
+            Ok(version) => version,
+            Err(message) => return error_response(id, &message),
+        };
+        match session.select_policy_action_with_behavior(policy_behavior_version) {
             Ok(action) => ok_response(id, json!({ "action": action })),
             Err(error) => error_response(id, &error.to_string()),
         }
@@ -626,6 +631,25 @@ fn error_response(id: u64, message: &str) -> RpcResponse {
     }
 }
 
+fn parse_policy_behavior_version(params: &Value) -> Result<u8, String> {
+    let Some(raw) = params.get("policyBehaviorVersion") else {
+        return Ok(LEGACY_POLICY_BEHAVIOR_VERSION);
+    };
+    let raw = raw.as_u64().ok_or_else(|| {
+        "selectPolicyAction policyBehaviorVersion must be an integer from 1 through 2".to_owned()
+    })?;
+    let version = u8::try_from(raw).map_err(|_| {
+        "selectPolicyAction policyBehaviorVersion must be an integer from 1 through 2".to_owned()
+    })?;
+    if !(LEGACY_POLICY_BEHAVIOR_VERSION..=DRAW_SITE_POLICY_BEHAVIOR_VERSION).contains(&version) {
+        return Err(
+            "selectPolicyAction policyBehaviorVersion must be an integer from 1 through 2"
+                .to_owned(),
+        );
+    }
+    Ok(version)
+}
+
 fn write_response(output: &mut impl Write, response: RpcResponse) -> Result<(), SessionJsonError> {
     let line = canonical_json(&serde_json::to_value(response)?)?;
     writeln!(output, "{line}")?;
@@ -711,6 +735,86 @@ mod tests {
         assert_eq!(action["descriptor"]["atlasOrder"], json!([]));
         assert_eq!(action["descriptor"]["spellbookOrder"], json!([]));
         assert_eq!(action["seat"], "north");
+    }
+
+    #[test]
+    fn service_should_opt_into_versioned_draw_site_policy() {
+        let manifest = synthetic_demo_manifest_json(31).expect("manifest");
+        let mut legacy = SessionJsonService::new();
+        let mut improved = SessionJsonService::new();
+        for service in [&mut legacy, &mut improved] {
+            assert!(
+                service
+                    .handle(&rpc(1, "new", json!({ "manifestJson": manifest.clone() })))
+                    .error
+                    .is_none()
+            );
+        }
+
+        let invalid = legacy.handle(&rpc(
+            2,
+            "selectPolicyAction",
+            json!({ "policyBehaviorVersion": 3 }),
+        ));
+        assert_eq!(
+            invalid.error.expect("invalid behavior version").message,
+            "selectPolicyAction policyBehaviorVersion must be an integer from 1 through 2"
+        );
+
+        for id in 3..700 {
+            let legacy_result = legacy.handle(&rpc(
+                id,
+                "selectPolicyAction",
+                json!({ "policyBehaviorVersion": LEGACY_POLICY_BEHAVIOR_VERSION }),
+            ));
+            let improved_result = improved.handle(&rpc(
+                id,
+                "selectPolicyAction",
+                json!({ "policyBehaviorVersion": DRAW_SITE_POLICY_BEHAVIOR_VERSION }),
+            ));
+            let legacy_action = legacy_result
+                .result
+                .expect("legacy selection")
+                .get("action")
+                .cloned()
+                .expect("legacy action");
+            let improved_action = improved_result
+                .result
+                .expect("improved selection")
+                .get("action")
+                .cloned()
+                .expect("improved action");
+            if legacy_action != improved_action {
+                assert_ne!(legacy_action["descriptor"]["kind"], "draw-site");
+                assert_eq!(improved_action["descriptor"]["kind"], "draw-site");
+                return;
+            }
+            let legacy_step_params = json!({
+                "actionId": legacy_action["actionId"],
+                "seat": legacy_action["seat"],
+                "stateVersion": legacy_action["stateVersion"],
+            });
+            let improved_step_params = json!({
+                "actionId": improved_action["actionId"],
+                "seat": improved_action["seat"],
+                "stateVersion": improved_action["stateVersion"],
+            });
+            assert_eq!(
+                legacy
+                    .handle(&rpc(id + 700, "step", legacy_step_params))
+                    .result
+                    .expect("legacy step")["accepted"],
+                true
+            );
+            assert_eq!(
+                improved
+                    .handle(&rpc(id + 700, "step", improved_step_params))
+                    .result
+                    .expect("improved step")["accepted"],
+                true
+            );
+        }
+        panic!("seed-31 did not reach a DrawSite policy divergence");
     }
 
     #[test]

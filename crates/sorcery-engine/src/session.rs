@@ -20,7 +20,10 @@ use crate::novelty_dispatch::{
 };
 use crate::novelty_frontier::{NoveltyFrontierSearchOutput, run_novelty_frontier_search};
 use crate::novelty_rollout::{NoveltyRolloutOutput, run_novelty_rollout};
-use crate::policy::{PolicyError, improved_baseline_policy_snapshot};
+use crate::policy::{
+    DRAW_SITE_POLICY_BEHAVIOR_VERSION, LEGACY_POLICY_BEHAVIOR_VERSION, PolicyError,
+    baseline_policy_snapshot, improved_baseline_policy_snapshot,
+};
 use crate::simulator::SimulatorError;
 
 /// An accepted receipt or stable rejection.
@@ -154,14 +157,38 @@ impl Session {
     ///
     /// Returns [`SessionError`] when observation, legal actions, or policy selection fails.
     pub fn select_baseline_policy_action(&self) -> Result<LegalAction, SessionError> {
+        self.select_policy_action_with_behavior(LEGACY_POLICY_BEHAVIOR_VERSION)
+    }
+
+    /// Selects one engine-issued action with an explicitly versioned policy behavior.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError`] when the behavior version, observation, legal actions, or policy
+    /// selection is unsupported or invalid.
+    pub fn select_policy_action_with_behavior(
+        &self,
+        policy_behavior_version: u8,
+    ) -> Result<LegalAction, SessionError> {
         self.ensure_active()?;
         let seat = self.acting_controller();
         let observation = self.game.observe(seat);
         let actions = self.game.legal_actions()?;
-        let policy = improved_baseline_policy_snapshot(
-            self.game.rules().authority_hash(),
-            self.game.rules().engine_version(),
-        )?;
+        let policy = match policy_behavior_version {
+            LEGACY_POLICY_BEHAVIOR_VERSION => baseline_policy_snapshot(
+                self.game.rules().authority_hash(),
+                self.game.rules().engine_version(),
+            )?,
+            DRAW_SITE_POLICY_BEHAVIOR_VERSION => improved_baseline_policy_snapshot(
+                self.game.rules().authority_hash(),
+                self.game.rules().engine_version(),
+            )?,
+            _ => {
+                return Err(SessionError::Policy(PolicyError::Invalid(
+                    "policyBehaviorVersion is unsupported",
+                )));
+            }
+        };
         policy
             .select_action(&observation, &actions)?
             .to_legal_action()
@@ -179,7 +206,7 @@ impl Session {
         committed_event_types: &[String],
     ) -> Result<NoveltyStep, SessionError> {
         self.ensure_active()?;
-        let policy = improved_baseline_policy_snapshot(
+        let policy = baseline_policy_snapshot(
             self.game.rules().authority_hash(),
             self.game.rules().engine_version(),
         )?;

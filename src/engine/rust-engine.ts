@@ -485,8 +485,10 @@ export class RustSessionClient {
     return Object.freeze(result.actions.map((action) => parseLegalAction(action)));
   }
 
-  async selectPolicyAction(): Promise<RustLegalAction> {
-    const result = await this.call('selectPolicyAction', {});
+  async selectPolicyAction(policyBehaviorVersion?: 1 | 2): Promise<RustLegalAction> {
+    const result = await this.call('selectPolicyAction', policyBehaviorVersion === undefined
+      ? {}
+      : { policyBehaviorVersion });
     if (!isRecord(result)) {
       throw new Error('Rust session selectPolicyAction result was invalid');
     }

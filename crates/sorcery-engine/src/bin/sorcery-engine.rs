@@ -24,7 +24,8 @@ use sorcery_engine::gauntlet::{
     GauntletOrientation, GauntletPair, run_gauntlet, run_gauntlet_to_dir,
 };
 use sorcery_engine::policy::{
-    DRAW_SITE_POLICY_BEHAVIOR_VERSION, PolicySnapshot, parse_policy_snapshot,
+    DRAW_SITE_POLICY_BEHAVIOR_VERSION, LEGACY_POLICY_BEHAVIOR_VERSION, PolicySnapshot,
+    parse_policy_snapshot,
 };
 use sorcery_engine::schedule::{FailurePolicy, SeedBlock, run_synthetic_schedule};
 use sorcery_engine::synthetic::synthetic_demo_manifest_json;
@@ -806,10 +807,22 @@ fn run_synthetic_batch(
 }
 
 fn baseline_policy(manifest_json: &str) -> CliResult<PolicySnapshot> {
-    policy_for_deck(manifest_json, SYNTHETIC_DECK_ID)
+    policy_for_deck_with_behavior(
+        manifest_json,
+        SYNTHETIC_DECK_ID,
+        LEGACY_POLICY_BEHAVIOR_VERSION,
+    )
 }
 
 fn policy_for_deck(manifest_json: &str, deck_id: &str) -> CliResult<PolicySnapshot> {
+    policy_for_deck_with_behavior(manifest_json, deck_id, DRAW_SITE_POLICY_BEHAVIOR_VERSION)
+}
+
+fn policy_for_deck_with_behavior(
+    manifest_json: &str,
+    deck_id: &str,
+    policy_behavior_version: u8,
+) -> CliResult<PolicySnapshot> {
     let manifest: Value = serde_json::from_str(manifest_json)?;
     let mut body = json!({
         "authorityHash": manifest["authority"]["contentHash"],
@@ -817,7 +830,6 @@ fn policy_for_deck(manifest_json: &str, deck_id: &str) -> CliResult<PolicySnapsh
         "engineVersion": manifest["engineVersion"],
         "generation": 0,
         "observationVersion": "seat-observation-v1",
-        "policyBehaviorVersion": DRAW_SITE_POLICY_BEHAVIOR_VERSION,
         "schemaVersion": 1,
         "selector": {
             "atlasReserve": 3,
@@ -829,6 +841,9 @@ fn policy_for_deck(manifest_json: &str, deck_id: &str) -> CliResult<PolicySnapsh
         },
         "tieBreak": "canonical-action-order-v1"
     });
+    if policy_behavior_version != LEGACY_POLICY_BEHAVIOR_VERSION {
+        body["policyBehaviorVersion"] = json!(policy_behavior_version);
+    }
     body["policyId"] = json!(identity_hash(&body)?);
     Ok(parse_policy_snapshot(&canonical_json(&body)?)?)
 }
