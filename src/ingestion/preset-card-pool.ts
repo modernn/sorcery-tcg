@@ -37,6 +37,11 @@ export function assertPrintedCardFacts(
       throw new Error(`${context} differs from source ${key}: ${source.stableId}`);
     }
   }
+  if (source.cardType === 'site' && definition.cardType === 'site'
+    && definition.siteAffinity !== undefined
+    && canonicalJson(definition.siteAffinity as JsonValue) !== canonicalJson(source.thresholds as JsonValue)) {
+    throw new Error(`${context} differs from source thresholds: ${source.stableId}`);
+  }
 }
 
 /** Existing source-checked manifests supply facts; no printed-text inference or new rules. */

@@ -46,6 +46,8 @@ mod resolution;
 #[cfg(test)]
 mod resolution_tests;
 mod selection;
+#[cfg(test)]
+mod site_affinity_tests;
 mod trigger_order;
 #[cfg(test)]
 mod trigger_tests;
@@ -1688,6 +1690,7 @@ fn account_for_selfplay_avatar_fields(facts: AvatarFacts) {
 
 fn account_for_selfplay_site_fields(facts: &SiteFacts) {
     let SiteFacts {
+        affinity: _,
         airborne_minions_atop_move_freely_away: _,
         blocks_ground_minion_entry_while_minion_atop: _,
         cannot_be_moved_destroyed_or_modified: _,
@@ -9192,6 +9195,9 @@ impl Game {
         else {
             return SiteWaterOverlay::None;
         };
+        if facts.cannot_be_moved_destroyed_or_modified {
+            return SiteWaterOverlay::Printed;
+        }
         let ordinary = facts.ordinary;
         let mut overlay = SiteWaterOverlay::Printed;
         for aura in &self.position.auras {
@@ -9248,7 +9254,9 @@ impl Game {
         else {
             return false;
         };
-        !facts.ordinary && self.fate_covers_cell(cell)
+        !facts.cannot_be_moved_destroyed_or_modified
+            && !facts.ordinary
+            && self.fate_covers_cell(cell)
     }
 
     fn underground_location_exists(&self, cell: Cell) -> bool {
@@ -9571,7 +9579,7 @@ impl Game {
             .position
             .units
             .iter()
-            .filter(|unit| unit.region != Region::Void && !self.minion_is_disabled(unit))
+            .filter(|unit| unit.region != Region::Void && !self.minion_abilities_lost(unit))
         {
             if matches!(
                 &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
@@ -9582,31 +9590,27 @@ impl Game {
                 }
             }
         }
-        let site_elements = Cell::ALL
-            .into_iter()
-            .filter_map(|cell| {
-                let site = self.position.sites[cell.index()].as_ref()?;
-                if site.controller != seat {
-                    return None;
-                }
-                let CardFacts::Site(facts) =
-                    &self.rules.cards[usize::from(site.card.card_id.0)].facts
-                else {
-                    return None;
-                };
-                if suppressed_sites[cell.index()] && !facts.cannot_be_moved_destroyed_or_modified
-                    || self.site_abilities_lost(cell) && suppressed_sites[cell.index()]
-                {
-                    return None;
-                }
-                Some(self.effective_site_elements(cell, facts.elements))
-            })
-            .flat_map(crate::facts::ElementSet::iter);
+        let site_affinities = Cell::ALL.into_iter().filter_map(|cell| {
+            let site = self.position.sites[cell.index()].as_ref()?;
+            if site.controller != seat {
+                return None;
+            }
+            let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
+            else {
+                return None;
+            };
+            if suppressed_sites[cell.index()] && !facts.cannot_be_moved_destroyed_or_modified
+                || self.site_abilities_lost(cell) && suppressed_sites[cell.index()]
+            {
+                return None;
+            }
+            Some(self.effective_site_affinity(cell, facts.affinity))
+        });
         let provider_elements = self
             .position
             .units
             .iter()
-            .filter(|unit| unit.controller == seat && !self.minion_is_disabled(unit))
+            .filter(|unit| unit.controller == seat && !self.minion_abilities_lost(unit))
             .filter_map(|unit| {
                 let CardFacts::Minion(facts) =
                     &self.rules.cards[usize::from(unit.card.card_id.0)].facts
@@ -9616,7 +9620,12 @@ impl Game {
                 facts.provides
             });
         let mut affinities = [0_u64; 4];
-        for element in site_elements.chain(provider_elements) {
+        for counts in site_affinities {
+            for (total, count) in affinities.iter_mut().zip(counts) {
+                *total += u64::from(count);
+            }
+        }
+        for element in provider_elements {
             affinities[match element {
                 Element::Earth => 0,
                 Element::Fire => 1,
@@ -9627,13 +9636,19 @@ impl Game {
         affinities
     }
 
-    fn effective_site_elements(&self, cell: Cell, printed: ElementSet) -> ElementSet {
+    fn effective_site_affinity(&self, cell: Cell, mut printed: [u8; 4]) -> [u8; 4] {
         match self.site_water_overlay(cell) {
-            SiteWaterOverlay::Fate => ElementSet::only(Element::Water),
-            SiteWaterOverlay::Flooded => printed.with(Element::Water),
-            SiteWaterOverlay::Drought => printed.without(Element::Water),
+            SiteWaterOverlay::Fate => [0, 0, printed[2].max(1), 0],
+            SiteWaterOverlay::Flooded => {
+                printed[2] = printed[2].max(1);
+                printed
+            }
+            SiteWaterOverlay::Drought => {
+                printed[2] = 0;
+                printed
+            }
             SiteWaterOverlay::Printed => printed,
-            SiteWaterOverlay::None => ElementSet::empty(),
+            SiteWaterOverlay::None => [0; 4],
         }
     }
 

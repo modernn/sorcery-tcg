@@ -408,15 +408,31 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
     const castCharge = findAction(current, (descriptor) =>
       descriptor.kind === 'cast-magic'
         && descriptor.cardInstanceId === charge.instanceId
-        && (descriptor.ally as JsonObject | undefined)?.instanceId === raal.instanceId);
+        && descriptor.ally === undefined
+        && descriptor.target === undefined
+        && descriptor.targetLocation === undefined);
     assert.match(String(castCharge.label),
-      /Cast Charge.*Raal Dromedary.*ally can move and attack this turn/);
+      /Cast Charge.*ally can move and attack this turn/);
     assert.doesNotMatch(String(castCharge.label), /card:|sha256:/);
     current = await submit(castCharge);
     assert.match(String(current.playerAction),
-      /Cast Charge.*Raal Dromedary.*ally can move and attack this turn/);
+      /Cast Charge.*ally can move and attack this turn/);
     assert.deepEqual(((current.receipt as JsonObject).events as JsonObject[])
-      .map(({ type }) => type), ['magic-cast', 'charge-granted', 'magic-resolved']);
+      .map(({ type }) => type), ['magic-cast']);
+    const chargeChoices = (current.actions as JsonObject[]).filter(({ descriptor }) => {
+      const value = descriptor as JsonObject;
+      return value.kind === 'choose-ability'
+        && value.sourceInstanceId === charge.instanceId
+        && (value.target as JsonObject | undefined)?.kind === 'minion'
+        && (value.target as JsonObject | undefined)?.instanceId === raal.instanceId;
+    });
+    assert.equal(chargeChoices.length, 1);
+    const chooseCharge = chargeChoices[0]!;
+    assert.match(String(chooseCharge.label), /Choose minion Raal Dromedary.*for ability/);
+    current = await submit(chooseCharge);
+    assert.match(String(current.playerAction), /Choose minion Raal Dromedary.*for ability/);
+    assert.deepEqual(((current.receipt as JsonObject).events as JsonObject[])
+      .map(({ type }) => type), ['ability-choice-committed', 'charge-granted', 'magic-resolved']);
     const chargedMove = findAction(current, (descriptor) =>
       descriptor.kind === 'move-and-attack'
         && descriptor.unitInstanceId === raal.instanceId
@@ -426,7 +442,7 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
       .find(({ instanceId }) => instanceId === raal.instanceId);
     assert.equal(movedRaal?.location, 'C4');
     const chargeReplay = await json('/api/replay', { method: 'POST' });
-    assert.equal(chargeReplay.acceptedActionCount, 12);
+    assert.equal(chargeReplay.acceptedActionCount, 13);
     assert.equal(chargeReplay.verified, true);
     assert.equal(chargeReplay.finalStateHash, current.stateHash);
 
@@ -860,7 +876,7 @@ function assertFireResponse(result: PrivateGameCheck['fireResponse']): void {
 function assertFireCharge(result: PrivateGameCheck['fireCharge']): void {
   assert.equal(result.charge, 'Charge');
   assert.equal(result.raalDromedary, 'Raal Dromedary');
-  assert.equal(result.acceptedActionCount, 12);
+  assert.equal(result.acceptedActionCount, 13);
   assert.equal(result.moveUnavailableBeforeCharge, true);
   assert.equal(result.exactNonTargetAllyChoice, true);
   assert.equal(result.manaPaid, 1);

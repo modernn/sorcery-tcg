@@ -261,3 +261,22 @@ predicate as continuous nearby enemy Stealth removal. Both Disabled and Silence
 suppress these special abilities. End-turn eligibility is captured before
 expiring temporary Silence, so expiry does not retroactively trigger a removed
 ability during that end phase.
+
+Sites may declare `siteAffinity` as four integer production counts (Earth, Fire,
+Water, Air; each 0–100), with positive components matching their `elements`.
+Element membership still controls classification; counts control casting
+threshold availability. Omission preserves one affinity per listed element.
+The Rust parser compiles the counts once into a four-byte array, and production
+sums those arrays without per-query allocation.
+
+Flooded supplies a minimum of one Water affinity and retains existing counts.
+Drought removes only Water production. A water-only flooding effect removes
+non-Water counts while retaining printed Water production, with a minimum of
+one. Site suppression zeros the full vector; Silence and Disabled suppress
+minion abilities that remove site production or supply additional affinity.
+Private ingestion validates explicit production against the source site's
+printed counts, separately from non-site casting requirements.
+
+Sites that cannot be modified retain their printed classification, affinity, and
+abilities under terrain overlays, including water-only flooding and ability
+loss. The same protection prevents site-production suppression.

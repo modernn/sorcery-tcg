@@ -457,6 +457,7 @@ export type GameCardDefinition =
     cardType: 'site';
     connectsBurrowedAllies?: boolean;
     elements: readonly GameElement[];
+    siteAffinity?: GameThresholds;
     flyToNearbyVoidOncePerTurnAtAirThreshold?: 3;
     genesisDiscardTopSpells?: 2;
     genesisDrawSpellPerAdjacentSameCard?: boolean;
@@ -1671,7 +1672,7 @@ const SUPPORTED_CARD_FIELDS = {
   `.trim().split(/\s+/)),
   site: new Set(`
     airborneMinionsAtopMoveFreelyAway blocksGroundMinionEntryWhileMinionAtop
-    cannotBeMovedDestroyedOrModified cardType connectsBurrowedAllies elements
+    cannotBeMovedDestroyedOrModified cardType connectsBurrowedAllies elements siteAffinity
     flyToNearbyVoidOncePerTurnAtAirThreshold
     genesisDiscardTopSpells genesisDrawSpellPerAdjacentSameCard genesisEnemiesLoseStealth
     genesisGainMana genesisGainManaIfOnlyControlledCopy genesisGainManaPerSite genesisHealNearbyAvatars
@@ -1842,6 +1843,34 @@ function rejectUnknownThresholds(
   if (unknown) throw new RangeError(`${path}.thresholds.${unknown} is unsupported`);
 }
 
+function validateSiteAffinity(
+  affinity: unknown,
+  path: string,
+  elements: readonly GameElement[],
+): asserts affinity is GameThresholds {
+  if (affinity === null || typeof affinity !== 'object' || Array.isArray(affinity)) {
+    throw new RangeError(`${path}.siteAffinity must be an object`);
+  }
+  const candidate = affinity as Record<string, unknown>;
+  const fields = ['air', 'earth', 'fire', 'water'] as const;
+  const unknown = Object.keys(candidate).find((field) => !fields.includes(field as typeof fields[number]));
+  if (unknown || Object.keys(candidate).length !== fields.length) {
+    throw new RangeError(`${path}.siteAffinity must contain exactly air, earth, fire, and water`);
+  }
+  for (const element of fields) {
+    const value = candidate[element];
+    if (typeof value !== 'number'
+      || !Number.isSafeInteger(value)
+      || value < 0
+      || value > MAX_COMBAT_STAT) {
+      throw new RangeError(`${path}.siteAffinity.${element} must be a safe integer between 0 and ${MAX_COMBAT_STAT}`);
+    }
+    if ((value > 0) !== elements.includes(element)) {
+      throw new RangeError(`${path}.siteAffinity.${element} must match printed elements membership`);
+    }
+  }
+}
+
 function validateMinionMetadata(
   card: Extract<GameCardDefinition, { cardType: 'minion' }>,
   path: string,
@@ -1995,6 +2024,7 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
       || card.elements.some((element, index) => elements.indexOf(element) <= elements.indexOf(card.elements[index - 1]!))) {
       throw new RangeError(`${path}.elements must contain unique elements in canonical order`);
     }
+    if (card.siteAffinity !== undefined) validateSiteAffinity(card.siteAffinity, path, card.elements);
     if (card.genesisGainMana !== undefined
       && (!Number.isSafeInteger(card.genesisGainMana)
         || card.genesisGainMana < 1
@@ -3464,6 +3494,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             cardType: 'site' as const,
             ...(card.connectsBurrowedAllies === true ? { connectsBurrowedAllies: true } : {}),
             elements: [...card.elements],
+            ...(card.siteAffinity !== undefined ? { siteAffinity: { ...card.siteAffinity } } : {}),
             ...(card.flyToNearbyVoidOncePerTurnAtAirThreshold === 3
               ? { flyToNearbyVoidOncePerTurnAtAirThreshold: 3 as const }
               : {}),

@@ -10,7 +10,12 @@ import { identityHash } from '../../src/authority/hash.ts';
 import type { PrivateStarterPreset } from '../../src/commands/run-private-game-check.ts';
 import { createGameManifest, tokenDependencies, type GameCardDefinition } from '../../src/engine/game.ts';
 import { RustSessionClient } from '../../src/engine/rust-engine.ts';
-import { buildPresetCardPool, prepareBoundExperiment, presetCardCatalog } from '../../src/ingestion/preset-card-pool.ts';
+import {
+  assertPrintedCardFacts,
+  buildPresetCardPool,
+  prepareBoundExperiment,
+  presetCardCatalog,
+} from '../../src/ingestion/preset-card-pool.ts';
 import { loadReviewedCardBindings, mergeReviewedCardBindings } from '../../src/ingestion/reviewed-card-bindings.ts';
 
 const thresholds = { air: 0, earth: 0, fire: 0, water: 0 };
@@ -76,6 +81,26 @@ test('preset ingestion rejects changed printed scalars and null-to-zero token co
     card.stableId === 'token' ? { ...card, manaCost: null } : card) };
   assert.throws(() => buildPresetCardPool(absentTokenAuthority, [base]),
     /preset binding differs from source manaCost: token/);
+});
+
+test('preset ingestion checks explicit site affinity against source production while allowing legacy omission', () => {
+  const source = {
+    ...authority.cards.find((card) => card.stableId === 'site')!,
+    stableId: 'repeated-site',
+    elements: ['fire'] as const,
+    thresholds: { ...thresholds, fire: 2 },
+  };
+  const repeatedSite = {
+    cardType: 'site' as const,
+    elements: ['fire'] as const,
+    siteAffinity: { ...source.thresholds },
+  };
+  assert.doesNotThrow(() => assertPrintedCardFacts(source, repeatedSite, 'preset binding'));
+  assert.throws(
+    () => assertPrintedCardFacts(source, { ...repeatedSite, siteAffinity: { ...source.thresholds, fire: 1 } }, 'preset binding'),
+    /preset binding differs from source thresholds: repeated-site/,
+  );
+  assert.doesNotThrow(() => assertPrintedCardFacts(source, { cardType: 'site', elements: ['fire'] }, 'legacy preset binding'));
 });
 
 test('reviewed local bindings require exact source identity, complete review and matching printed stats', () => {

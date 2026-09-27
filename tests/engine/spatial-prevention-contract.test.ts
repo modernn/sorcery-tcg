@@ -9,12 +9,15 @@ const authority = {
   revisionId: 'synthetic-spatial-prevention-test',
 };
 
-function input(minion: GameCardDefinition): GameManifestInput {
+function input(
+  minion: GameCardDefinition,
+  site: Extract<GameCardDefinition, { cardType: 'site' }> = { cardType: 'site', elements: ['earth'] },
+): GameManifestInput {
   return {
     authority,
     cards: {
       avatar: { attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20 },
-      site: { cardType: 'site', elements: ['earth'] },
+      site,
       minion,
     },
     decks: {
@@ -25,6 +28,52 @@ function input(minion: GameCardDefinition): GameManifestInput {
     seed: 1,
   };
 }
+
+test('site affinity accepts repeated printed production and preserves membership', () => {
+  const siteAffinity = { air: 0, earth: 0, fire: 2, water: 0 } as const;
+  const manifest = createGameManifest(input(minion(), {
+    cardType: 'site', elements: ['fire'], siteAffinity,
+  }));
+  const site = manifest.cards.site;
+  assert(site?.cardType === 'site');
+  assert.deepEqual(site.siteAffinity, siteAffinity);
+  const legacy = createGameManifest(input(minion())).cards.site;
+  assert(legacy?.cardType === 'site');
+  assert.equal(legacy.siteAffinity, undefined);
+});
+
+test('site affinity rejects incomplete, extra, malformed, and membership-mismatched values', () => {
+  const candidates = [
+    { air: 0, earth: 0, fire: 2 },
+    { air: 0, earth: 0, fire: 2, water: 0, void: 0 },
+    { air: 0, earth: 0, fire: 0, water: 0 },
+    { air: 0, earth: 1, fire: 2, water: 0 },
+    { air: 0, earth: 0, fire: 101, water: 0 },
+    { air: 0, earth: 0, fire: 1.5, water: 0 },
+    { air: 0, earth: 0, fire: null, water: 0 },
+  ];
+  for (const siteAffinity of candidates) {
+    assert.throws(
+      () => createGameManifest(input(minion(), {
+        cardType: 'site', elements: ['fire'], siteAffinity: siteAffinity as never,
+      })),
+      /siteAffinity/,
+    );
+  }
+});
+
+test('site affinity is cloned into the canonical manifest', () => {
+  const siteAffinity = { air: 0, earth: 0, fire: 2, water: 0 };
+  const manifest = createGameManifest(input(minion(), {
+    cardType: 'site', elements: ['fire'], siteAffinity,
+  }));
+  siteAffinity.fire = 100;
+  const cloned = manifest.cards.site;
+  assert(cloned?.cardType === 'site');
+  assert.notEqual(cloned.siteAffinity, siteAffinity);
+  assert.deepEqual(cloned.siteAffinity, { air: 0, earth: 0, fire: 2, water: 0 });
+  assert.equal(Object.isFrozen(cloned.siteAffinity), true);
+});
 
 function minion(overrides: Partial<Extract<GameCardDefinition, { cardType: 'minion' }>> = {}) {
   return {

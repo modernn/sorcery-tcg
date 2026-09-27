@@ -4728,6 +4728,8 @@ function gameDefinition(
       cardType: 'site',
       ...(connectsBurrowedAllies ? { connectsBurrowedAllies: true } : {}),
       elements: card.elements,
+      ...(Object.values(card.thresholds).some((count) => count > 1)
+        ? { siteAffinity: card.thresholds } : {}),
       ...(flyToNearbyVoidOncePerTurnAtAirThreshold
         ? { flyToNearbyVoidOncePerTurnAtAirThreshold: 3 as const }
         : {}),
@@ -6379,7 +6381,7 @@ function openingPair(
     const siteDefinition = session.state.cards[site.cardId];
     if (siteDefinition?.cardType !== 'site') continue;
     const affinity = { air: 0, earth: 0, fire: 0, water: 0 };
-    siteDefinition.elements.forEach((element) => { affinity[element] += 1; });
+    siteDefinition.elements.forEach((element) => { affinity[element] += siteDefinition.siteAffinity?.[element] ?? 1; });
     for (const minion of player.hand.spellbook) {
       if (preferredCardId && minion.cardId !== preferredCardId) continue;
       const definition = session.state.cards[minion.cardId];
@@ -6419,7 +6421,7 @@ function openingSiteForMinion(
     const siteDefinition = session.state.cards[site.cardId];
     if (siteDefinition?.cardType !== 'site') return false;
     const affinity = { air: 0, earth: 0, fire: 0, water: 0 };
-    siteDefinition.elements.forEach((element) => { affinity[element] += 1; });
+    siteDefinition.elements.forEach((element) => { affinity[element] += siteDefinition.siteAffinity?.[element] ?? 1; });
     return (['air', 'earth', 'fire', 'water'] as const)
       .every((element) => affinity[element] >= definition.thresholds[element]);
   })?.instanceId;
@@ -6438,7 +6440,7 @@ function earthOpponentOpening(session: GameSession): Readonly<{
       for (const site of [first, second]) {
         const definition = session.state.cards[site.cardId];
         if (definition?.cardType !== 'site') continue;
-        definition.elements.forEach((element) => { affinity[element] += 1; });
+        definition.elements.forEach((element) => { affinity[element] += definition.siteAffinity?.[element] ?? 1; });
       }
       const minion = [...player.hand.spellbook, ...player.spellbook.slice(0, 1)].find((card) => {
         const definition = session.state.cards[card.cardId];
@@ -6707,7 +6709,7 @@ function findEarthDuelOpening(
       for (const site of [first, second]) {
         const definition = session.state.cards[site.cardId];
         if (definition?.cardType !== 'site') continue;
-        definition.elements.forEach((element) => { affinity[element] += 1; });
+        definition.elements.forEach((element) => { affinity[element] += definition.siteAffinity?.[element] ?? 1; });
       }
       const target = [...south.hand.spellbook, ...south.spellbook.slice(0, 2)].find((card) => {
         if (requiredTargetId && card.cardId !== requiredTargetId) return false;
@@ -7060,7 +7062,7 @@ function findEarthBurrowingOpening(
     northSites.slice(0, 3).forEach(({ cardId }) => {
       const definition = session.state.cards[cardId];
       if (definition?.cardType === 'site') {
-        definition.elements.forEach((element) => { affinity[element] += 1; });
+        definition.elements.forEach((element) => { affinity[element] += definition.siteAffinity?.[element] ?? 1; });
       }
     });
     const comparisonInstanceId = [
@@ -8641,43 +8643,46 @@ function findAirOpening(
   session: GameSession;
   southSiteInstanceId: string;
 }> {
-  const seed = input.config.airSeed;
-  const built = buildManifest(input, seed, 'air');
-  const session = createGameSession(built.manifest);
-  const northSites = session.state.players.north.hand.atlas.filter((site) => {
-    const definition = session.state.cards[site.cardId];
-    return definition?.cardType === 'site' && definition.elements.includes('air');
-  });
-  const movementInstanceId = availableMinionInstance(
-    session,
-    'north',
-    input.movementMinion.stableId,
-    2,
-  );
-  const south = openingPair(session, 'south');
-  const southCardId = south && session.state.players.south.hand.spellbook
-    .find(({ instanceId }) => instanceId === south.minionInstanceId)?.cardId;
-  const southDefinition = southCardId ? session.state.cards[southCardId] : undefined;
-  if (northSites.length >= 3
-    && movementInstanceId
-    && south
-    && southDefinition?.cardType === 'minion'
-    && southDefinition.attack <= 2) {
-    return {
-      ...built,
-      attackerInstanceId: south.minionInstanceId,
-      movementInstanceId,
-      northSiteInstanceIds: [
-        northSites[0]!.instanceId,
-        northSites[1]!.instanceId,
-        northSites[2]!.instanceId,
-      ],
-      seed,
+  // Select a reproducible diagnostic opening; deck growth can invalidate the original seed.
+  for (let offset = 0; offset <= 256; offset += 1) {
+    const seed = input.config.airSeed + offset;
+    const built = buildManifest(input, seed, 'air');
+    const session = createGameSession(built.manifest);
+    const northSites = session.state.players.north.hand.atlas.filter((site) => {
+      const definition = session.state.cards[site.cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('air');
+    });
+    const movementInstanceId = availableMinionInstance(
       session,
-      southSiteInstanceId: south.siteInstanceId,
-    };
+      'north',
+      input.movementMinion.stableId,
+      2,
+    );
+    const south = openingPair(session, 'south');
+    const southCardId = south && session.state.players.south.hand.spellbook
+      .find(({ instanceId }) => instanceId === south.minionInstanceId)?.cardId;
+    const southDefinition = southCardId ? session.state.cards[southCardId] : undefined;
+    if (northSites.length >= 3
+      && movementInstanceId
+      && south
+      && southDefinition?.cardType === 'minion'
+      && southDefinition.attack <= 2) {
+      return {
+        ...built,
+        attackerInstanceId: south.minionInstanceId,
+        movementInstanceId,
+        northSiteInstanceIds: [
+          northSites[0]!.instanceId,
+          northSites[1]!.instanceId,
+          northSites[2]!.instanceId,
+        ],
+        seed,
+        session,
+        southSiteInstanceId: south.siteInstanceId,
+      };
+    }
   }
-  throw new Error(`private Air scenario seed ${seed} no longer produces its supported opening`);
+  throw new Error('private Air scenario found no supported opening in its bounded seed scan');
 }
 
 function findAirZapOpening(
@@ -10720,7 +10725,7 @@ function findAirSummoningOpening(
   sites.forEach(({ cardId }) => {
     const definition = session.state.cards[cardId];
     if (definition?.cardType === 'site') {
-      definition.elements.forEach((element) => { affinity[element] += 1; });
+      definition.elements.forEach((element) => { affinity[element] += definition.siteAffinity?.[element] ?? 1; });
     }
   });
   const roamingInstanceId = spells
@@ -10794,7 +10799,7 @@ function findFireOpening(
     const siteDefinition = session.state.cards[first.cardId];
     if (siteDefinition?.cardType !== 'site') continue;
     const affinity = { air: 0, earth: 0, fire: 0, water: 0 };
-    siteDefinition.elements.forEach((element) => { affinity[element] += 1; });
+    siteDefinition.elements.forEach((element) => { affinity[element] += siteDefinition.siteAffinity?.[element] ?? 1; });
     const attacker = session.state.players.south.hand.spellbook.find(({ cardId }) => {
       const definition = session.state.cards[cardId];
       return definition?.cardType === 'minion'
@@ -10961,7 +10966,7 @@ function findWaterOpening(
     const siteDefinition = session.state.cards[first.cardId];
     if (siteDefinition?.cardType !== 'site') continue;
     const affinity = { air: 0, earth: 0, fire: 0, water: 0 };
-    siteDefinition.elements.forEach((element) => { affinity[element] += 1; });
+    siteDefinition.elements.forEach((element) => { affinity[element] += siteDefinition.siteAffinity?.[element] ?? 1; });
     const attacker = session.state.players.south.hand.spellbook.find((card) => {
       const definition = session.state.cards[card.cardId];
       return definition?.cardType === 'minion'
@@ -21652,31 +21657,50 @@ function runFireCharge(
   const chargeActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.chargeInstanceId
-      && descriptor.ally?.kind === 'minion'
-      && descriptor.ally.instanceId === opening.raalInstanceId
-      && descriptor.ally.seat === 'north'
+      && descriptor.ally === undefined
       && descriptor.target === undefined
       && descriptor.targetLocation === undefined
       && descriptor.targetSiteInstanceId === undefined
       && descriptor.cemeteryMinionInstanceId === undefined);
   const chosenCharge = chargeActions[0];
   if (!chosenCharge || chargeActions.length !== 1) {
-    throw new Error('private non-target Charge ally choice is not exactly available');
+    throw new Error('private non-target Charge cast is not exactly available');
   }
   const manaBefore = session.state.players.north.mana;
-  session = accept(session, chosenCharge);
+  const castResult = stepGame(session, chosenCharge);
+  if (!castResult.accepted) throw new Error(`actual-card Charge cast rejected: ${castResult.reason.code}`);
+  session = castResult.session;
+  const castEvents = castResult.receipt.events;
+  const chargeChoices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+    descriptor.kind === 'choose-ability'
+      && descriptor.sourceInstanceId === opening.chargeInstanceId
+      && descriptor.target?.kind === 'minion'
+      && descriptor.target.instanceId === opening.raalInstanceId
+      && descriptor.target.seat === 'north');
+  const chosenChargeChoice = chargeChoices[0];
+  if (!chosenChargeChoice || chargeChoices.length !== 1) {
+    throw new Error('private non-target Charge ally choice is not exactly available');
+  }
+  const choiceResult = stepGame(session, chosenChargeChoice);
+  if (!choiceResult.accepted) {
+    throw new Error(`actual-card Charge ally choice rejected: ${choiceResult.reason.code}`);
+  }
+  session = choiceResult.session;
+  const choiceEvents = choiceResult.receipt.events;
   const after = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.raalInstanceId);
   if (!after) throw new Error('private temporary Charge removed its ally');
-  const castEvents = session.transcript.at(-1)?.events ?? [];
   const castPayload = castEvents[0] && isJsonRecord(castEvents[0].payload)
     ? castEvents[0].payload
     : undefined;
-  const grantedPayload = castEvents[1] && isJsonRecord(castEvents[1].payload)
-    ? castEvents[1].payload
+  const choicePayload = choiceEvents[0] && isJsonRecord(choiceEvents[0].payload)
+    ? choiceEvents[0].payload
     : undefined;
-  const resolvedPayload = castEvents[2] && isJsonRecord(castEvents[2].payload)
-    ? castEvents[2].payload
+  const grantedPayload = choiceEvents[1] && isJsonRecord(choiceEvents[1].payload)
+    ? choiceEvents[1].payload
+    : undefined;
+  const resolvedPayload = choiceEvents[2] && isJsonRecord(choiceEvents[2].payload)
+    ? choiceEvents[2].payload
     : undefined;
   const temporaryChargeRecorded = temporarySources(after.temporaryModifiers, 'charge').length === 1
     && temporarySources(after.temporaryModifiers, 'charge')[0] === opening.chargeInstanceId;
@@ -21711,13 +21735,18 @@ function runFireCharge(
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
-    causalEventsVerified: castEvents.map(({ type }) => type).join(',')
-      === 'magic-cast,charge-granted,magic-resolved'
+    causalEventsVerified: castEvents.map(({ type }) => type).join(',') === 'magic-cast'
+      && choiceEvents.map(({ type }) => type).join(',')
+      === 'ability-choice-committed,charge-granted,magic-resolved'
       && castPayload?.instanceId === opening.chargeInstanceId
       && castPayload.manaPaid === 1
       && castPayload.seat === 'north'
-      && castPayload.allyInstanceId === opening.raalInstanceId
-      && castPayload.allySeat === 'north'
+      && choicePayload?.sourceInstanceId === opening.chargeInstanceId
+      && choicePayload.seat === 'north'
+      && isJsonRecord(choicePayload.target)
+      && choicePayload.target.instanceId === opening.raalInstanceId
+      && choicePayload.target.kind === 'minion'
+      && choicePayload.target.seat === 'north'
       && grantedPayload?.instanceId === opening.raalInstanceId
       && grantedPayload.seat === 'north'
       && grantedPayload.sourceInstanceId === opening.chargeInstanceId
@@ -21726,7 +21755,7 @@ function runFireCharge(
       && expiryIndex < turnEndedIndex,
     charge: input.chargeMagic.name,
     deck: deckList(opening.manifest.decks.north, opening.names),
-    exactNonTargetAllyChoice: chargeActions.length === 1,
+    exactNonTargetAllyChoice: chargeActions.length === 1 && chargeChoices.length === 1,
     expiredAtEndOfTurn,
     manaPaid: manaBefore - session.state.players.north.mana,
     moveAvailableAfterCharge,

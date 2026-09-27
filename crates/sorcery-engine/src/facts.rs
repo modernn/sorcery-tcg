@@ -186,6 +186,7 @@ pub struct SiteCountQuery {
     reason = "named rule facts are clearer and safer than positional bits"
 )]
 pub struct SiteFacts {
+    pub affinity: [u8; 4],
     pub airborne_minions_atop_move_freely_away: bool,
     pub blocks_ground_minion_entry_while_minion_atop: bool,
     pub cannot_be_moved_destroyed_or_modified: bool,
@@ -969,6 +970,7 @@ const SITE_FIELDS: &[&str] = &[
     "cardType",
     "connectsBurrowedAllies",
     "elements",
+    "siteAffinity",
     "flyToNearbyVoidOncePerTurnAtAirThreshold",
     "genesisDiscardTopSpells",
     "genesisDrawSpellPerAdjacentSameCard",
@@ -1363,8 +1365,41 @@ fn parse_site_count_query(
     }))
 }
 
+fn parse_site_affinity(
+    object: &Map<String, Value>,
+    elements: ElementSet,
+    path: &str,
+) -> Result<[u8; 4], FactError> {
+    let Some(value) = object.get("siteAffinity") else {
+        return Ok(Element::ALL.map(|element| u8::from(elements.contains(element))));
+    };
+    let field_path = format!("{path}.siteAffinity");
+    let counts = value
+        .as_object()
+        .ok_or_else(|| FactError::new(&field_path, "must be an object"))?;
+    reject_unknown(counts, &ELEMENT_FIELDS, &field_path)?;
+    let mut affinity = [0; 4];
+    for (index, field) in ELEMENT_FIELDS.into_iter().enumerate() {
+        affinity[index] = compact_u8(required_nonnegative_integer(
+            counts,
+            field,
+            MAX_COMBAT_STAT,
+            &field_path,
+        )?);
+        if (affinity[index] > 0) != elements.contains(Element::ALL[index]) {
+            return Err(FactError::new(
+                &field_path,
+                "positive counts must match elements",
+            ));
+        }
+    }
+    Ok(affinity)
+}
+
 fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, FactError> {
     reject_unknown(object, SITE_FIELDS, path)?;
+    let elements = parse_elements(object, path)?;
+    let affinity = parse_site_affinity(object, elements, path)?;
     let genesis_gain_mana =
         optional_bounded_integer(object, "genesisGainMana", 1, MAX_COMBAT_STAT, path)?
             .map(compact_u8);
@@ -1386,6 +1421,7 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
         parse_reference(object, "genesisPayOneManaToSummonToken", path)?;
     let genesis_reorder_next_spells = fixed_integer(object, "genesisReorderNextSpells", 3, path)?;
     Ok(SiteFacts {
+        affinity,
         airborne_minions_atop_move_freely_away: true_only(
             object,
             "airborneMinionsAtopMoveFreelyAway",
@@ -1402,7 +1438,7 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
             path,
         )?,
         connects_burrowed_allies: optional_bool(object, "connectsBurrowedAllies", path)?,
-        elements: parse_elements(object, path)?,
+        elements,
         fly_to_nearby_void_once_per_turn_at_air_threshold: fixed_integer(
             object,
             "flyToNearbyVoidOncePerTurnAtAirThreshold",
