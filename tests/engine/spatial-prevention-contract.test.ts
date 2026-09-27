@@ -75,6 +75,23 @@ test('site affinity is cloned into the canonical manifest', () => {
   assert.equal(Object.isFrozen(cloned.siteAffinity), true);
 });
 
+test('site entry effect accepts and clones only the closed Stealth effect', () => {
+  const manifest = createGameManifest(input(minion(), {
+    cardType: 'site', elements: ['earth'], siteEntryEffect: 'grantStealthToEnteringMinion',
+  }));
+  const site = manifest.cards.site;
+  assert(site?.cardType === 'site');
+  assert.equal(site.siteEntryEffect, 'grantStealthToEnteringMinion');
+  for (const siteEntryEffect of [true, 'killEnteringMinion', {}]) {
+    assert.throws(
+      () => createGameManifest(input(minion(), {
+        cardType: 'site', elements: ['earth'], siteEntryEffect: siteEntryEffect as never,
+      })),
+      /siteEntryEffect/u,
+    );
+  }
+});
+
 function minion(overrides: Partial<Extract<GameCardDefinition, { cardType: 'minion' }>> = {}) {
   return {
     attack: 1,

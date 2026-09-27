@@ -21,8 +21,8 @@ use crate::facts::{
     AlternativeSummonPayment, ArtifactEffect, ArtifactFacts, AuraEffect, AuraFacts, AvatarFacts,
     BasicMovementRestriction, CardFacts, DamagePrevention, DamageSourceFilter, Element, ElementSet,
     EndTurnStealth, FactError, MagicEffect, MagicFacts, MinionFacts, RequiredCastRegion,
-    SiteCountController, SiteCountOccupant, SiteCountQuery, SiteCountScope, SiteFacts, Thresholds,
-    parse_card_definition, validate_identifier,
+    SiteCountController, SiteCountOccupant, SiteCountQuery, SiteCountScope, SiteEntryEffect,
+    SiteFacts, Thresholds, parse_card_definition, validate_identifier,
 };
 use crate::prng::PrngState;
 
@@ -48,6 +48,8 @@ mod resolution_tests;
 mod selection;
 #[cfg(test)]
 mod site_affinity_tests;
+#[cfg(test)]
+mod site_entry_tests;
 mod trigger_order;
 #[cfg(test)]
 mod trigger_tests;
@@ -79,6 +81,7 @@ pub struct RulesContext {
     authority_hash: IdentityHash,
     cards: Box<[CardDefinition]>,
     has_nearby_damage_prevention: bool,
+    has_site_entry_effects: bool,
     first_seat: Seat,
     manifest_id: IdentityHash,
     seed: u32,
@@ -1718,6 +1721,7 @@ fn account_for_selfplay_site_fields(facts: &SiteFacts) {
         prevents_units_with_power_at_least_from_entering: _,
         ranged_units_here_range_bonus: _,
         sacrifice_to_destroy_nearby_site: _,
+        site_entry_effect: _,
         unique_or_legendary: _,
     } = facts;
 }
@@ -1906,6 +1910,7 @@ impl Game {
         let rules = Arc::new(RulesContext {
             authority_hash: manifest.authority.content_hash.clone(),
             has_nearby_damage_prevention: cards.iter().any(|card| matches!(&card.facts, CardFacts::Minion(facts) if facts.nearby_damage_prevention.is_some())),
+            has_site_entry_effects: cards.iter().any(|card| matches!(&card.facts, CardFacts::Site(facts) if facts.site_entry_effect.is_some())),
             cards: cards.into_boxed_slice(),
             first_seat: manifest.first_seat,
             manifest_id: manifest.identity,
@@ -6280,7 +6285,10 @@ impl Game {
         &mut self,
         instance_id: &IdentityHash,
         location: Location,
+        destination_footprint: Option<SquareArea>,
+        outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        let old_sites = self.minion_occupied_site_incarnations(instance_id)?;
         let retains = self.retains_planar_gate_voidwalk(instance_id, location);
         let unit_index = self
             .position
@@ -6294,7 +6302,9 @@ impl Game {
             CardFacts::Minion(facts) if facts.connects_top_bottom
         );
         let unit = &mut self.position.units[unit_index];
-        if let Some(area) = unit.occupied_cells {
+        if let Some(area) = destination_footprint {
+            unit.occupied_cells = Some(area);
+        } else if let Some(area) = unit.occupied_cells {
             unit.occupied_cells = Some(
                 Self::translate_footprint(area, unit.location, location.cell, connects_top_bottom)
                     .ok_or(GameError::IllegalAction)?,
@@ -6306,7 +6316,99 @@ impl Game {
         unit.planar_gate_voidwalk = retains;
         unit.region = location.region;
         self.translate_carried_artifact_cells(&instance_id, from, location.cell);
+        self.apply_minion_site_entry_effects(&instance_id, &old_sites, outcomes)
+    }
+
+    fn minion_occupied_site_incarnations(
+        &self,
+        instance_id: &IdentityHash,
+    ) -> Result<Vec<RealmReference>, GameError> {
+        let unit = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let mut sites = Vec::new();
+        for cell in Self::unit_occupied_cells(unit) {
+            let Some(site) = &self.position.sites[cell.index()] else {
+                continue;
+            };
+            let reference = RealmReference::from_card(&site.card);
+            if !sites.contains(&reference) {
+                sites.push(reference);
+            }
+        }
+        Ok(sites)
+    }
+
+    fn apply_minion_site_entry_effects(
+        &mut self,
+        instance_id: &IdentityHash,
+        old_sites: &[RealmReference],
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        if !self.rules.has_site_entry_effects {
+            return Ok(());
+        }
+        let unit = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let seat = unit.controller;
+        let cells = Self::unit_occupied_cells(unit).to_vec();
+        let mut entries = Vec::new();
+        for cell in cells {
+            let Some(site) = &self.position.sites[cell.index()] else {
+                continue;
+            };
+            let reference = RealmReference::from_card(&site.card);
+            if old_sites.contains(&reference)
+                || entries
+                    .iter()
+                    .any(|(_, prior, _): &(Cell, RealmReference, SiteEntryEffect)| {
+                        *prior == reference
+                    })
+                || self.site_abilities_lost(cell)
+            {
+                continue;
+            }
+            let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            if let Some(effect) = facts.site_entry_effect {
+                entries.push((cell, reference, effect));
+            }
+        }
+        for (cell, source, effect) in entries {
+            outcomes.push("site-entry-triggered", || {
+                json!({
+                    "cell": cell,
+                    "sourceInstanceId": source.instance_id(),
+                    "targetInstanceId": instance_id,
+                })
+            });
+            match effect {
+                SiteEntryEffect::GrantStealthToEnteringMinion => self.apply_grant_stealth_minion(
+                    instance_id,
+                    seat,
+                    source.instance_id(),
+                    outcomes,
+                )?,
+            }
+        }
         Ok(())
+    }
+
+    fn apply_summoned_minion_site_entry_effects(
+        &mut self,
+        instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        self.apply_minion_site_entry_effects(instance_id, &[], outcomes)
     }
 
     fn translate_carried_artifact_cells(
@@ -11254,7 +11356,7 @@ impl Game {
             {
                 break;
             }
-            self.move_unit_target_to(&continuation.target, next)?;
+            self.move_unit_target_to(&continuation.target, next, outcomes)?;
             path_index += 1;
             walked.push(next);
             self.settle_region_occupancy(outcomes)?;
@@ -11457,7 +11559,7 @@ impl Game {
             {
                 break;
             }
-            self.move_minion_to(unit_instance_id, next)?;
+            self.move_minion_to(unit_instance_id, next, None, outcomes)?;
             reached += 1;
             self.settle_region_occupancy(outcomes)?;
             if self.position.pending_deathrites.is_some() || self.position.terminal.is_some() {
@@ -11559,7 +11661,7 @@ impl Game {
             cell: unit.location,
             region: unit.region,
         };
-        self.move_minion_to(unit_instance_id, next)?;
+        self.move_minion_to(unit_instance_id, next, None, outcomes)?;
         self.position
             .pending_basic_movement
             .as_pending_mut()
@@ -11729,7 +11831,7 @@ impl Game {
         }) {
             return Err(GameError::IllegalAction);
         }
-        self.move_minion_to(unit_instance_id, *to)?;
+        self.move_minion_to(unit_instance_id, *to, None, outcomes)?;
         self.position.state_version += 1;
         outcomes.push("unit-stepped", || {
             json!({
@@ -18917,15 +19019,7 @@ impl Game {
                     .is_none_or(|cells| self.square_allows_power_entry(cells, profile.power))
                 && self.unit_entry_allowed(from, destination, profile));
         if legal && !stays {
-            self.move_minion_to(source_instance_id, destination)?;
-            if let Some(cells) = destination_cells {
-                self.position
-                    .units
-                    .iter_mut()
-                    .find(|candidate| candidate.card.instance_id == *source_instance_id)
-                    .expect("teleporting minion")
-                    .occupied_cells = Some(cells);
-            }
+            self.move_minion_to(source_instance_id, destination, destination_cells, outcomes)?;
             outcomes.push("unit-teleported", || {
                 let mut payload = json!({
                     "from": from,
@@ -19195,7 +19289,7 @@ impl Game {
             seat: other_seat(seat),
         };
         let from = self.unit_target_location(&enemy)?;
-        let to = self.move_unit_target_to(&enemy, destination)?;
+        let to = self.move_unit_target_to(&enemy, destination, outcomes)?;
         let path = if to == from {
             vec![from]
         } else {
@@ -21098,7 +21192,7 @@ impl Game {
                     (ally.as_ref(), tempted_enemy.as_ref(), *tempted_destination)
                 {
                     let from = self.unit_target_location(enemy)?;
-                    let to = self.move_unit_target_to(enemy, destination)?;
+                    let to = self.move_unit_target_to(enemy, destination, outcomes)?;
                     let ally_instance_id = ally.instance_id().clone();
                     let enemy_instance_id = enemy.instance_id().clone();
                     let enemy_seat = enemy.seat();
@@ -22115,7 +22209,7 @@ impl Game {
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
         let from = self.unit_target_location(ally)?;
-        let stepped_to = self.move_unit_target_to(ally, destination)?;
+        let stepped_to = self.move_unit_target_to(ally, destination, outcomes)?;
         if stepped_to != from {
             let instance_id = ally.instance_id().clone();
             let ally_seat = ally.seat();
@@ -22153,7 +22247,7 @@ impl Game {
             strike_location,
         } = leap;
         let from = self.unit_target_location(ally)?;
-        let stepped_to = self.move_unit_target_to(ally, destination)?;
+        let stepped_to = self.move_unit_target_to(ally, destination, outcomes)?;
         if stepped_to != from {
             let instance_id = ally.instance_id().clone();
             let ally_seat = ally.seat();
@@ -22295,7 +22389,7 @@ impl Game {
         if stays {
             return Ok(());
         }
-        let to = self.move_unit_target_to(ally, destination)?;
+        let to = self.move_unit_target_to(ally, destination, outcomes)?;
         let instance_id = ally.instance_id().clone();
         let ally_seat = ally.seat();
         outcomes.push("unit-teleported", || {
@@ -22323,6 +22417,7 @@ impl Game {
         &mut self,
         ally: &UnitTarget,
         destination: Location,
+        outcomes: &mut OutcomeLog<'_>,
     ) -> Result<Location, GameError> {
         let from = self.unit_target_location(ally)?;
         if from == destination {
@@ -22345,7 +22440,7 @@ impl Game {
                 {
                     return Err(GameError::IllegalAction);
                 }
-                self.move_minion_to(instance_id, destination)?;
+                self.move_minion_to(instance_id, destination, None, outcomes)?;
             }
         }
         Ok(destination)
@@ -22920,6 +23015,7 @@ impl Game {
             }
             payload
         });
+        self.apply_summoned_minion_site_entry_effects(&card_instance_id, outcomes)?;
         if lance_count > 0 {
             outcomes.push("lance-gained", || {
                 json!({

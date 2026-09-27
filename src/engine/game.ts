@@ -477,6 +477,7 @@ export type GameCardDefinition =
     preventsUnitsWithPowerAtLeastFromEntering?: number;
     rangedUnitsHereRangeBonus?: 1;
     sacrificeToDestroyNearbySite?: true;
+    siteEntryEffect?: 'grantStealthToEnteringMinion';
     uniqueOrLegendary?: true;
   }>
   | Readonly<{
@@ -1680,6 +1681,7 @@ const SUPPORTED_CARD_FIELDS = {
     genesisImmobilizeNearbyUntilNextTurn genesisMayBottomNextSpell genesisPayOneManaToSummonToken
     genesisReorderNextSpells
     isTower ordinary ordinaryMinionManaDiscount rangedUnitsHereRangeBonus sacrificeToDestroyNearbySite
+    siteEntryEffect
     minionsHereGainVoidwalkUntilLeavingVoid
     preventsUnitsWithPowerAtLeastFromEntering uniqueOrLegendary
   `.trim().split(/\s+/)),
@@ -2105,6 +2107,10 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
     if (card.sacrificeToDestroyNearbySite !== undefined
       && card.sacrificeToDestroyNearbySite !== true) {
       throw new RangeError(`${path}.sacrificeToDestroyNearbySite must be true when defined`);
+    }
+    if (card.siteEntryEffect !== undefined
+      && card.siteEntryEffect !== 'grantStealthToEnteringMinion') {
+      throw new RangeError(`${path}.siteEntryEffect is unsupported`);
     }
     if (card.ordinary !== undefined && card.ordinary !== true) {
       throw new RangeError(`${path}.ordinary must be true when defined`);
@@ -3550,6 +3556,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : {}),
             ...(card.sacrificeToDestroyNearbySite === true
               ? { sacrificeToDestroyNearbySite: true as const }
+              : {}),
+            ...(card.siteEntryEffect === 'grantStealthToEnteringMinion'
+              ? { siteEntryEffect: card.siteEntryEffect }
               : {}),
             ...(card.uniqueOrLegendary === true
               ? { uniqueOrLegendary: true as const }

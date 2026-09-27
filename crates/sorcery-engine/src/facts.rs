@@ -179,6 +179,13 @@ pub struct SiteCountQuery {
     pub occupant: SiteCountOccupant,
 }
 
+/// Closed, non-interrupting effect supported when a minion enters a site.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SiteEntryEffect {
+    /// The entering minion permanently gains Stealth.
+    GrantStealthToEnteringMinion,
+}
+
 /// Site facts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[expect(
@@ -211,6 +218,7 @@ pub struct SiteFacts {
     pub prevents_units_with_power_at_least_from_entering: Option<u8>,
     pub ranged_units_here_range_bonus: bool,
     pub sacrifice_to_destroy_nearby_site: bool,
+    pub site_entry_effect: Option<SiteEntryEffect>,
     pub unique_or_legendary: bool,
 }
 
@@ -990,6 +998,7 @@ const SITE_FIELDS: &[&str] = &[
     "preventsUnitsWithPowerAtLeastFromEntering",
     "rangedUnitsHereRangeBonus",
     "sacrificeToDestroyNearbySite",
+    "siteEntryEffect",
     "uniqueOrLegendary",
 ];
 
@@ -1420,6 +1429,18 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
     let genesis_pay_one_mana_to_summon_token =
         parse_reference(object, "genesisPayOneManaToSummonToken", path)?;
     let genesis_reorder_next_spells = fixed_integer(object, "genesisReorderNextSpells", 3, path)?;
+    let site_entry_effect = match object.get("siteEntryEffect") {
+        None => None,
+        Some(Value::String(value)) if value == "grantStealthToEnteringMinion" => {
+            Some(SiteEntryEffect::GrantStealthToEnteringMinion)
+        }
+        Some(_) => {
+            return Err(FactError::new(
+                format!("{path}.siteEntryEffect"),
+                "must be grantStealthToEnteringMinion",
+            ));
+        }
+    };
     Ok(SiteFacts {
         affinity,
         airborne_minions_atop_move_freely_away: true_only(
@@ -1479,6 +1500,7 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
         .map(compact_u8),
         ranged_units_here_range_bonus: fixed_integer(object, "rangedUnitsHereRangeBonus", 1, path)?,
         sacrifice_to_destroy_nearby_site: true_only(object, "sacrificeToDestroyNearbySite", path)?,
+        site_entry_effect,
         unique_or_legendary: true_only(object, "uniqueOrLegendary", path)?,
     })
 }

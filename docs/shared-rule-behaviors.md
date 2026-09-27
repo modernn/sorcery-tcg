@@ -282,3 +282,20 @@ to single-affinity production.
 Sites that cannot be modified retain their printed classification, affinity, and
 abilities under terrain overlays, including water-only flooding and ability
 loss. The same protection prevents site-production suppression.
+
+## Minion site entry
+
+`siteEntryEffect: "grantStealthToEnteringMinion"` is a deliberately narrow
+site-transition fact. It means an unconditional, repeatable effect on every minion
+that enters that site. It does not encode a first-entry limit, a per-turn reset,
+controller or Airborne filtering, Avatars, exits, damage, killing, Submerge, discard,
+strikes, or fights. Cards containing any of those clauses remain unsupported.
+
+Entry compares the site's realm incarnation across the minion's old and new occupied
+footprints. Summoning and simultaneous token placement start with an empty old set;
+ordinary, incremental, forced, teleported, dragged, defending, and effect-driven
+movement use the shared relocation boundary. Overlapping cells of an oversized minion
+do not re-enter the same site. Surface/subsurface changes at one site, playing a site
+under a unit, and occupants carried by a flying site do not enter a new site. The
+effect is non-interrupting and uses the existing permanent Stealth helper; this narrow
+slice therefore does not open a trigger-order choice or movement continuation.
