@@ -19,9 +19,9 @@ use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{
     AlternativeSummonPayment, ArtifactEffect, ArtifactFacts, AuraEffect, AuraFacts, AvatarFacts,
-    BasicMovementRestriction, CardFacts, DamagePrevention, Element, ElementSet, EndTurnStealth,
-    FactError, MagicEffect, MagicFacts, MinionFacts, RequiredCastRegion, SiteCountController,
-    SiteCountOccupant, SiteCountQuery, SiteCountScope, SiteFacts, Thresholds,
+    BasicMovementRestriction, CardFacts, DamagePrevention, DamageSourceFilter, Element, ElementSet,
+    EndTurnStealth, FactError, MagicEffect, MagicFacts, MinionFacts, RequiredCastRegion,
+    SiteCountController, SiteCountOccupant, SiteCountQuery, SiteCountScope, SiteFacts, Thresholds,
     parse_card_definition, validate_identifier,
 };
 use crate::prng::PrngState;
@@ -1150,12 +1150,51 @@ struct DamageCasualties {
 struct MinionDamageStatus {
     damage_prevention: Option<DamagePrevention>,
     defense: u16,
-    disabled: bool,
+    abilities_lost: bool,
     index: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DamageOrigin {
+    Other,
+    RangedStrike,
+    Magic(ElementSet),
+}
+
+impl DamageOrigin {
+    fn magic(thresholds: Thresholds) -> Self {
+        Self::Magic(
+            [Element::Earth, Element::Fire, Element::Water, Element::Air]
+                .into_iter()
+                .filter(|element| thresholds.get(*element) > 0)
+                .fold(ElementSet::empty(), ElementSet::with),
+        )
+    }
+
+    fn matches(self, filter: DamageSourceFilter) -> bool {
+        match (self, filter) {
+            (Self::RangedStrike, DamageSourceFilter::RangedStrikes) => true,
+            (Self::Magic(elements), DamageSourceFilter::Magic(element)) => {
+                element.is_none_or(|element| elements.contains(element))
+            }
+            _ => false,
+        }
+    }
+
+    fn value(self) -> Value {
+        match self {
+            Self::Other => json!({"kind":"other"}),
+            Self::RangedStrike => json!({"kind":"ranged-strike"}),
+            Self::Magic(elements) => json!({"kind":"magic", "elements": (
+                [(Element::Earth,"earth"),(Element::Fire,"fire"),(Element::Water,"water"),(Element::Air,"air")]
+                .into_iter().filter_map(|(element,name)| elements.contains(element).then_some(name)).collect::<Vec<_>>()) }),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct UnitDamageSource {
+    origin: DamageOrigin,
     current_power: u16,
     lethal: bool,
 }
@@ -10658,6 +10697,7 @@ impl Game {
             target.instance_id(),
             amount,
             UnitDamageSource {
+                origin: DamageOrigin::RangedStrike,
                 current_power: strike.current_power,
                 lethal: strike.lethal,
             },
@@ -12257,6 +12297,7 @@ impl Game {
                 Ok((
                     attack,
                     UnitDamageSource {
+                        origin: DamageOrigin::Other,
                         current_power: attack.midpoint(defense),
                         lethal: self.carried_lethal(UnitKind::Avatar, seat, instance_id)?,
                     },
@@ -12284,6 +12325,7 @@ impl Game {
         Ok((
             attack,
             UnitDamageSource {
+                origin: DamageOrigin::Other,
                 current_power: attack.midpoint(defense),
                 lethal,
             },
@@ -12922,6 +12964,7 @@ impl Game {
                 Ok((
                     amount,
                     UnitDamageSource {
+                        origin: DamageOrigin::Other,
                         current_power: strike.current_power,
                         lethal: strike.lethal,
                     },
@@ -12977,6 +13020,7 @@ impl Game {
                         )?
                     },
                     UnitDamageSource {
+                        origin: DamageOrigin::Other,
                         current_power: attacker.current_power,
                         lethal: attacker.lethal,
                     },
@@ -13145,7 +13189,7 @@ impl Game {
                 let MinionDamageStatus {
                     damage_prevention,
                     defense,
-                    disabled,
+                    abilities_lost,
                     index,
                 } = minion_status.ok_or(GameError::IllegalAction)?;
                 if self
@@ -13159,10 +13203,15 @@ impl Game {
                 let (unwarded, lethal_dealt) = sources.iter().try_fold(
                     (0_u16, false),
                     |(total, any_lethal), (amount, source)| {
-                        let dealt = if disabled {
+                        let dealt = if abilities_lost {
                             *amount
                         } else {
                             match damage_prevention {
+                                Some(DamagePrevention::PreventsDamageFrom(filter))
+                                    if source.origin.matches(filter) =>
+                                {
+                                    0
+                                }
                                 Some(
                                     DamagePrevention::PreventsDamageFromUnitsWithPowerAtLeast(
                                         threshold,
@@ -13348,7 +13397,7 @@ impl Game {
         Ok(MinionDamageStatus {
             damage_prevention,
             defense,
-            disabled: self.minion_is_disabled(&self.position.units[index]),
+            abilities_lost: self.minion_abilities_lost(&self.position.units[index]),
             index,
         })
     }
@@ -13844,6 +13893,7 @@ impl Game {
                     &target_instance_id,
                     u16::from(amount),
                     UnitDamageSource {
+                        origin: DamageOrigin::Other,
                         current_power: source.current_power,
                         lethal: source.lethal,
                     },
@@ -15751,7 +15801,7 @@ impl Game {
         target_artifact_instance_id: &IdentityHash,
         expected_location: Option<Location>,
         amount: u8,
-        source_instance_id: &IdentityHash,
+        (source_instance_id, origin): (&IdentityHash, DamageOrigin),
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
         let artifact = self
@@ -15804,6 +15854,7 @@ impl Game {
                 &instance_id,
                 u16::from(amount),
                 UnitDamageSource {
+                    origin,
                     current_power: 0,
                     lethal: false,
                 },
@@ -16432,6 +16483,7 @@ impl Game {
         source.owner = artifact.card.owner;
         source.realm = Some(RealmReference::from_card(&artifact.card));
         source.damage = UnitDamageSource {
+            origin: DamageOrigin::Other,
             current_power: 0,
             lethal: false,
         };
@@ -16539,6 +16591,7 @@ impl Game {
             target_location,
             amount,
             UnitDamageSource {
+                origin: DamageOrigin::Other,
                 current_power: 0,
                 lethal: false,
             },
@@ -16663,6 +16716,7 @@ impl Game {
             });
         }
         let source = UnitDamageSource {
+            origin: DamageOrigin::Other,
             current_power: 0,
             lethal: false,
         };
@@ -17217,6 +17271,7 @@ impl Game {
         }
         let card_id = definition.id.clone();
         let thresholds = facts.thresholds;
+        let magic_origin = DamageOrigin::magic(thresholds);
         let extra_targets = u64::try_from(pending.targets.len().saturating_sub(1))
             .map_err(|_| GameError::IllegalAction)?;
         let mana_paid =
@@ -17334,6 +17389,7 @@ impl Game {
                 target.instance_id(),
                 CHAIN_MAGIC_DAMAGE,
                 UnitDamageSource {
+                    origin: magic_origin,
                     current_power: 0,
                     lethal: false,
                 },
@@ -19351,6 +19407,7 @@ impl Game {
             &(target_instance_id, target_kind, target_seat),
             3,
             UnitDamageSource {
+                origin: DamageOrigin::Other,
                 current_power: 0,
                 lethal: false,
             },
@@ -19638,6 +19695,7 @@ impl Game {
                 &target_instance_id,
                 3,
                 UnitDamageSource {
+                    origin: DamageOrigin::Other,
                     current_power: 0,
                     lethal: false,
                 },
@@ -20066,6 +20124,7 @@ impl Game {
         }
         let effect = facts.effect.clone();
         let thresholds = facts.thresholds;
+        let magic_origin = DamageOrigin::magic(thresholds);
         let mana_paid = u16::try_from(facts.mana_cost).map_err(|_| GameError::IllegalAction)?;
         let life_paid = facts.pay_life_as_additional_cost;
         let next_air_thresholds_cast_this_turn = player
@@ -20288,6 +20347,7 @@ impl Game {
             // a unit damage source and must never inherit the caster's power or Lethal.
             source.realm = None;
             source.damage = UnitDamageSource {
+                origin: magic_origin,
                 current_power: 0,
                 lethal: false,
             };
@@ -21213,6 +21273,7 @@ impl Game {
                         &(target_instance_id, target_kind, target_seat),
                         allocated,
                         UnitDamageSource {
+                            origin: magic_origin,
                             current_power: 0,
                             lethal: false,
                         },
@@ -21681,7 +21742,7 @@ impl Game {
                     target_artifact_instance_id,
                     *target_location,
                     amount,
-                    card_instance_id,
+                    (card_instance_id, magic_origin),
                     outcomes,
                 )?;
             }
@@ -21843,6 +21904,7 @@ impl Game {
                         &instance_id,
                         amount,
                         UnitDamageSource {
+                            origin: magic_origin,
                             current_power: 0,
                             lethal: false,
                         },
@@ -30345,6 +30407,63 @@ mod tests {
     }
 
     #[test]
+    fn silence_suppresses_printed_damage_prevention() {
+        for prevention in [
+            DamagePrevention::TakesOneLessDamage,
+            DamagePrevention::PreventsDamageFromUnitsWithPowerAtLeast(4),
+            DamagePrevention::PreventsDamageFrom(DamageSourceFilter::RangedStrikes),
+            DamagePrevention::PreventsDamageFrom(DamageSourceFilter::Magic(None)),
+        ] {
+            let (mut game, id) = damage_transaction_fixture(None);
+            let card_id = game.position.units[0].card.card_id;
+            let CardFacts::Minion(facts) = &mut Arc::get_mut(&mut game.rules)
+                .expect("unshared fixture rules")
+                .cards[usize::from(card_id.0)]
+            .facts
+            else {
+                panic!("minion fixture");
+            };
+            facts.damage_prevention = Some(prevention);
+            let origin = if prevention
+                == DamagePrevention::PreventsDamageFrom(DamageSourceFilter::RangedStrikes)
+            {
+                DamageOrigin::RangedStrike
+            } else {
+                DamageOrigin::Magic(ElementSet::default())
+            };
+            let source = UnitDamageSource {
+                origin,
+                current_power: 4,
+                lethal: false,
+            };
+            let mut events = Vec::new();
+            game.apply_simultaneous_unit_damage(
+                UnitKind::Minion,
+                Seat::South,
+                &id,
+                &[(1, source)],
+                &mut OutcomeLog::Record(&mut events),
+            )
+            .unwrap();
+            assert_eq!(game.position.units[0].damage, 0);
+            game.position.units[0].temporary_modifiers.grant(
+                TemporaryModifierKind::Silence,
+                1,
+                id.clone(),
+            );
+            game.apply_simultaneous_unit_damage(
+                UnitKind::Minion,
+                Seat::South,
+                &id,
+                &[(1, source)],
+                &mut OutcomeLog::Record(&mut events),
+            )
+            .unwrap();
+            assert_eq!(game.position.units[0].damage, 1);
+        }
+    }
+
+    #[test]
     fn damage_transaction_applies_prevention_per_source_and_only_dealt_lethal_kills() {
         for prevention in [
             ("takesLessDamage", 1),
@@ -30361,6 +30480,7 @@ mod tests {
                         (
                             1,
                             UnitDamageSource {
+                                origin: DamageOrigin::Other,
                                 current_power: 4,
                                 lethal: true,
                             },
@@ -30368,6 +30488,7 @@ mod tests {
                         (
                             2,
                             UnitDamageSource {
+                                origin: DamageOrigin::Other,
                                 current_power: 3,
                                 lethal: false,
                             },
@@ -30406,6 +30527,7 @@ mod tests {
                     (
                         2,
                         UnitDamageSource {
+                            origin: DamageOrigin::Other,
                             current_power: 2,
                             lethal: true,
                         },
@@ -30413,6 +30535,7 @@ mod tests {
                     (
                         3,
                         UnitDamageSource {
+                            origin: DamageOrigin::Other,
                             current_power: 3,
                             lethal: false,
                         },
@@ -30440,6 +30563,7 @@ mod tests {
                 &id,
                 1,
                 UnitDamageSource {
+                    origin: DamageOrigin::Other,
                     current_power: 1,
                     lethal: true,
                 },
@@ -30467,6 +30591,7 @@ mod tests {
                     (
                         1,
                         UnitDamageSource {
+                            origin: DamageOrigin::Other,
                             current_power: 4,
                             lethal: true,
                         },
@@ -30474,6 +30599,7 @@ mod tests {
                     (
                         1,
                         UnitDamageSource {
+                            origin: DamageOrigin::Other,
                             current_power: 5,
                             lethal: false,
                         },
@@ -30495,6 +30621,7 @@ mod tests {
                         (
                             1,
                             UnitDamageSource {
+                                origin: DamageOrigin::Other,
                                 current_power: 4,
                                 lethal: true,
                             },
@@ -30502,6 +30629,7 @@ mod tests {
                         (
                             2,
                             UnitDamageSource {
+                                origin: DamageOrigin::Other,
                                 current_power: 3,
                                 lethal: false,
                             },
@@ -30620,6 +30748,7 @@ mod tests {
                 &target,
                 strike.amount,
                 UnitDamageSource {
+                    origin: DamageOrigin::Other,
                     current_power: strike.current_power,
                     lethal: strike.lethal,
                 },
@@ -30722,6 +30851,7 @@ mod tests {
                 targets,
                 1,
                 UnitDamageSource {
+                    origin: DamageOrigin::Other,
                     current_power: 0,
                     lethal: false,
                 },

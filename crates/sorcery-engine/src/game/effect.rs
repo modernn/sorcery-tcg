@@ -62,9 +62,13 @@ pub(super) struct EffectSource {
 
 impl EffectSource {
     pub(super) fn value(&self) -> Value {
-        json!({ "instanceId": self.instance_id, "owner": self.owner, "controller": self.controller,
+        let mut value = json!({ "instanceId": self.instance_id, "owner": self.owner, "controller": self.controller,
             "realm": self.realm.as_ref().map(RealmReference::value), "actor": self.actor.as_ref().map(RealmReference::value),
-            "region": self.region, "cells": self.cells, "power": self.damage.current_power, "lethal": self.damage.lethal })
+            "region": self.region, "cells": self.cells, "power": self.damage.current_power, "lethal": self.damage.lethal });
+        if self.damage.origin != super::DamageOrigin::Other {
+            value["damageOrigin"] = self.damage.origin.value();
+        }
+        value
     }
 }
 

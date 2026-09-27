@@ -134,6 +134,7 @@ fn source(
         region: Region::Surface,
         cells: vec![Cell::parse("C3").expect("fixture cell")],
         damage: UnitDamageSource {
+            origin: crate::game::DamageOrigin::Other,
             current_power: power,
             lethal: false,
         },

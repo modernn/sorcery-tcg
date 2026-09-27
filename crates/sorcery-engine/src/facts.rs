@@ -400,10 +400,18 @@ pub enum RequiredCastRegion {
     Underwater,
 }
 
+/// Source predicates evaluated separately from damage modification.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DamageSourceFilter {
+    RangedStrikes,
+    Magic(Option<Element>),
+}
+
 /// A minion's single supported damage-prevention rule.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DamagePrevention {
     TakesOneLessDamage,
+    PreventsDamageFrom(DamageSourceFilter),
     PreventsDamageFromUnitsWithPowerAtLeast(u8),
     Ward,
 }
@@ -1173,6 +1181,7 @@ const MINION_FIELDS: &[&str] = &[
     "otherControlledMortalsPowerBonus",
     "otherNearbyAlliesPowerBonus",
     "preventsDamageFromUnitsWithPowerAtLeast",
+    "preventsDamageFrom",
     "provides",
     "ranged",
     "sacrificeMinionAtSummoningLocationForManaDiscount",
@@ -2106,12 +2115,37 @@ fn parse_required_cast_region(
     )
 }
 
+fn parse_damage_source_filter(
+    object: &Map<String, Value>,
+    path: &str,
+) -> Result<Option<DamageSourceFilter>, FactError> {
+    let Some(value) = object.get("preventsDamageFrom") else {
+        return Ok(None);
+    };
+    let filter = match value.as_str() {
+        Some("ranged-strikes") => DamageSourceFilter::RangedStrikes,
+        Some("magic") => DamageSourceFilter::Magic(None),
+        Some("earth-magic") => DamageSourceFilter::Magic(Some(Element::Earth)),
+        Some("fire-magic") => DamageSourceFilter::Magic(Some(Element::Fire)),
+        Some("water-magic") => DamageSourceFilter::Magic(Some(Element::Water)),
+        Some("air-magic") => DamageSourceFilter::Magic(Some(Element::Air)),
+        _ => {
+            return Err(FactError::new(
+                format!("{path}.preventsDamageFrom"),
+                "must be a supported damage source filter",
+            ));
+        }
+    };
+    Ok(Some(filter))
+}
+
 fn parse_damage_prevention(
     object: &Map<String, Value>,
     path: &str,
 ) -> Result<Option<DamagePrevention>, FactError> {
     at_most_one(
         [
+            parse_damage_source_filter(object, path)?.map(DamagePrevention::PreventsDamageFrom),
             fixed_integer(object, "takesLessDamage", 1, path)?
                 .then_some(DamagePrevention::TakesOneLessDamage),
             optional_bounded_integer(

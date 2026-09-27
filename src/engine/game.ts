@@ -714,6 +714,7 @@ export type GameCardDefinition =
     occupiesSquareArea?: 2;
     otherControlledMortalsPowerBonus?: 1;
     otherNearbyAlliesPowerBonus?: 1;
+    preventsDamageFrom?: 'ranged-strikes' | 'magic' | 'earth-magic' | 'fire-magic' | 'water-magic' | 'air-magic';
     preventsDamageFromUnitsWithPowerAtLeast?: number;
     provides?: GameElement;
     ranged?: boolean;
@@ -1643,7 +1644,7 @@ const SUPPORTED_CARD_FIELDS = {
     movesOnlyForward movesOnlySideways mustAttackAUnitIfAble
     mustBeCastBurrowed mustBeCastSubmerged mustBeCastToOuterColumn mustBeCastToWaterSite
     nearbyAvatarsMayDiscardCardToGainControlOfThis nearbyEnemiesPermanentlyLoseStealth occupiesSquareArea ordinary otherControlledMortalsPowerBonus
-    otherNearbyAlliesPowerBonus preventsDamageFromUnitsWithPowerAtLeast provides ranged
+    otherNearbyAlliesPowerBonus preventsDamageFrom preventsDamageFromUnitsWithPowerAtLeast provides ranged
     sacrificeMinionAtSummoningLocationForManaDiscount shootsDragProjectile siteProvidesNoThreshold
     spellcaster spellcasterElements stealth strikesFirstWhileAttacking strikesFirstWhileDefending submerge summonToAnySite
     tapToDamageEachUnitAtAdjacentLocation tapToShootProjectileDamage tapForMana takesLessDamage thresholds token
@@ -3121,6 +3122,10 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
   if (card.takesLessDamage !== undefined && card.takesLessDamage !== 1) {
     throw new RangeError(`${path}.takesLessDamage must be 1`);
   }
+  if (card.preventsDamageFrom !== undefined
+    && !['ranged-strikes', 'magic', 'earth-magic', 'fire-magic', 'water-magic', 'air-magic'].includes(card.preventsDamageFrom)) {
+    throw new RangeError(`${path}.preventsDamageFrom is unsupported`);
+  }
   if (card.token !== undefined && card.token !== true) {
     throw new RangeError(`${path}.token must be true when defined`);
   }
@@ -3129,6 +3134,7 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
   }
   if (Number(card.takesLessDamage === 1)
       + Number(card.ward === true)
+      + Number(card.preventsDamageFrom !== undefined)
       + Number(card.preventsDamageFromUnitsWithPowerAtLeast !== undefined) > 1) {
     throw new RangeError(`${path} competing damage prevention effects are unsupported`);
   }
@@ -3822,6 +3828,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : {}),
             ...(card.otherNearbyAlliesPowerBonus === 1
               ? { otherNearbyAlliesPowerBonus: 1 as const }
+              : {}),
+            ...(card.preventsDamageFrom !== undefined
+              ? { preventsDamageFrom: card.preventsDamageFrom }
               : {}),
             ...(card.preventsDamageFromUnitsWithPowerAtLeast !== undefined
               ? {

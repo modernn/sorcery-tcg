@@ -109,6 +109,7 @@ impl Game {
                 target.instance_id(),
                 amount,
                 UnitDamageSource {
+                    origin: crate::game::DamageOrigin::Other,
                     current_power: group.strike.current_power,
                     lethal: group.strike.lethal,
                 },
