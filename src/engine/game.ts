@@ -478,6 +478,7 @@ export type GameCardDefinition =
     rangedUnitsHereRangeBonus?: 1;
     sacrificeToDestroyNearbySite?: true;
     siteEntryEffect?: 'grantStealthToEnteringMinion';
+    siteEntryUsage?: 'firstEntry';
     uniqueOrLegendary?: true;
   }>
   | Readonly<{
@@ -1681,7 +1682,7 @@ const SUPPORTED_CARD_FIELDS = {
     genesisImmobilizeNearbyUntilNextTurn genesisMayBottomNextSpell genesisPayOneManaToSummonToken
     genesisReorderNextSpells
     isTower ordinary ordinaryMinionManaDiscount rangedUnitsHereRangeBonus sacrificeToDestroyNearbySite
-    siteEntryEffect
+    siteEntryEffect siteEntryUsage
     minionsHereGainVoidwalkUntilLeavingVoid
     preventsUnitsWithPowerAtLeastFromEntering uniqueOrLegendary
   `.trim().split(/\s+/)),
@@ -2111,6 +2112,12 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
     if (card.siteEntryEffect !== undefined
       && card.siteEntryEffect !== 'grantStealthToEnteringMinion') {
       throw new RangeError(`${path}.siteEntryEffect is unsupported`);
+    }
+    if (card.siteEntryUsage !== undefined && card.siteEntryUsage !== 'firstEntry') {
+      throw new RangeError(`${path}.siteEntryUsage is unsupported`);
+    }
+    if (card.siteEntryUsage !== undefined && card.siteEntryEffect === undefined) {
+      throw new RangeError(`${path}.siteEntryUsage requires siteEntryEffect`);
     }
     if (card.ordinary !== undefined && card.ordinary !== true) {
       throw new RangeError(`${path}.ordinary must be true when defined`);
@@ -3559,6 +3566,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : {}),
             ...(card.siteEntryEffect === 'grantStealthToEnteringMinion'
               ? { siteEntryEffect: card.siteEntryEffect }
+              : {}),
+            ...(card.siteEntryUsage === 'firstEntry'
+              ? { siteEntryUsage: card.siteEntryUsage }
               : {}),
             ...(card.uniqueOrLegendary === true
               ? { uniqueOrLegendary: true as const }

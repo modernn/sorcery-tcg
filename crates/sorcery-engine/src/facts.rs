@@ -186,6 +186,15 @@ pub enum SiteEntryEffect {
     GrantStealthToEnteringMinion,
 }
 
+/// Usage limit for a site's entry effect.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SiteEntryUsage {
+    /// Resolve the effect for every qualifying entry.
+    EveryEntry,
+    /// Resolve the effect only for the first qualifying entry of this site incarnation.
+    FirstEntry,
+}
+
 /// Site facts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[expect(
@@ -219,6 +228,7 @@ pub struct SiteFacts {
     pub ranged_units_here_range_bonus: bool,
     pub sacrifice_to_destroy_nearby_site: bool,
     pub site_entry_effect: Option<SiteEntryEffect>,
+    pub site_entry_usage: SiteEntryUsage,
     pub unique_or_legendary: bool,
 }
 
@@ -999,6 +1009,7 @@ const SITE_FIELDS: &[&str] = &[
     "rangedUnitsHereRangeBonus",
     "sacrificeToDestroyNearbySite",
     "siteEntryEffect",
+    "siteEntryUsage",
     "uniqueOrLegendary",
 ];
 
@@ -1405,6 +1416,10 @@ fn parse_site_affinity(
     Ok(affinity)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the site effect list intentionally mirrors the fail-closed Site contract"
+)]
 fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, FactError> {
     reject_unknown(object, SITE_FIELDS, path)?;
     let elements = parse_elements(object, path)?;
@@ -1441,6 +1456,22 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
             ));
         }
     };
+    let site_entry_usage = match object.get("siteEntryUsage") {
+        None => SiteEntryUsage::EveryEntry,
+        Some(Value::String(value)) if value == "firstEntry" => SiteEntryUsage::FirstEntry,
+        Some(_) => {
+            return Err(FactError::new(
+                format!("{path}.siteEntryUsage"),
+                "must be firstEntry",
+            ));
+        }
+    };
+    if site_entry_usage == SiteEntryUsage::FirstEntry && site_entry_effect.is_none() {
+        return Err(FactError::new(
+            format!("{path}.siteEntryUsage"),
+            "requires siteEntryEffect",
+        ));
+    }
     Ok(SiteFacts {
         affinity,
         airborne_minions_atop_move_freely_away: true_only(
@@ -1501,6 +1532,7 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
         ranged_units_here_range_bonus: fixed_integer(object, "rangedUnitsHereRangeBonus", 1, path)?,
         sacrifice_to_destroy_nearby_site: true_only(object, "sacrificeToDestroyNearbySite", path)?,
         site_entry_effect,
+        site_entry_usage,
         unique_or_legendary: true_only(object, "uniqueOrLegendary", path)?,
     })
 }

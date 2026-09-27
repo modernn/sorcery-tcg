@@ -286,8 +286,10 @@ loss. The same protection prevents site-production suppression.
 ## Minion site entry
 
 `siteEntryEffect: "grantStealthToEnteringMinion"` is a deliberately narrow
-site-transition fact. It means an unconditional, repeatable effect on every minion
-that enters that site. It does not encode a first-entry limit, a per-turn reset,
+site-transition fact. It means an unconditional effect on every minion that enters
+that site. With `siteEntryUsage: "firstEntry"`, it resolves only for the first
+qualifying minion to enter that site incarnation; the marker does not reset at a turn
+boundary. This is the complete Dark Alley clause. The fact still does not encode
 controller or Airborne filtering, Avatars, exits, damage, killing, Submerge, discard,
 strikes, or fights. Cards containing any of those clauses remain unsupported.
 
@@ -299,3 +301,6 @@ do not re-enter the same site. Surface/subsurface changes at one site, playing a
 under a unit, and occupants carried by a flying site do not enter a new site. The
 effect is non-interrupting and uses the existing permanent Stealth helper; this narrow
 slice therefore does not open a trigger-order choice or movement continuation.
+First-entry markers are keyed by the site's realm incarnation, survive turns, are
+cloned through checkpoints, and disappear semantically when that incarnation leaves
+the realm.

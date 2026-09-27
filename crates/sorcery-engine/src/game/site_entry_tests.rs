@@ -21,10 +21,13 @@ fn card_id(game: &Game, name: &str) -> CardId {
     )
 }
 
-fn fixture() -> Game {
+fn fixture_with_site_entry_usage(usage: Option<&str>) -> Game {
     let manifest = selfplay_manifest_with(9321, |manifest| {
         manifest["cards"]["north-site-1"]["siteEntryEffect"] =
             json!("grantStealthToEnteringMinion");
+        if let Some(usage) = usage {
+            manifest["cards"]["north-site-1"]["siteEntryUsage"] = json!(usage);
+        }
         manifest["cards"]["north-site-1"]["elements"] = json!(["air"]);
         manifest["cards"]["north-site-1"]["flyToNearbyVoidOncePerTurnAtAirThreshold"] = json!(3);
         manifest["cards"]["north-spell-49"] = json!({
@@ -54,6 +57,10 @@ fn fixture() -> Game {
     game.position.active_seat = Seat::North;
     game.position.decision_seat = Seat::North;
     game
+}
+
+fn fixture() -> Game {
+    fixture_with_site_entry_usage(None)
 }
 
 fn site(game: &Game, label: &str) -> SitePosition {
@@ -123,10 +130,26 @@ fn site_entry_effect_is_closed_and_fail_closed() {
         facts.site_entry_effect,
         Some(SiteEntryEffect::GrantStealthToEnteringMinion)
     );
+    assert_eq!(facts.site_entry_usage, SiteEntryUsage::EveryEntry);
+    let first = json!({
+        "cardType":"site", "elements":["air"],
+        "siteEntryEffect":"grantStealthToEnteringMinion", "siteEntryUsage":"firstEntry"
+    });
+    let CardFacts::Site(facts) = crate::facts::parse_card_definition("site", &first).unwrap()
+    else {
+        panic!("first-entry site facts")
+    };
+    assert_eq!(facts.site_entry_usage, SiteEntryUsage::FirstEntry);
     for value in [json!(true), json!("killEnteringMinion"), json!({})] {
         let invalid = json!({
             "cardType":"site", "elements":["earth"], "siteEntryEffect":value
         });
+        assert!(crate::facts::parse_card_definition("site", &invalid).is_err());
+    }
+    for invalid in [
+        json!({"cardType":"site", "elements":["air"], "siteEntryUsage":"firstEntry"}),
+        json!({"cardType":"site", "elements":["air"], "siteEntryEffect":"grantStealthToEnteringMinion", "siteEntryUsage":"perTurn"}),
+    ] {
         assert!(crate::facts::parse_card_definition("site", &invalid).is_err());
     }
 }
@@ -180,6 +203,101 @@ fn engine_issued_basic_movement_triggers_entry_and_replays_from_clone() {
             "basic-movement-continued"
         ]
     );
+}
+
+#[test]
+fn first_entry_usage_is_per_site_incarnation_and_survives_turns_and_replay() {
+    let mut game = fixture_with_site_entry_usage(Some("firstEntry"));
+    let first_site = Cell::parse("C3").unwrap();
+    game.position.sites[first_site.index()] = Some(site(&game, "first-site"));
+    let entrant = minion(&game, "north-spell-1", "first-entrant", "C2", None);
+    let entrant_id = entrant.card.instance_id.clone();
+    game.position.units.push(entrant);
+
+    let mut first_events = Vec::new();
+    let mut replay = game.clone();
+    game.move_minion_to(
+        &entrant_id,
+        Location {
+            cell: first_site,
+            region: Region::Surface,
+        },
+        None,
+        &mut OutcomeLog::Record(&mut first_events),
+    )
+    .unwrap();
+    let mut replay_events = Vec::new();
+    replay
+        .move_minion_to(
+            &entrant_id,
+            Location {
+                cell: first_site,
+                region: Region::Surface,
+            },
+            None,
+            &mut OutcomeLog::Record(&mut replay_events),
+        )
+        .unwrap();
+    assert_eq!(first_events, replay_events);
+    assert_eq!(game.authoritative_state(), replay.authoritative_state());
+    assert!(game.position.units[0].stealthed);
+    assert_eq!(game.position.site_entry_uses.len(), 1);
+    assert_eq!(
+        game.authoritative_state()["siteEntryUses"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+
+    game.position.units[0].stealthed = false;
+    let outside = Cell::parse("C2").unwrap();
+    game.move_minion_to(
+        &entrant_id,
+        Location {
+            cell: outside,
+            region: Region::Surface,
+        },
+        None,
+        &mut OutcomeLog::Ignore,
+    )
+    .unwrap();
+    game.position.turn_number += 1;
+    let mut repeat_events = Vec::new();
+    game.move_minion_to(
+        &entrant_id,
+        Location {
+            cell: first_site,
+            region: Region::Surface,
+        },
+        None,
+        &mut OutcomeLog::Record(&mut repeat_events),
+    )
+    .unwrap();
+    assert!(repeat_events.is_empty());
+    assert!(!game.position.units[0].stealthed);
+
+    let second_site = Cell::parse("D3").unwrap();
+    game.position.sites[second_site.index()] = Some(site(&game, "second-site"));
+    let mut second_events = Vec::new();
+    game.move_minion_to(
+        &entrant_id,
+        Location {
+            cell: second_site,
+            region: Region::Surface,
+        },
+        None,
+        &mut OutcomeLog::Record(&mut second_events),
+    )
+    .unwrap();
+    assert!(game.position.units[0].stealthed);
+    assert_eq!(
+        second_events
+            .iter()
+            .filter(|(kind, _)| kind == "site-entry-triggered")
+            .count(),
+        1
+    );
+    assert_eq!(game.position.site_entry_uses.len(), 2);
 }
 
 #[test]

@@ -22,7 +22,7 @@ use crate::facts::{
     BasicMovementRestriction, CardFacts, DamagePrevention, DamageSourceFilter, Element, ElementSet,
     EndTurnStealth, FactError, MagicEffect, MagicFacts, MinionFacts, RequiredCastRegion,
     SiteCountController, SiteCountOccupant, SiteCountQuery, SiteCountScope, SiteEntryEffect,
-    SiteFacts, Thresholds, parse_card_definition, validate_identifier,
+    SiteEntryUsage, SiteFacts, Thresholds, parse_card_definition, validate_identifier,
 };
 use crate::prng::PrngState;
 
@@ -117,6 +117,7 @@ pub struct Position {
     players: [PlayerPosition; 2],
     prng: PrngState,
     rubble: [Option<IdentityHash>; 20],
+    site_entry_uses: Vec<RealmReference>,
     sites: [Option<SitePosition>; 20],
     state_version: u64,
     temporary_controls: Vec<TemporaryControl>,
@@ -1731,6 +1732,7 @@ fn account_for_selfplay_site_fields(facts: &SiteFacts) {
         ranged_units_here_range_bonus: _,
         sacrifice_to_destroy_nearby_site: _,
         site_entry_effect: _,
+        site_entry_usage: _,
         unique_or_legendary: _,
     } = facts;
 }
@@ -1975,6 +1977,7 @@ impl Game {
                 players: [north, south],
                 prng,
                 rubble: std::array::from_fn(|_| None),
+                site_entry_uses: Vec::new(),
                 sites: std::array::from_fn(|_| None),
                 state_version: 0,
                 temporary_controls: Vec::new(),
@@ -6376,11 +6379,11 @@ impl Game {
             };
             let reference = RealmReference::from_card(&site.card);
             if old_sites.contains(&reference)
-                || entries
-                    .iter()
-                    .any(|(_, prior, _): &(Cell, RealmReference, SiteEntryEffect)| {
+                || entries.iter().any(
+                    |(_, prior, _, _): &(Cell, RealmReference, SiteEntryEffect, SiteEntryUsage)| {
                         *prior == reference
-                    })
+                    },
+                )
                 || self.site_abilities_lost(cell)
             {
                 continue;
@@ -6389,11 +6392,19 @@ impl Game {
             else {
                 return Err(GameError::IllegalAction);
             };
+            if facts.site_entry_usage == SiteEntryUsage::FirstEntry
+                && self.position.site_entry_uses.contains(&reference)
+            {
+                continue;
+            }
             if let Some(effect) = facts.site_entry_effect {
-                entries.push((cell, reference, effect));
+                entries.push((cell, reference, effect, facts.site_entry_usage));
             }
         }
-        for (cell, source, effect) in entries {
+        for (cell, source, effect, usage) in entries {
+            if usage == SiteEntryUsage::FirstEntry {
+                self.position.site_entry_uses.push(source.clone());
+            }
             outcomes.push("site-entry-triggered", || {
                 json!({
                     "cell": cell,
@@ -6441,6 +6452,13 @@ impl Game {
                 *cell = current.translated(from, to);
             }
         }
+    }
+
+    fn forget_site_entry_usage(&mut self, card: &CardInstance) {
+        let reference = RealmReference::from_card(card);
+        self.position
+            .site_entry_uses
+            .retain(|used| used != &reference);
     }
 
     fn settle_nearby_enemy_stealth(&mut self, outcomes: &mut OutcomeLog<'_>) {
@@ -15834,6 +15852,7 @@ impl Game {
         let mut rubble = Vec::with_capacity(destroyed.len());
         let mut destroyed_cards = Vec::with_capacity(destroyed.len());
         for (cell, site) in destroyed {
+            self.forget_site_entry_usage(&site.card);
             self.position.sites[cell.index()] = None;
             let rubble_instance_id = identity_hash(&json!({
                 "cell": cell,
@@ -16011,6 +16030,7 @@ impl Game {
         }
         self.remap_returned_site_occupants_to_void(cell);
         let card = target_site.card;
+        self.forget_site_entry_usage(&card);
         self.position.sites[cell.index()] = None;
         self.position.players[seat_index(owner)]
             .hand_atlas
@@ -24646,6 +24666,18 @@ impl Game {
             "turnNumber": self.position.turn_number,
         });
         if let Value::Object(object) = &mut value {
+            if !self.position.site_entry_uses.is_empty() {
+                object.insert(
+                    "siteEntryUses".to_owned(),
+                    json!(
+                        self.position
+                            .site_entry_uses
+                            .iter()
+                            .map(RealmReference::value)
+                            .collect::<Vec<_>>()
+                    ),
+                );
+            }
             self.insert_pending_genesis_state(object);
             if let Some(pending) = &self.position.pending_damage_order {
                 object.insert("pendingDamageOrder".to_owned(), pending.value(self));
