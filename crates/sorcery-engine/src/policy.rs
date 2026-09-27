@@ -6,7 +6,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::action::{ActionDescriptor, DeckZone, GenesisTokenChoice};
+use crate::action::{ActionDescriptor, CombatTarget, DeckZone, GenesisTokenChoice};
 use crate::board::Region;
 use crate::canonical::{
     CanonicalError, IdentityHash, canonical_json, identity_hash, parse_json_without_duplicate_keys,
@@ -29,6 +29,8 @@ pub const POLICY_SNAPSHOT_MAX_BYTES: usize = 64 * 1024;
 pub const LEGACY_POLICY_BEHAVIOR_VERSION: u8 = 1;
 /// Baseline selector behavior that scores an engine-issued `DrawSite` action.
 pub const DRAW_SITE_POLICY_BEHAVIOR_VERSION: u8 = 2;
+/// Baseline selector behavior that prefers movement progress over a stationary attack.
+pub const MOVEMENT_PROGRESS_POLICY_BEHAVIOR_VERSION: u8 = 3;
 
 const MAX_ENGINE_VERSION_BYTES: usize = 64;
 
@@ -400,19 +402,57 @@ fn select_feature<'a>(
                         && matches!(action.descriptor(), ActionDescriptor::DrawSite))
             })
         }
-        PolicyFeature::PoweredMovement => select_powered_movement(observation, actions),
+        PolicyFeature::PoweredMovement => {
+            select_powered_movement(observation, actions, policy_behavior_version)
+        }
         PolicyFeature::BeneficialTactic => beneficial_tactic_index(
             observation.seat(),
             observation.air_thresholds_cast_this_turn(),
             actions.iter().map(IssuedAction::descriptor),
         )
         .and_then(|index| actions.get(index)),
-        PolicyFeature::MoveTowardEnemy => select_movement(observation, actions),
+        PolicyFeature::MoveTowardEnemy => {
+            select_movement(observation, actions, policy_behavior_version)
+        }
         PolicyFeature::EndTurn => actions
             .iter()
             .find(|action| matches!(action.descriptor(), ActionDescriptor::EndTurn)),
-        PolicyFeature::CanonicalFallback => actions.first(),
+        PolicyFeature::CanonicalFallback => {
+            select_canonical_fallback(actions, policy_behavior_version)
+        }
     }
+}
+
+fn select_canonical_fallback(
+    actions: &[IssuedAction],
+    policy_behavior_version: u8,
+) -> Option<&IssuedAction> {
+    if policy_behavior_version >= MOVEMENT_PROGRESS_POLICY_BEHAVIOR_VERSION {
+        let first_attack_is_site = actions.iter().find_map(|action| match action.descriptor() {
+            ActionDescriptor::DeclareAttack { target } => {
+                Some(matches!(target, CombatTarget::Site { .. }))
+            }
+            _ => None,
+        });
+        if first_attack_is_site == Some(true) {
+            if let Some(meaningful_attack) = actions.iter().find(|action| {
+                matches!(
+                    action.descriptor(),
+                    ActionDescriptor::DeclareAttack { target }
+                        if !matches!(target, CombatTarget::Site { .. })
+                )
+            }) {
+                return Some(meaningful_attack);
+            }
+            if let Some(decline) = actions
+                .iter()
+                .find(|action| matches!(action.descriptor(), ActionDescriptor::DeclineAttack))
+            {
+                return Some(decline);
+            }
+        }
+    }
+    actions.first()
 }
 
 fn beneficial_tactic_index<'a>(
@@ -474,8 +514,9 @@ fn beneficial_tactic_rank(
 fn select_powered_movement<'a>(
     observation: &SeatObservation,
     actions: &'a [IssuedAction],
+    policy_behavior_version: u8,
 ) -> Option<&'a IssuedAction> {
-    let movement = select_movement(observation, actions)?;
+    let movement = select_movement(observation, actions, policy_behavior_version)?;
     let ActionDescriptor::MoveAndAttack {
         unit_instance_id, ..
     } = movement.descriptor()
@@ -495,19 +536,45 @@ fn select_powered_movement<'a>(
 fn select_movement<'a>(
     observation: &SeatObservation,
     actions: &'a [IssuedAction],
+    policy_behavior_version: u8,
 ) -> Option<&'a IssuedAction> {
     let enemy = observation.enemy_avatar();
+    let has_stationary_attack = actions.iter().any(|action| {
+        matches!(
+            action.descriptor(),
+            ActionDescriptor::MoveAndAttack { path, to, .. }
+                if path.len() == 1 && *to == enemy
+        )
+    });
     actions
         .iter()
         .filter_map(|action| {
-            let ActionDescriptor::MoveAndAttack { path, to, .. } = action.descriptor() else {
+            let ActionDescriptor::MoveAndAttack { from, path, to, .. } = action.descriptor() else {
                 return None;
             };
             if to.region != Region::Surface {
                 return None;
             }
+            if policy_behavior_version >= MOVEMENT_PROGRESS_POLICY_BEHAVIOR_VERSION
+                && *to == *from
+                && path.len() > 1
+            {
+                return None;
+            }
+            if policy_behavior_version >= MOVEMENT_PROGRESS_POLICY_BEHAVIOR_VERSION
+                && has_stationary_attack
+                && path.len() > 1
+                && to.cell.manhattan_distance(enemy.cell)
+                    >= from.cell.manhattan_distance(enemy.cell)
+            {
+                return None;
+            }
             let priority = if path.len() == 1 && *to == enemy {
-                0
+                if policy_behavior_version >= MOVEMENT_PROGRESS_POLICY_BEHAVIOR_VERSION {
+                    u16::MAX
+                } else {
+                    0
+                }
             } else if path.len() > 1 {
                 u16::from(to.cell.manhattan_distance(enemy.cell)) + 1
             } else {
@@ -666,7 +733,7 @@ fn validate(snapshot: &PolicySnapshot) -> Result<(), PolicyError> {
         ));
     }
     validate_engine_version(&snapshot.engine_version)?;
-    if !(LEGACY_POLICY_BEHAVIOR_VERSION..=DRAW_SITE_POLICY_BEHAVIOR_VERSION)
+    if !(LEGACY_POLICY_BEHAVIOR_VERSION..=MOVEMENT_PROGRESS_POLICY_BEHAVIOR_VERSION)
         .contains(&snapshot.policy_behavior_version)
     {
         return Err(PolicyError::Invalid("policyBehaviorVersion is unsupported"));
@@ -711,6 +778,22 @@ pub fn improved_baseline_policy_snapshot(
         authority_hash,
         engine_version,
         DRAW_SITE_POLICY_BEHAVIOR_VERSION,
+    )
+}
+
+/// Builds the explicitly versioned baseline selector that prefers movement progress.
+///
+/// # Errors
+///
+/// Returns [`PolicyError`] when the snapshot cannot be canonicalized or hashed.
+pub fn movement_progress_policy_snapshot(
+    authority_hash: &IdentityHash,
+    engine_version: &str,
+) -> Result<PolicySnapshot, PolicyError> {
+    baseline_policy_snapshot_with_behavior(
+        authority_hash,
+        engine_version,
+        MOVEMENT_PROGRESS_POLICY_BEHAVIOR_VERSION,
     )
 }
 
@@ -817,7 +900,9 @@ pub fn parse_policy_snapshot(text: &str) -> Result<PolicySnapshot, PolicyError> 
 
 #[cfg(test)]
 mod tests {
-    use crate::action::{ActionDescriptor, GenesisTokenChoice, ProjectileDirection, UnitTarget};
+    use crate::action::{
+        ActionDescriptor, CombatTarget, GenesisTokenChoice, ProjectileDirection, UnitTarget,
+    };
     use crate::board::{Cell, Location, Region};
     use crate::canonical::IdentityHash;
     use crate::contract::Seat;
@@ -825,7 +910,8 @@ mod tests {
 
     use super::{
         PolicyFeature, baseline_policy_snapshot, beneficial_tactic_index,
-        improved_baseline_policy_snapshot, select_feature, serialize_policy_snapshot,
+        improved_baseline_policy_snapshot, movement_progress_policy_snapshot, select_feature,
+        serialize_policy_snapshot,
     };
 
     fn move_toward(unit: IdentityHash, from: &str, to: &str) -> IssuedAction {
@@ -851,6 +937,22 @@ mod tests {
                     cell: to_cell,
                     region: Region::Surface,
                 },
+                unit_instance_id: unit,
+            },
+            Seat::North,
+        )
+    }
+
+    fn stationary_attack(unit: IdentityHash, cell: &str) -> IssuedAction {
+        let location = Location {
+            cell: Cell::parse(cell).expect("cell"),
+            region: Region::Surface,
+        };
+        IssuedAction::for_test(
+            ActionDescriptor::MoveAndAttack {
+                from: location,
+                path: vec![location],
+                to: location,
                 unit_instance_id: unit,
             },
             Seat::North,
@@ -1152,6 +1254,161 @@ mod tests {
                 .expect("improved policy serialization")
                 .contains("policyBehaviorVersion")
         );
+    }
+
+    #[test]
+    fn movement_progress_preference_is_versioned_and_keeps_legacy_rank() {
+        let enemy = Location {
+            cell: Cell::parse("C1").expect("C1"),
+            region: Region::Surface,
+        };
+        let observation = SeatObservation::for_test(Seat::North, enemy, Vec::new(), 0);
+        let stationary = stationary_attack(identity('a'), "C1");
+        let advancing = move_toward(identity('b'), "C4", "C3");
+        let actions = [
+            stationary,
+            advancing,
+            IssuedAction::for_test(ActionDescriptor::EndTurn, Seat::North),
+        ];
+
+        let legacy = select_feature(PolicyFeature::MoveTowardEnemy, 0, &observation, &actions, 1)
+            .expect("legacy movement selection");
+        assert!(matches!(
+            legacy.descriptor(),
+            ActionDescriptor::MoveAndAttack { path, .. } if path.len() == 1
+        ));
+
+        let unchanged_v2 =
+            select_feature(PolicyFeature::MoveTowardEnemy, 0, &observation, &actions, 2)
+                .expect("v2 movement selection");
+        assert!(matches!(
+            unchanged_v2.descriptor(),
+            ActionDescriptor::MoveAndAttack { path, .. } if path.len() == 1
+        ));
+
+        let improved = select_feature(PolicyFeature::MoveTowardEnemy, 0, &observation, &actions, 3)
+            .expect("versioned movement selection");
+        assert!(matches!(
+            improved.descriptor(),
+            ActionDescriptor::MoveAndAttack { unit_instance_id, path, .. }
+                if *unit_instance_id == identity('b') && path.len() > 1
+        ));
+        assert!(matches!(
+            select_feature(
+                PolicyFeature::MoveTowardEnemy,
+                0,
+                &observation,
+                &[stationary_attack(identity('c'), "C1")],
+                3,
+            )
+            .expect("v3 stationary fallback")
+            .descriptor(),
+            ActionDescriptor::MoveAndAttack { path, .. } if path.len() == 1
+        ));
+        let loop_location = Location {
+            cell: Cell::parse("C4").expect("C4"),
+            region: Region::Surface,
+        };
+        let loop_midpoint = Location {
+            cell: Cell::parse("C3").expect("C3"),
+            region: Region::Surface,
+        };
+        let looped = IssuedAction::for_test(
+            ActionDescriptor::MoveAndAttack {
+                from: loop_location,
+                path: vec![loop_location, loop_midpoint, loop_location],
+                to: loop_location,
+                unit_instance_id: identity('d'),
+            },
+            Seat::North,
+        );
+        assert!(
+            select_feature(
+                PolicyFeature::MoveTowardEnemy,
+                0,
+                &observation,
+                &[looped],
+                3
+            )
+            .is_none(),
+            "v3 should reject a movement path with no net displacement"
+        );
+    }
+
+    #[test]
+    fn movement_progress_policy_version_prioritizes_meaningful_attacks() {
+        let enemy = Location {
+            cell: Cell::parse("C1").expect("C1"),
+            region: Region::Surface,
+        };
+        let observation = SeatObservation::for_test(Seat::North, enemy, Vec::new(), 0);
+        let v2 = improved_baseline_policy_snapshot(&identity('a'), "sorcery-core-v1")
+            .expect("v2 baseline policy");
+        let v3 = movement_progress_policy_snapshot(&identity('a'), "sorcery-core-v1")
+            .expect("v3 baseline policy");
+        assert_eq!(v2.policy_behavior_version(), 2);
+        assert_eq!(v3.policy_behavior_version(), 3);
+        assert_ne!(v2.policy_id(), v3.policy_id());
+
+        let site_attack = IssuedAction::for_test(
+            ActionDescriptor::DeclareAttack {
+                target: CombatTarget::Site {
+                    instance_id: identity('e'),
+                    seat: Seat::South,
+                },
+            },
+            Seat::North,
+        );
+        let avatar_attack = IssuedAction::for_test(
+            ActionDescriptor::DeclareAttack {
+                target: CombatTarget::Avatar {
+                    instance_id: identity('f'),
+                    seat: Seat::South,
+                },
+            },
+            Seat::North,
+        );
+        let decline = IssuedAction::for_test(ActionDescriptor::DeclineAttack, Seat::North);
+        let attack_actions = [site_attack.clone(), avatar_attack, decline.clone()];
+        assert!(matches!(
+            select_feature(
+                PolicyFeature::CanonicalFallback,
+                0,
+                &observation,
+                &attack_actions,
+                2
+            )
+            .expect("v2 fallback")
+            .descriptor(),
+            ActionDescriptor::DeclareAttack { .. }
+        ));
+        assert!(matches!(
+            select_feature(
+                PolicyFeature::CanonicalFallback,
+                0,
+                &observation,
+                &attack_actions,
+                3
+            )
+            .expect("v3 fallback")
+            .descriptor(),
+            ActionDescriptor::DeclareAttack {
+                target: CombatTarget::Avatar { .. }
+            }
+        ));
+        let site_only_actions = [site_attack.clone(), decline.clone()];
+        assert!(matches!(
+            select_feature(
+                PolicyFeature::CanonicalFallback,
+                0,
+                &observation,
+                &site_only_actions,
+                3
+            )
+            .expect("v3 site-only fallback")
+            .descriptor(),
+            ActionDescriptor::DeclineAttack
+        ));
     }
 
     #[test]

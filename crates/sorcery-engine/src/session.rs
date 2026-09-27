@@ -23,8 +23,9 @@ use crate::novelty_dispatch::{
 use crate::novelty_frontier::{NoveltyFrontierSearchOutput, run_novelty_frontier_search};
 use crate::novelty_rollout::{NoveltyRolloutOutput, run_novelty_rollout};
 use crate::policy::{
-    DRAW_SITE_POLICY_BEHAVIOR_VERSION, LEGACY_POLICY_BEHAVIOR_VERSION, PolicyError,
-    baseline_policy_snapshot, improved_baseline_policy_snapshot,
+    DRAW_SITE_POLICY_BEHAVIOR_VERSION, LEGACY_POLICY_BEHAVIOR_VERSION,
+    MOVEMENT_PROGRESS_POLICY_BEHAVIOR_VERSION, PolicyError, baseline_policy_snapshot,
+    improved_baseline_policy_snapshot, movement_progress_policy_snapshot,
 };
 use crate::simulator::SimulatorError;
 
@@ -182,6 +183,10 @@ impl Session {
                 self.game.rules().engine_version(),
             )?,
             DRAW_SITE_POLICY_BEHAVIOR_VERSION => improved_baseline_policy_snapshot(
+                self.game.rules().authority_hash(),
+                self.game.rules().engine_version(),
+            )?,
+            MOVEMENT_PROGRESS_POLICY_BEHAVIOR_VERSION => movement_progress_policy_snapshot(
                 self.game.rules().authority_hash(),
                 self.game.rules().engine_version(),
             )?,

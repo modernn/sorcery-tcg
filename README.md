@@ -38,7 +38,9 @@ tokens, validates the new game, binds policies, and runs both seat orientations 
 Decks must differ. Use `game:demo` or `game:batch` for mirror self-play.
 
 Requests contain `schemaVersion: 1`, `baseManifest`, `candidate`, `opponent`, `seeds`,
-`workers`, and optionally `artifactsDir` for synthetic runs. Start with one worker and
+`workers`, and optionally `artifactsDir` for synthetic runs. They use policy behavior v2
+by default; set `policyBehaviorVersion: 3` explicitly to opt into the movement-progress
+selector. Start with one worker and
 one seed; the limits are 128 seeds, eight workers, and 16 MiB input. Identical inputs
 produce identical reports regardless of worker count. Read `limitations` and deck
 `diagnostics`: engine support and Constructed legality are distinct.

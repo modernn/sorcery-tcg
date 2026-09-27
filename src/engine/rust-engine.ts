@@ -485,7 +485,7 @@ export class RustSessionClient {
     return Object.freeze(result.actions.map((action) => parseLegalAction(action)));
   }
 
-  async selectPolicyAction(policyBehaviorVersion?: 1 | 2): Promise<RustLegalAction> {
+  async selectPolicyAction(policyBehaviorVersion?: 1 | 2 | 3): Promise<RustLegalAction> {
     const result = await this.call('selectPolicyAction', policyBehaviorVersion === undefined
       ? {}
       : { policyBehaviorVersion });

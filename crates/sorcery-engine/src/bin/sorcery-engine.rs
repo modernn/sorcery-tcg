@@ -21,11 +21,11 @@ use sorcery_engine::game_record::{
     record_synthetic_demo, replay_artifact_steps, replay_game_artifacts, write_game_artifacts,
 };
 use sorcery_engine::gauntlet::{
-    GauntletOrientation, GauntletPair, run_gauntlet, run_gauntlet_to_dir,
+    GauntletOrientation, GauntletPair, GauntletReport, run_gauntlet, run_gauntlet_to_dir,
 };
 use sorcery_engine::policy::{
-    DRAW_SITE_POLICY_BEHAVIOR_VERSION, LEGACY_POLICY_BEHAVIOR_VERSION, PolicySnapshot,
-    parse_policy_snapshot,
+    DRAW_SITE_POLICY_BEHAVIOR_VERSION, LEGACY_POLICY_BEHAVIOR_VERSION,
+    MOVEMENT_PROGRESS_POLICY_BEHAVIOR_VERSION, PolicySnapshot, parse_policy_snapshot,
 };
 use sorcery_engine::schedule::{FailurePolicy, SeedBlock, run_synthetic_schedule};
 use sorcery_engine::synthetic::synthetic_demo_manifest_json;
@@ -86,6 +86,15 @@ struct ExperimentJsonRequest {
     seeds: Vec<u32>,
     workers: usize,
     artifacts_dir: Option<String>,
+    #[serde(default = "default_experiment_policy_behavior_version")]
+    policy_behavior_version: u8,
+}
+
+struct ExperimentResultContext {
+    base_manifest: Value,
+    seeds: Vec<u32>,
+    artifacts_dir: Option<String>,
+    policy_behavior_version: u8,
 }
 
 #[derive(Deserialize)]
@@ -486,6 +495,14 @@ fn parse_experiment_json(input: &[u8]) -> CliResult<ExperimentJsonRequest> {
     if request.seeds.is_empty() || request.seeds.len() > MAX_BATCH_JOBS / 2 {
         return Err(io::Error::other("experiment-json requires 1-128 seeds").into());
     }
+    if !(LEGACY_POLICY_BEHAVIOR_VERSION..=MOVEMENT_PROGRESS_POLICY_BEHAVIOR_VERSION)
+        .contains(&request.policy_behavior_version)
+    {
+        return Err(io::Error::other(
+            "experiment-json policyBehaviorVersion must be an integer from 1 through 3",
+        )
+        .into());
+    }
     // Private manifests contain source-derived facts; this convenience command never
     // persists them. The private authority workflow owns publication-safe artifact paths.
     if request.artifacts_dir.is_some() && request.base_manifest["authority"]["mode"] != "synthetic"
@@ -536,6 +553,12 @@ fn experiment_manifests(
 
 fn run_experiment_json(input: &[u8]) -> CliResult<Value> {
     let request = parse_experiment_json(input)?;
+    let result_context = ExperimentResultContext {
+        base_manifest: request.base_manifest.clone(),
+        seeds: request.seeds.clone(),
+        artifacts_dir: request.artifacts_dir.clone(),
+        policy_behavior_version: request.policy_behavior_version,
+    };
     let base_manifest_json = canonical_json(&request.base_manifest)?;
     let manifest: ManifestDeckEnvelope = serde_json::from_value(request.base_manifest.clone())?;
     let catalog = manifest_catalog(manifest.cards);
@@ -548,8 +571,16 @@ fn run_experiment_json(input: &[u8]) -> CliResult<Value> {
     }
     let manifests =
         experiment_manifests(&base_manifest_json, &candidate, &opponent, &request.seeds)?;
-    let candidate_policy = policy_for_deck(&manifests[0][0], candidate.deck_id().as_str())?;
-    let opponent_policy = policy_for_deck(&manifests[0][0], opponent.deck_id().as_str())?;
+    let candidate_policy = policy_for_deck_with_behavior(
+        &manifests[0][0],
+        candidate.deck_id().as_str(),
+        request.policy_behavior_version,
+    )?;
+    let opponent_policy = policy_for_deck_with_behavior(
+        &manifests[0][0],
+        opponent.deck_id().as_str(),
+        request.policy_behavior_version,
+    )?;
     let pairs = manifests
         .iter()
         .zip(&request.seeds)
@@ -591,6 +622,24 @@ fn run_experiment_json(input: &[u8]) -> CliResult<Value> {
     } else {
         run_gauntlet(&pairs, request.workers)?
     };
+    finalize_experiment_result(
+        result_context,
+        &candidate,
+        &opponent,
+        &candidate_policy,
+        &opponent_policy,
+        report,
+    )
+}
+
+fn finalize_experiment_result(
+    context: ExperimentResultContext,
+    candidate: &DeckValidation,
+    opponent: &DeckValidation,
+    candidate_policy: &PolicySnapshot,
+    opponent_policy: &PolicySnapshot,
+    report: GauntletReport,
+) -> CliResult<Value> {
     let total_turns: u64 = report
         .games
         .iter()
@@ -606,17 +655,22 @@ fn run_experiment_json(input: &[u8]) -> CliResult<Value> {
         .ok_or_else(|| io::Error::other("invalid gauntlet report"))?
         .remove("averageTurns");
     result["schemaVersion"] = json!(1);
-    result["experimentId"] = json!(identity_hash(&json!({
+    let mut experiment_identity = json!({
         "schemaVersion": 1,
-        "baseManifestId": request.base_manifest["manifestId"],
+        "baseManifestId": context.base_manifest["manifestId"],
         "candidateDeckId": candidate.deck_id(),
         "opponentDeckId": opponent.deck_id(),
         "candidatePolicyId": candidate_policy.policy_id(),
         "opponentPolicyId": opponent_policy.policy_id(),
-        "seeds": request.seeds,
-    }))?);
-    result["candidate"] = experiment_deck_report(&candidate, &candidate_policy);
-    result["opponent"] = experiment_deck_report(&opponent, &opponent_policy);
+        "seeds": context.seeds,
+    });
+    if context.policy_behavior_version != DRAW_SITE_POLICY_BEHAVIOR_VERSION {
+        experiment_identity["policyBehaviorVersion"] = json!(context.policy_behavior_version);
+        result["policyBehaviorVersion"] = json!(context.policy_behavior_version);
+    }
+    result["experimentId"] = json!(identity_hash(&experiment_identity)?);
+    result["candidate"] = experiment_deck_report(candidate, candidate_policy);
+    result["opponent"] = experiment_deck_report(opponent, opponent_policy);
     result["totalTurns"] = json!(total_turns);
     result["allReplayVerified"] = json!(all_replay_verified);
     result["ranked"] = json!(false);
@@ -625,7 +679,7 @@ fn run_experiment_json(input: &[u8]) -> CliResult<Value> {
         "Manifest facts are not independently authority-verified. Rarity and copy limits are unavailable.",
         "Engine support is checked independently from Constructed deck legality."
     ]);
-    if let Some(dir) = request.artifacts_dir {
+    if let Some(dir) = context.artifacts_dir {
         result["artifactsDir"] = json!(dir);
     }
     Ok(result)
@@ -814,8 +868,13 @@ fn baseline_policy(manifest_json: &str) -> CliResult<PolicySnapshot> {
     )
 }
 
+#[cfg(test)]
 fn policy_for_deck(manifest_json: &str, deck_id: &str) -> CliResult<PolicySnapshot> {
     policy_for_deck_with_behavior(manifest_json, deck_id, DRAW_SITE_POLICY_BEHAVIOR_VERSION)
+}
+
+fn default_experiment_policy_behavior_version() -> u8 {
+    DRAW_SITE_POLICY_BEHAVIOR_VERSION
 }
 
 fn policy_for_deck_with_behavior(

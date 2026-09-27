@@ -12,7 +12,7 @@ use crate::checkpoint::{
 use crate::contract::{ActionRequest, Seat};
 use crate::novelty::NoveltyStep;
 use crate::novelty_dispatch::ForcedNoveltyInput;
-use crate::policy::{DRAW_SITE_POLICY_BEHAVIOR_VERSION, LEGACY_POLICY_BEHAVIOR_VERSION};
+use crate::policy::{LEGACY_POLICY_BEHAVIOR_VERSION, MOVEMENT_PROGRESS_POLICY_BEHAVIOR_VERSION};
 use crate::session::{Session, StepResult};
 
 const SCHEMA_VERSION: u8 = 1;
@@ -655,14 +655,16 @@ fn parse_policy_behavior_version(params: &Value) -> Result<u8, String> {
         return Ok(LEGACY_POLICY_BEHAVIOR_VERSION);
     };
     let raw = raw.as_u64().ok_or_else(|| {
-        "selectPolicyAction policyBehaviorVersion must be an integer from 1 through 2".to_owned()
+        "selectPolicyAction policyBehaviorVersion must be an integer from 1 through 3".to_owned()
     })?;
     let version = u8::try_from(raw).map_err(|_| {
-        "selectPolicyAction policyBehaviorVersion must be an integer from 1 through 2".to_owned()
+        "selectPolicyAction policyBehaviorVersion must be an integer from 1 through 3".to_owned()
     })?;
-    if !(LEGACY_POLICY_BEHAVIOR_VERSION..=DRAW_SITE_POLICY_BEHAVIOR_VERSION).contains(&version) {
+    if !(LEGACY_POLICY_BEHAVIOR_VERSION..=MOVEMENT_PROGRESS_POLICY_BEHAVIOR_VERSION)
+        .contains(&version)
+    {
         return Err(
-            "selectPolicyAction policyBehaviorVersion must be an integer from 1 through 2"
+            "selectPolicyAction policyBehaviorVersion must be an integer from 1 through 3"
                 .to_owned(),
         );
     }
@@ -773,11 +775,11 @@ mod tests {
         let invalid = legacy.handle(&rpc(
             2,
             "selectPolicyAction",
-            json!({ "policyBehaviorVersion": 3 }),
+            json!({ "policyBehaviorVersion": 4 }),
         ));
         assert_eq!(
             invalid.error.expect("invalid behavior version").message,
-            "selectPolicyAction policyBehaviorVersion must be an integer from 1 through 2"
+            "selectPolicyAction policyBehaviorVersion must be an integer from 1 through 3"
         );
 
         for id in 3..700 {
@@ -789,7 +791,9 @@ mod tests {
             let improved_result = improved.handle(&rpc(
                 id,
                 "selectPolicyAction",
-                json!({ "policyBehaviorVersion": DRAW_SITE_POLICY_BEHAVIOR_VERSION }),
+                json!({
+                    "policyBehaviorVersion": crate::policy::DRAW_SITE_POLICY_BEHAVIOR_VERSION
+                }),
             ));
             let legacy_action = legacy_result
                 .result
@@ -834,6 +838,30 @@ mod tests {
             );
         }
         panic!("seed-31 did not reach a DrawSite policy divergence");
+    }
+
+    #[test]
+    fn service_should_accept_movement_progress_policy_v3() {
+        let manifest = synthetic_demo_manifest_json(31).expect("manifest");
+        let mut service = SessionJsonService::new();
+        assert!(
+            service
+                .handle(&rpc(1, "new", json!({ "manifestJson": manifest })))
+                .error
+                .is_none()
+        );
+        let selected = service.handle(&rpc(
+            2,
+            "selectPolicyAction",
+            json!({
+                "policyBehaviorVersion": MOVEMENT_PROGRESS_POLICY_BEHAVIOR_VERSION
+            }),
+        ));
+        assert!(selected.error.is_none());
+        assert_eq!(
+            selected.result.expect("v3 action")["action"]["seat"],
+            "north"
+        );
     }
 
     #[test]

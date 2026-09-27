@@ -4,6 +4,7 @@ import test from 'node:test';
 import { createSyntheticDemoManifest } from '../../src/commands/run-game-demo.ts';
 import { canonicalJson } from '../../src/authority/canonical-json.ts';
 import { RustSessionClient } from '../../src/engine/rust-engine.ts';
+import { withSetup } from './rust-setup-session.ts';
 
 test('Rust session-json client creates, views, steps, and verifies a synthetic match', async () => {
   const client = await RustSessionClient.start();
@@ -105,4 +106,12 @@ test('Rust session client forwards counterfactual workers without changing the d
   } finally {
     await client.close();
   }
+});
+
+test('SetupCtx forwards explicit v3 movement-progress policy behavior', async () => {
+  await withSetup(createSyntheticDemoManifest(31), async (ctx) => {
+    const selected = await ctx.selectPolicyAction(3);
+    const legalActions = await ctx.legalActions(selected.seat);
+    assert.ok(legalActions.some(({ actionId }) => actionId === selected.actionId));
+  });
 });

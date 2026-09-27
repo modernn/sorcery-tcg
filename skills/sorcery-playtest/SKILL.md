@@ -52,7 +52,14 @@ Choose by issued action ID and current state version. Never invent a mutation.
 Existing session clients default to policy behavior v1 so old transcripts stay
 byte-compatible. For new LLM playtests, call `selectPolicyAction(2)` or send
 `{"policyBehaviorVersion":2}` with `selectPolicyAction`. Record that version with the
-run; omitting it deliberately selects the legacy behavior.
+run; omitting it deliberately selects the legacy behavior. For an explicitly versioned
+movement-progress experiment, call `selectPolicyAction(3)` or send
+`{"policyBehaviorVersion":3}`. V3 prefers movement that makes progress toward the
+opposing avatar when it competes with a stationary attack, rejects no-net movement
+cycles, and avoids selecting a site attack ahead of a meaningful unit or avatar target.
+Use v3 only when that selector change is the hypothesis: it has its own policy identity,
+does not rewrite v1/v2 snapshots or transcripts, and does not change the experiment
+default.
 
 Separate fair play from debugging. Do not use opponent hidden hands, deck order, or
 full replay state to choose moves in a fair-play experiment. Checkpoint branches of

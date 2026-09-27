@@ -80,7 +80,7 @@ export class RustGameSessionHandle {
   }
 
   /** Selects one engine-issued action with the shared baseline deterministic policy. */
-  async selectPolicyAction(policyBehaviorVersion?: 1 | 2): Promise<GameLegalAction> {
+  async selectPolicyAction(policyBehaviorVersion?: 1 | 2 | 3): Promise<GameLegalAction> {
     return asGameLegalAction(await this.client.selectPolicyAction(policyBehaviorVersion));
   }
 
