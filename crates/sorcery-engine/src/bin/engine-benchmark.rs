@@ -190,11 +190,15 @@ fn replay_profile_report(sample_count: u32) -> BenchmarkResult<Value> {
         return Err(io::Error::other("replay profile warmup verification failed").into());
     }
     black_box(replay_selected(&manifest_json, &rollout)?);
+    black_box(state_hash_sample(&game, rollout.action_indices())?);
 
     let mut speculative = Vec::with_capacity(usize::try_from(sample_count)?);
     let mut recorded = Vec::with_capacity(usize::try_from(sample_count)?);
     let mut verification = Vec::with_capacity(usize::try_from(sample_count)?);
     let mut selected = Vec::with_capacity(usize::try_from(sample_count)?);
+    let mut state_hashes = Vec::with_capacity(usize::try_from(sample_count)?);
+    let mut state_materialization = Vec::with_capacity(usize::try_from(sample_count)?);
+    let mut state_canonicalization = Vec::with_capacity(usize::try_from(sample_count)?);
     for _ in 0..sample_count {
         let started = Instant::now();
         let measured_rollout = run_game(game.clone(), &policy, &policy, MAX_GAME_ACTIONS)?;
@@ -202,6 +206,12 @@ fn replay_profile_report(sample_count: u32) -> BenchmarkResult<Value> {
         if measured_rollout != rollout {
             return Err(io::Error::other("replay profile speculative rollout changed").into());
         }
+
+        let (state_hash_sample, materialization_sample, canonicalization_sample) =
+            state_hash_sample(&game, rollout.action_indices())?;
+        state_hashes.push(state_hash_sample);
+        state_materialization.push(materialization_sample);
+        state_canonicalization.push(canonicalization_sample);
 
         let started = Instant::now();
         let measured_replay = Session::replay(&manifest_json, &action_ids)?;
@@ -244,8 +254,50 @@ fn replay_profile_report(sample_count: u32) -> BenchmarkResult<Value> {
         "sampleCount": sample_count,
         "seed": 31,
         "selectedReplay": summarize(&selected)?,
+        "stateCanonicalizationOnly": summarize(&state_canonicalization)?,
+        "stateHashOnly": summarize(&state_hashes)?,
+        "stateMaterializationOnly": summarize(&state_materialization)?,
         "speculativeRollout": summarize(&speculative)?,
     }))
+}
+
+fn state_hash_sample(
+    game: &Game,
+    action_indices: &[usize],
+) -> BenchmarkResult<(Sample, Sample, Sample)> {
+    let mut game = game.clone();
+    let mut hash_latencies = Vec::with_capacity(action_indices.len());
+    let mut materialization_latencies = Vec::with_capacity(action_indices.len());
+    let mut canonicalization_latencies = Vec::with_capacity(action_indices.len());
+    for &action_index in action_indices {
+        let action = game
+            .legal_actions()?
+            .into_iter()
+            .nth(action_index)
+            .ok_or_else(|| io::Error::other("state hash profile action is not legal"))?;
+        game.apply_action(&action)?;
+        let started = Instant::now();
+        let state = black_box(game.authoritative_state());
+        materialization_latencies.push(started.elapsed());
+        let started = Instant::now();
+        black_box(sorcery_engine::canonical::identity_hash(&state)?);
+        canonicalization_latencies.push(started.elapsed());
+        let started = Instant::now();
+        black_box(game.state_hash()?);
+        hash_latencies.push(started.elapsed());
+    }
+    let sample = |latencies: Vec<Duration>| -> BenchmarkResult<Sample> {
+        Ok(Sample {
+            duration: latencies.iter().sum(),
+            operations: u32::try_from(latencies.len())?,
+            latencies,
+        })
+    };
+    Ok((
+        sample(hash_latencies)?,
+        sample(materialization_latencies)?,
+        sample(canonicalization_latencies)?,
+    ))
 }
 
 fn single_operation_sample(duration: Duration) -> Sample {
