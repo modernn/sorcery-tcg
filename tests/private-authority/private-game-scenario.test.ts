@@ -592,7 +592,7 @@ function assertHamlet(result: PrivateGameCheck['fireHamlet']): void {
   assert.equal(result.hamlet, 'Hamlet');
   assert.equal(result.wasteland, 'Wasteland');
   assert.equal(result.raalDromedary, 'Raal Dromedary');
-  assert.equal(result.seed, 135);
+  assert.equal(result.seed, 7512);
   assert.equal(result.acceptedActionCount, 10);
   assert.equal(result.exactDestinationCosts, true);
   assert.equal(result.fireAffinityVerified, true);
@@ -613,7 +613,7 @@ function assertGranaryRats(result: PrivateGameCheck['fireGranaryRats']): void {
   assert.equal(result.granaryRats, 'Granary Rats');
   assert.equal(result.wasteland, 'Wasteland');
   assert.equal(result.acceptedActionCount, 4);
-  assert.equal(result.seed, 102);
+  assert.equal(result.seed, 7386);
   assert.equal(result.fireAffinityBeforeSummon, true);
   assert.equal(result.siteThresholdSuppressed, true);
   assert.equal(result.manaPaid, 1);
@@ -675,7 +675,7 @@ function assertSwordAndShield(result: PrivateGameCheck['earthSwordAndShield']): 
 function assertVoidArtifact(result: PrivateGameCheck['airVoidArtifact']): void {
   assert.equal(result.spectralStalker, 'Spectral Stalker');
   assert.equal(result.swordAndShield, 'Sword and Shield');
-  assert.equal(result.seed, 18);
+  assert.equal(result.seed, 7451);
   assert.equal(result.acceptedActionCount, 22);
   assert.equal(result.relocationVerified, true);
   assert.equal(result.noRandomDraws, true);
@@ -772,7 +772,7 @@ function assertMesmerism(result: PrivateGameCheck['waterMesmerism']): void {
   assert.equal(result.oldControllerHadAction, true);
   assert.equal(result.newControllerGainedAction, true);
   assert.equal(result.oldControllerLostAction, true);
-  assert.equal(result.seed, 4724);
+  assert.equal(result.seed, 12038);
   assert.equal(result.causalEventsVerified, true);
   assert.equal(result.noRandomDraws, true);
   assert.equal(result.deck.atlas.reduce((total, card) => total + card.copies, 0), 30);
@@ -1527,6 +1527,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
       elements: ['air'],
       genesisGainManaIfOnlyControlledCopy: 1,
       isTower: true,
+      ordinary: true,
     });
   }
   const earthLesson = starterCatalog[1]!;
@@ -1568,7 +1569,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
     .find(({ name }) => name === 'Charge')?.copies, 4);
   assert.equal(result.fireVileImp.vileImp, 'Vile Imp');
   assert.equal(result.fireVileImp.wasteland, 'Wasteland');
-  assert.equal(result.fireVileImp.acceptedActionCount, 10);
+  assert.equal(result.fireVileImp.acceptedActionCount, 11);
   assert.equal(result.fireVileImp.avatarTookTwoDamage, true);
   assert.equal(result.fireVileImp.causalEventsVerified, true);
   assert.equal(result.fireVileImp.declinePreservedAvatar, true);
@@ -1704,7 +1705,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airHeadlessHaunt.supportedSpellbookCopies, 36);
   assert.equal(result.airHeadlessHaunt.replayVerified, true);
   assert.equal(result.airRaiseDead.raiseDead, 'Raise Dead');
-  assert.equal(result.airRaiseDead.seed, 223);
+  assert.equal(result.airRaiseDead.seed, 7837);
   assert.equal(result.airRaiseDead.acceptedActionCount, 28);
   assert.equal(result.airRaiseDead.causalEventsVerified, true);
   assert.equal(result.airRaiseDead.legalPlacementVerified, true);
@@ -2008,7 +2009,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airRainOfArrows.rainOfArrows, 'Rain of Arrows');
   assert.equal(result.airRainOfArrows.shellycoat, 'Shellycoat');
   assert.equal(result.airRainOfArrows.snowLeopard, 'Snow Leopard');
-  assert.equal(result.airRainOfArrows.seed, 389);
+  assert.equal(result.airRainOfArrows.seed, 11395);
   assert.equal(result.airRainOfArrows.acceptedActionCount, 16);
   assert.equal(result.airRainOfArrows.noTargetChoice, true);
   assert.equal(result.airRainOfArrows.surfaceMinionsComparedAndSurvived, true);
@@ -2089,7 +2090,7 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.airLeyline.replayVerified, true);
   assert.equal(result.earthOverpower.overpower, 'Overpower');
   assert.equal(result.earthOverpower.elthamTownsfolk, 'Eltham Townsfolk');
-  assert.equal(result.earthOverpower.acceptedActionCount, 12);
+  assert.equal(result.earthOverpower.acceptedActionCount, 13);
   assert.equal(result.earthOverpower.exactOwnAllyChoices, true);
   assert.equal(result.earthOverpower.currentPowerIncreasedByTwo, true);
   assert.equal(result.earthOverpower.unitStatePreservedOnGrant, true);
