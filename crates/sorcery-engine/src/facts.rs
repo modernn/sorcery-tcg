@@ -57,6 +57,12 @@ impl ElementSet {
         self.0 & (1 << element.index()) != 0
     }
 
+    /// Returns whether the two sets share any element.
+    #[must_use]
+    pub const fn intersects(self, other: Self) -> bool {
+        self.0 & other.0 != 0
+    }
+
     /// Returns this set with `element` present.
     #[must_use]
     pub const fn with(self, element: Element) -> Self {
@@ -417,6 +423,13 @@ pub enum DamagePrevention {
     Ward,
 }
 
+/// A continuous nearby protection grant from a minion.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NearbyDamagePrevention {
+    pub allied_only: bool,
+    pub prevention: DamagePrevention,
+}
+
 /// Minion facts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[expect(
@@ -447,6 +460,7 @@ pub struct MinionFacts {
     pub charge: bool,
     pub connects_top_bottom: bool,
     pub damage_prevention: Option<DamagePrevention>,
+    pub nearby_damage_prevention: Option<NearbyDamagePrevention>,
     pub deathrite_damage_each_unit_here: Option<u8>,
     pub deathrite_draw_site: bool,
     pub deathrite_draw_spells: bool,
@@ -1184,6 +1198,7 @@ const MINION_FIELDS: &[&str] = &[
     "otherNearbyAlliesPowerBonus",
     "preventsDamageFromUnitsWithPowerAtLeast",
     "preventsDamageFrom",
+    "nearbyDamagePrevention",
     "provides",
     "ranged",
     "sacrificeMinionAtSummoningLocationForManaDiscount",
@@ -2168,6 +2183,34 @@ fn parse_damage_prevention(
     )
 }
 
+fn parse_nearby_damage_prevention(
+    object: &Map<String, Value>,
+    path: &str,
+) -> Result<Option<NearbyDamagePrevention>, FactError> {
+    let Some(value) = object.get("nearbyDamagePrevention") else {
+        return Ok(None);
+    };
+    let nested_path = format!("{path}.nearbyDamagePrevention");
+    let grant = value
+        .as_object()
+        .ok_or_else(|| FactError::new(&nested_path, "must be an object"))?;
+    reject_unknown(
+        grant,
+        &[
+            "alliedOnly",
+            "takesLessDamage",
+            "preventsDamageFrom",
+            "preventsDamageFromUnitsWithPowerAtLeast",
+        ],
+        &nested_path,
+    )?;
+    Ok(Some(NearbyDamagePrevention {
+        allied_only: true_only(grant, "alliedOnly", &nested_path)?,
+        prevention: parse_damage_prevention(grant, &nested_path)?
+            .ok_or_else(|| FactError::new(&nested_path, "must contain one prevention selector"))?,
+    }))
+}
+
 fn parse_provides(object: &Map<String, Value>, path: &str) -> Result<Option<Element>, FactError> {
     let Some(value) = object.get("provides") else {
         return Ok(None);
@@ -2458,6 +2501,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         charge: optional_bool(object, "charge", path)?,
         connects_top_bottom,
         damage_prevention,
+        nearby_damage_prevention: parse_nearby_damage_prevention(object, path)?,
         deathrite_damage_each_unit_here,
         deathrite_draw_site: optional_bool(object, "deathriteDrawSite", path)?,
         deathrite_draw_spells: optional_bool(object, "deathriteDrawSpells", path)?,

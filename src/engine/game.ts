@@ -23,6 +23,21 @@ import {
 
 const MAX_DECK_CARDS = 200;
 const MAX_COMBAT_STAT = 100;
+const DAMAGE_PREVENTION_SOURCES = [
+  'ranged-strikes',
+  'magic',
+  'earth-magic',
+  'fire-magic',
+  'water-magic',
+  'air-magic',
+] as const;
+type DamagePreventionSource = typeof DAMAGE_PREVENTION_SOURCES[number];
+type NearbyDamagePrevention = Readonly<{
+  alliedOnly?: true;
+  takesLessDamage?: number;
+  preventsDamageFrom?: DamagePreventionSource;
+  preventsDamageFromUnitsWithPowerAtLeast?: number;
+}>;
 
 export type GameSeat = EngineSeat;
 export type DeckZone = 'atlas' | 'spellbook';
@@ -711,11 +726,12 @@ export type GameCardDefinition =
     mustBeCastSubmerged?: boolean;
     mustBeCastToWaterSite?: boolean;
     nearbyEnemiesPermanentlyLoseStealth?: true;
+    nearbyDamagePrevention?: NearbyDamagePrevention;
     ordinary?: true;
     occupiesSquareArea?: 2;
     otherControlledMortalsPowerBonus?: 1;
     otherNearbyAlliesPowerBonus?: 1;
-    preventsDamageFrom?: 'ranged-strikes' | 'magic' | 'earth-magic' | 'fire-magic' | 'water-magic' | 'air-magic';
+    preventsDamageFrom?: DamagePreventionSource;
     preventsDamageFromUnitsWithPowerAtLeast?: number;
     provides?: GameElement;
     ranged?: boolean;
@@ -1645,7 +1661,7 @@ const SUPPORTED_CARD_FIELDS = {
     manaCost mayRangedStrikeOnceDuringBasicMovement mayStepAfterRangedStrike demon mortal undead movementBonus
     movesOnlyForward movesOnlySideways mustAttackAUnitIfAble
     mustBeCastBurrowed mustBeCastSubmerged mustBeCastToOuterColumn mustBeCastToWaterSite
-    nearbyAvatarsMayDiscardCardToGainControlOfThis nearbyEnemiesPermanentlyLoseStealth occupiesSquareArea ordinary otherControlledMortalsPowerBonus
+    nearbyAvatarsMayDiscardCardToGainControlOfThis nearbyDamagePrevention nearbyEnemiesPermanentlyLoseStealth occupiesSquareArea ordinary otherControlledMortalsPowerBonus
     otherNearbyAlliesPowerBonus preventsDamageFrom preventsDamageFromUnitsWithPowerAtLeast provides ranged
     sacrificeMinionAtSummoningLocationForManaDiscount shootsDragProjectile siteProvidesNoThreshold
     spellcaster spellcasterElements stealth strikesFirstWhileAttacking strikesFirstWhileDefending submerge summonToAnySite
@@ -1751,6 +1767,51 @@ function validateEffectProgram(program: unknown, path: string): asserts program 
 
 function cloneEffectProgram(program: EffectProgram): EffectProgram {
   return structuredClone(program);
+}
+
+function validateNearbyDamagePrevention(value: unknown, path: string): asserts value is NearbyDamagePrevention {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new RangeError(`${path} must be an object`);
+  }
+  const candidate = value as Record<string, unknown>;
+  const unknown = Object.keys(candidate).find((field) => ![
+    'alliedOnly',
+    'takesLessDamage',
+    'preventsDamageFrom',
+    'preventsDamageFromUnitsWithPowerAtLeast',
+  ].includes(field));
+  if (unknown) throw new RangeError(`${path}.${unknown} is unsupported`);
+  if (candidate.alliedOnly !== undefined && candidate.alliedOnly !== true) {
+    throw new RangeError(`${path}.alliedOnly must be true when defined`);
+  }
+  const selectorCount = Number(candidate.takesLessDamage !== undefined)
+    + Number(candidate.preventsDamageFrom !== undefined)
+    + Number(candidate.preventsDamageFromUnitsWithPowerAtLeast !== undefined);
+  if (selectorCount !== 1) {
+    throw new RangeError(`${path} must define exactly one prevention selector`);
+  }
+  if (candidate.takesLessDamage !== undefined
+    && (typeof candidate.takesLessDamage !== 'number'
+      || !Number.isSafeInteger(candidate.takesLessDamage)
+      || candidate.takesLessDamage < 1
+      || candidate.takesLessDamage > MAX_COMBAT_STAT)) {
+    throw new RangeError(
+      `${path}.takesLessDamage must be a safe integer between 1 and ${MAX_COMBAT_STAT}`,
+    );
+  }
+  if (candidate.preventsDamageFrom !== undefined
+    && !DAMAGE_PREVENTION_SOURCES.includes(candidate.preventsDamageFrom as DamagePreventionSource)) {
+    throw new RangeError(`${path}.preventsDamageFrom is unsupported`);
+  }
+  if (candidate.preventsDamageFromUnitsWithPowerAtLeast !== undefined
+    && (typeof candidate.preventsDamageFromUnitsWithPowerAtLeast !== 'number'
+      || !Number.isSafeInteger(candidate.preventsDamageFromUnitsWithPowerAtLeast)
+      || candidate.preventsDamageFromUnitsWithPowerAtLeast < 1
+      || candidate.preventsDamageFromUnitsWithPowerAtLeast > MAX_COMBAT_STAT)) {
+    throw new RangeError(
+      `${path}.preventsDamageFromUnitsWithPowerAtLeast must be a safe integer between 1 and ${MAX_COMBAT_STAT}`,
+    );
+  }
 }
 
 function rejectUnknownThresholds(
@@ -3053,6 +3114,9 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
     && card.otherControlledMortalsPowerBonus !== 1) {
     throw new RangeError(`${path}.otherControlledMortalsPowerBonus must be 1`);
   }
+  if (card.nearbyDamagePrevention !== undefined) {
+    validateNearbyDamagePrevention(card.nearbyDamagePrevention, `${path}.nearbyDamagePrevention`);
+  }
   if (card.preventsDamageFromUnitsWithPowerAtLeast !== undefined
     && (!Number.isSafeInteger(card.preventsDamageFromUnitsWithPowerAtLeast)
       || card.preventsDamageFromUnitsWithPowerAtLeast < 1
@@ -3136,7 +3200,7 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
     );
   }
   if (card.preventsDamageFrom !== undefined
-    && !['ranged-strikes', 'magic', 'earth-magic', 'fire-magic', 'water-magic', 'air-magic'].includes(card.preventsDamageFrom)) {
+    && !DAMAGE_PREVENTION_SOURCES.includes(card.preventsDamageFrom)) {
     throw new RangeError(`${path}.preventsDamageFrom is unsupported`);
   }
   if (card.token !== undefined && card.token !== true) {
@@ -3834,6 +3898,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.mustBeCastToWaterSite === true ? { mustBeCastToWaterSite: true } : {}),
             ...(card.nearbyEnemiesPermanentlyLoseStealth === true
               ? { nearbyEnemiesPermanentlyLoseStealth: true as const }
+              : {}),
+            ...(card.nearbyDamagePrevention !== undefined
+              ? { nearbyDamagePrevention: { ...card.nearbyDamagePrevention } }
               : {}),
             ...(card.ordinary === true ? { ordinary: true as const } : {}),
             ...(card.occupiesSquareArea === 2 ? { occupiesSquareArea: 2 as const } : {}),

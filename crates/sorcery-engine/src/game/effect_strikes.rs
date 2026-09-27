@@ -65,13 +65,8 @@ impl Game {
             .iter()
             .enumerate()
             .map(|(index, target)| {
-                let (kind, status) = match target {
-                    UnitTarget::Avatar { .. } => (UnitKind::Avatar, None),
-                    UnitTarget::Minion { instance_id, .. } => (
-                        UnitKind::Minion,
-                        Some(self.minion_damage_status(instance_id)?),
-                    ),
-                };
+                let kind = super::unit_target_kind(target);
+                let status = self.unit_damage_status(kind, target.seat(), target.instance_id())?;
                 let amount = if let Some(values) = amounts {
                     values[index]
                 } else {

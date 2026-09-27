@@ -221,5 +221,27 @@ are each reduced, rather than reducing their combined total once. Reduction
 saturates at zero. Avatar damage is reduced before life loss or Death's Door
 settlement; direct life loss (including a strike on a controlled site) bypasses
 this damage rule. A fully prevented hit cannot deliver a death blow.
-This does not yet admit protection granted by nearby units or temporary
-proximity-dependent reduction.
+Temporary proximity-dependent reduction still requires its own duration and
+count semantics.
+
+Minions can provide `nearbyDamagePrevention` with one existing prevention
+selector and optional `alliedOnly: true`. Nearby includes the provider itself,
+uses full occupied footprints, and stays within a region. An allied-only grant
+checks controller; otherwise both players' units can receive it. Avatar and
+Minion recipients share the same compact protection snapshot. Numeric grants
+add, source immunities combine, and power-qualified immunities use the lowest
+applicable threshold. A recipient losing its own abilities does not remove
+protection supplied by another active provider. Silence, Disabled, or departure
+of the provider ends its grant for later damage.
+
+Every simultaneous damage path captures recipient protection before applying
+any damage, including area effects, fights, effect-driven strikes, and staged
+Magic. A provider awakening or dying in the group cannot change protection
+halfway through that group; subsequent damage uses fresh protection. The same
+ability-loss predicate now suppresses existing power grants to Avatars and
+prospective minion entry power.
+The immutable rules context records whether any provider exists in the manifest,
+so decks without this mechanic skip the provider scan. Protection snapshots
+combine numeric values and elemental bits without allocating a provider list.
+This does not yet admit arbitrary recipient subtype filters, equipment providers,
+or consumable prevention ordering; the existing Ward-order guard remains.
