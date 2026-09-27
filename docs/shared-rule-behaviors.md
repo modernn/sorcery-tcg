@@ -154,8 +154,11 @@ completion wait through damage choices and any resulting Deathrites.
 Mixed additive/doubling damage split across several defenders remains explicitly
 unsupported pending authoritative allocation timing. Combinations involving temporary
 doubling also remain guarded until lasting-effect controller provenance is retained.
-These gaps must be resolved before removing the old Lance counter or admitting new
-Lance cards; synthetic scenario coverage alone does not admit an official card.
+These gaps remain fail-closed for newly bound cards as well as existing ones.
+Provisional admission requires complete source-reviewed facts and direct private
+card scenarios; it does not certify every interaction or ranked eligibility.
+Synthetic scenario coverage alone does not admit an official card. The old Lance
+counter remains a compatibility path, not a fact used by new bindings.
 
 Minion `entersCarrying` lists 1–32 carriable artifact-token references, with repeated
 references creating separate artifacts. It lowers to restricted carried-token effects,
