@@ -237,6 +237,28 @@ test('reviewed sites retain printed rarity for shared ordinary-site effects', ()
   { ...authority, cards: [exceptional] }, new Map()), /source ordinary/);
 });
 
+test('reviewed bindings fail closed when a printed site ability has no site fact', () => {
+  const base = authority.cards.find((card) => card.stableId === 'site')!;
+  const wardSite = { ...base, stableId: 'ward-site', name: 'Synthetic Ward Site', rulesText: 'Ward' };
+  const wardAuthority = { ...authority, cards: [wardSite] };
+  const row = {
+    cardId: wardSite.stableId,
+    sourceCardHash: identityHash(wardSite as unknown as JsonValue),
+    facts: { ...facts.site!, ordinary: true, ward: true } as unknown as GameCardDefinition,
+    review: { entireRulesText: true, proofs: ['synthetic printed site Ward review'] },
+  };
+  const file = {
+    schemaVersion: 1,
+    authorityHash: wardAuthority.authorityHash,
+    revisionId: wardAuthority.revisionId,
+    cards: [row],
+  };
+  assert.throws(
+    () => mergeReviewedCardBindings(file, wardAuthority, new Map()),
+    /reviewed\.ward-site\.ward is unsupported/,
+  );
+});
+
 test('preset pool merges provenance deterministically and rejects authority or fact conflicts', () => {
   const pool = buildPresetCardPool(authority, presets);
   assert.deepEqual(pool, buildPresetCardPool(authority, [...presets].reverse()));
