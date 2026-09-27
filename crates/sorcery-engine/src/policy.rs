@@ -443,6 +443,7 @@ fn beneficial_tactic_rank(
             Some(4)
         }
         ActionDescriptor::ActivateSparkmage { .. } if air_thresholds_cast_this_turn > 0 => Some(5),
+        ActionDescriptor::ActivateDiscardRandomDamage { .. } => Some(5),
         _ => None,
     }
 }
@@ -960,6 +961,22 @@ mod tests {
             beneficial_tactic_index(Seat::North, 1, [magic.clone(), magic].iter()),
             Some(0),
             "equal-ranked actions preserve their canonical input order"
+        );
+    }
+
+    #[test]
+    fn beneficial_tactics_select_generic_random_damage_activation() {
+        let discard_damage = ActionDescriptor::ActivateDiscardRandomDamage {
+            discard_card_instance_id: identity('c'),
+            source_instance_id: identity('d'),
+        };
+        assert_eq!(
+            beneficial_tactic_index(
+                Seat::North,
+                0,
+                [discard_damage, ActionDescriptor::EndTurn].iter()
+            ),
+            Some(0)
         );
     }
 
