@@ -304,7 +304,11 @@ impl SessionJsonService {
                 Ok(value) => value,
                 Err(message) => return error_response(id, &message),
             };
-        match session.run_counterfactual(max_continuation) {
+        let workers = match optional_usize_param(params, "workers", "runCounterfactual", 1) {
+            Ok(value) => value,
+            Err(message) => return error_response(id, &message),
+        };
+        match session.run_counterfactual_with_workers(max_continuation, workers) {
             Ok(report) => ok_response(id, json!({ "result": report.result() })),
             Err(error) => error_response(id, &error.to_string()),
         }
@@ -533,6 +537,21 @@ fn no_session(id: u64) -> RpcResponse {
 fn usize_param(params: &Value, key: &str, method: &str) -> Result<usize, String> {
     let Some(value) = params.get(key).and_then(Value::as_u64) else {
         return Err(format!("{method} requires {key}"));
+    };
+    usize::try_from(value).map_err(|_| format!("{method} {key} is out of range"))
+}
+
+fn optional_usize_param(
+    params: &Value,
+    key: &str,
+    method: &str,
+    default: usize,
+) -> Result<usize, String> {
+    let Some(value) = params.get(key) else {
+        return Ok(default);
+    };
+    let Some(value) = value.as_u64() else {
+        return Err(format!("{method} {key} must be an unsigned integer"));
     };
     usize::try_from(value).map_err(|_| format!("{method} {key} is out of range"))
 }
@@ -976,7 +995,7 @@ mod tests {
         let report = service.handle(&rpc(
             2,
             "runCounterfactual",
-            json!({ "maxContinuationDecisions": 0 }),
+            json!({ "maxContinuationDecisions": 0, "workers": 2 }),
         ));
         let result = report.result.expect("counterfactual result")["result"].clone();
         assert!(result["status"] == "complete" || result["status"] == "too-wide");

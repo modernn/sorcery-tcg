@@ -7,6 +7,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sorcery_engine::batch::{BatchJob, MAX_GAME_ACTIONS, run_game_batch};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
+use sorcery_engine::counterfactual::run_counterfactual_with_workers;
 use sorcery_engine::game::Game;
 use sorcery_engine::policy::{
     DRAW_SITE_POLICY_BEHAVIOR_VERSION, PolicySnapshot, parse_policy_snapshot,
@@ -103,6 +104,14 @@ fn main() -> BenchmarkResult<()> {
     if std::env::args().any(|arg| arg == "--setup-scaling") {
         let samples = positive_integer("BENCHMARK_SETUP_SAMPLES", 5, MAX_SETUP_SAMPLES)?;
         let report = setup_scaling_report(samples)?;
+        let stdout = io::stdout();
+        let mut output = stdout.lock();
+        serde_json::to_writer(&mut output, &report)?;
+        writeln!(output)?;
+        return Ok(());
+    }
+    if std::env::args().any(|arg| arg == "--search-scaling") {
+        let report = search_scaling_report()?;
         let stdout = io::stdout();
         let mut output = stdout.lock();
         serde_json::to_writer(&mut output, &report)?;
@@ -663,6 +672,58 @@ fn worker_scaling_report() -> BenchmarkResult<Value> {
         "peakRssBytes": peak_rss_bytes(),
         "workers": samples,
         "deterministicResultHash": baseline_hash,
+    }))
+}
+
+fn search_scaling_report() -> BenchmarkResult<Value> {
+    const SEED: u32 = 31;
+    const CONTINUATION_DECISIONS: usize = 4;
+    const REPEATS: usize = 5;
+    const WORKERS: [usize; 4] = [1, 2, 4, 8];
+    let manifest = synthetic_demo_manifest_json(SEED)?;
+    let session = Session::new(&manifest)?;
+    let mut serialized_report = None;
+    let mut measurements = Vec::with_capacity(WORKERS.len());
+    for workers in WORKERS {
+        let mut durations = Vec::with_capacity(REPEATS);
+        let mut hashes = Vec::with_capacity(REPEATS);
+        let mut serialized_bytes = 0;
+        for _ in 0..REPEATS {
+            let started = Instant::now();
+            let report =
+                run_counterfactual_with_workers(&session, CONTINUATION_DECISIONS, workers)?;
+            let bytes = serde_json::to_vec(report.result())?;
+            if let Some(expected) = &serialized_report {
+                if expected != &bytes {
+                    return Err(io::Error::other(
+                        "counterfactual serialized report changed with repeat or worker count",
+                    )
+                    .into());
+                }
+            } else {
+                serialized_report = Some(bytes.clone());
+            }
+            durations.push(started.elapsed().as_secs_f64() * 1_000.0);
+            hashes.push(identity_hash(report.result())?);
+            serialized_bytes = bytes.len();
+        }
+        durations.sort_by(f64::total_cmp);
+        measurements.push(json!({
+            "workers": workers,
+            "durationMs": round(durations[REPEATS / 2]),
+            "serializedReportBytes": serialized_bytes,
+            "resultHashes": hashes,
+        }));
+    }
+    Ok(json!({
+        "benchmarkVersion": 1,
+        "mode": "search-scaling",
+        "seed": SEED,
+        "continuationDecisions": CONTINUATION_DECISIONS,
+        "repeats": REPEATS,
+        "workerOwnership": "counterfactual-search",
+        "peakRssBytes": peak_rss_bytes(),
+        "workers": measurements,
     }))
 }
 

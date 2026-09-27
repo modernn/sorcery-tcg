@@ -10,7 +10,9 @@ use crate::contract::{
     ActionRequest, Attempt, LegalAction, Receipt, ReceiptInput, Rejection, RejectionCode, Seat,
     accepted_attempt, create_events, create_receipt, create_rejection, rejected_attempt,
 };
-use crate::counterfactual::{CounterfactualReport, run_counterfactual};
+use crate::counterfactual::{
+    CounterfactualReport, run_counterfactual, run_counterfactual_with_workers,
+};
 use crate::game::{
     Game, GameEndReason, GameError, GameOutcome, IssuedAction, Position, SeatObservation,
 };
@@ -271,6 +273,25 @@ impl Session {
     ) -> Result<CounterfactualReport, SessionError> {
         self.ensure_active()?;
         run_counterfactual(self, max_continuation_decisions)
+    }
+
+    /// Expands counterfactual root actions with a bounded search-owned worker budget.
+    ///
+    /// The caller owns any outer batch budget; pass `workers: 1` from an outer
+    /// worker so this search does not multiply thread pools.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError`] when the continuation or worker bound is invalid,
+    /// nested ownership is disallowed, or a branch fails. An over-budget memory
+    /// estimate falls back to serial execution.
+    pub fn run_counterfactual_with_workers(
+        &self,
+        max_continuation_decisions: usize,
+        workers: usize,
+    ) -> Result<CounterfactualReport, SessionError> {
+        self.ensure_active()?;
+        run_counterfactual_with_workers(self, max_continuation_decisions, workers)
     }
 
     /// Returns legal actions materialized at the external boundary.
@@ -551,6 +572,31 @@ impl Session {
             "state": self.game.authoritative_state(),
             "transcript": self.transcript,
         }))
+    }
+
+    /// Estimates the serialized footprint of a cloned session at this boundary.
+    ///
+    /// This deliberately includes every retained journal and identity-bearing field,
+    /// including rejected attempts that are not part of [`Self::replay_value`]. It
+    /// is an internal admission input, not a public JSON representation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError`] when the session is unsupported or its footprint
+    /// cannot be serialized.
+    pub(crate) fn serialized_clone_size(&self) -> Result<usize, SessionError> {
+        self.ensure_active()?;
+        Ok(serde_json::to_vec(&json!({
+            "attempts": self.attempts,
+            "eventCount": self.event_count,
+            "game": self.game.authoritative_state(),
+            "initialRandomDraws": self.game.initial_random_draws(),
+            "manifestJson": self.manifest_json,
+            "stateHash": self.state_hash,
+            "transcript": self.transcript,
+            "unsupportedMechanic": self.unsupported_mechanic,
+        }))?
+        .len())
     }
 
     /// Returns the exercised mechanic that aborted this session, if any.

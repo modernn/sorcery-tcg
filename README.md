@@ -150,7 +150,7 @@ Every request has `schemaVersion: 1`, a numeric `id`, a `method`, and `params`.
 ```json
 {"schemaVersion":1,"id":1,"method":"new","params":{"manifestJson":"<canonical manifest JSON>"}}
 {"schemaVersion":1,"id":2,"method":"legalActions","params":{"seat":"north"}}
-{"schemaVersion":1,"id":3,"method":"runCounterfactual","params":{"maxContinuationDecisions":4}}
+{"schemaVersion":1,"id":3,"method":"runCounterfactual","params":{"maxContinuationDecisions":4,"workers":4}}
 {"schemaVersion":1,"id":4,"method":"runNoveltyFrontierSearch","params":{"maxActions":4,"maxBranches":2}}
 {"schemaVersion":1,"id":5,"method":"checkpoint","params":{}}
 {"schemaVersion":1,"id":6,"method":"verifyReplay","params":{}}
@@ -162,6 +162,25 @@ serialized `baseManifest` from an experiment request. `step` accepts only an iss
 `selectPolicyAction` supplies a deterministic baseline action. `resume` takes
 `{ "checkpoint": <checkpoint object> }`. Search does not mutate its root; unfinished
 branches are horizons, not wins. `exportGameRecord` requires a finished game.
+Counterfactual search accepts an optional `workers` budget from 1 through 8 and
+defaults to serial execution. The counterfactual search owns that inner budget;
+callers already running an outer batch worker must pass `workers: 1` to avoid nested
+thread pools. Parallel admission serializes the complete session clone (including
+the rejected-attempt journal), applies a conservative 2x capacity/transient allowance,
+and multiplies by continuation steps and effective workers (`min(requested, root actions)`).
+Roots with zero or one action stay serial; over-budget estimates also fall back
+to serial execution instead of changing search success. Complete serialized
+reports remain byte-identical across worker counts.
+
+Measure counterfactual scaling and peak resident memory with:
+
+```sh
+CARGO_BUILD_JOBS=2 cargo run --release --locked -p sorcery-engine \
+  --bin engine-benchmark -- --search-scaling
+```
+
+The benchmark compares 1/2/4/8 workers over five seed-31 searches, fails on any
+complete-report byte difference, and records the process peak RSS.
 
 For synthetic disk replay:
 

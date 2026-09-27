@@ -10,6 +10,7 @@ use serde::Serialize;
 
 use crate::canonical::IdentityHash;
 use crate::contract::Seat;
+use crate::counterfactual::enter_outer_worker;
 use crate::game::{GameEndReason, GameOutcome};
 use crate::game_record::{
     game_record_from_session, session_eligibility, validate_artifacts_dir, write_game_artifacts,
@@ -383,6 +384,7 @@ fn run_batch_inner(
         let handles = (0..worker_count)
             .map(|_| {
                 scope.spawn(|| {
+                    let _outer_worker_guard = enter_outer_worker();
                     let mut results = Vec::new();
                     loop {
                         let job_index = next_job.fetch_add(1, Ordering::Relaxed);
