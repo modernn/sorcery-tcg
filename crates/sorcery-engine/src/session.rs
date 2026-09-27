@@ -20,7 +20,7 @@ use crate::novelty_dispatch::{
 };
 use crate::novelty_frontier::{NoveltyFrontierSearchOutput, run_novelty_frontier_search};
 use crate::novelty_rollout::{NoveltyRolloutOutput, run_novelty_rollout};
-use crate::policy::{PolicyError, baseline_policy_snapshot};
+use crate::policy::{PolicyError, improved_baseline_policy_snapshot};
 use crate::simulator::SimulatorError;
 
 /// An accepted receipt or stable rejection.
@@ -158,7 +158,7 @@ impl Session {
         let seat = self.acting_controller();
         let observation = self.game.observe(seat);
         let actions = self.game.legal_actions()?;
-        let policy = baseline_policy_snapshot(
+        let policy = improved_baseline_policy_snapshot(
             self.game.rules().authority_hash(),
             self.game.rules().engine_version(),
         )?;
@@ -179,7 +179,7 @@ impl Session {
         committed_event_types: &[String],
     ) -> Result<NoveltyStep, SessionError> {
         self.ensure_active()?;
-        let policy = baseline_policy_snapshot(
+        let policy = improved_baseline_policy_snapshot(
             self.game.rules().authority_hash(),
             self.game.rules().engine_version(),
         )?;

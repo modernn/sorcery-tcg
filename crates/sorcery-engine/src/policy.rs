@@ -25,8 +25,17 @@ pub const MAX_POLICY_GENERATION: u32 = 1_000_000;
 pub const MAX_ATLAS_RESERVE: u8 = 8;
 /// Maximum accepted canonical policy snapshot byte length.
 pub const POLICY_SNAPSHOT_MAX_BYTES: usize = 64 * 1024;
+/// Legacy selector behavior retained for previously issued policy snapshots.
+pub const LEGACY_POLICY_BEHAVIOR_VERSION: u8 = 1;
+/// Baseline selector behavior that scores an engine-issued `DrawSite` action.
+pub const DRAW_SITE_POLICY_BEHAVIOR_VERSION: u8 = 2;
 
 const MAX_ENGINE_VERSION_BYTES: usize = 64;
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+const fn is_legacy_policy_behavior_version(version: &u8) -> bool {
+    *version == LEGACY_POLICY_BEHAVIOR_VERSION
+}
 
 /// The observation contract consumed by the deterministic selector.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -156,6 +165,8 @@ pub struct PolicySnapshot {
     engine_version: String,
     generation: u32,
     observation_version: ObservationVersion,
+    #[serde(skip_serializing_if = "is_legacy_policy_behavior_version")]
+    policy_behavior_version: u8,
     #[serde(skip_serializing_if = "Option::is_none")]
     parent_policy_id: Option<IdentityHash>,
     policy_id: IdentityHash,
@@ -193,6 +204,12 @@ impl PolicySnapshot {
     #[must_use]
     pub const fn observation_version(&self) -> ObservationVersion {
         self.observation_version
+    }
+
+    /// Returns the selector behavior version bound into this policy identity.
+    #[must_use]
+    pub const fn policy_behavior_version(&self) -> u8 {
+        self.policy_behavior_version
     }
 
     /// Returns the optional parent policy identity.
@@ -281,6 +298,7 @@ impl PolicySnapshot {
                 self.selector.atlas_reserve,
                 observation,
                 legal_actions,
+                self.policy_behavior_version,
             ) {
                 return Ok(action);
             }
@@ -331,6 +349,7 @@ impl PolicySnapshot {
             engine_version: self.engine_version.clone(),
             generation: self.generation + 1,
             observation_version: self.observation_version,
+            policy_behavior_version: self.policy_behavior_version,
             parent_policy_id: Some(self.policy_id.clone()),
             policy_id: self.policy_id.clone(),
             schema_version: self.schema_version,
@@ -348,6 +367,7 @@ fn select_feature<'a>(
     atlas_reserve: u8,
     observation: &SeatObservation,
     actions: &'a [IssuedAction],
+    policy_behavior_version: u8,
 ) -> Option<&'a IssuedAction> {
     match feature {
         PolicyFeature::KeepMulligan => actions.iter().find(|action| {
@@ -375,6 +395,9 @@ fn select_feature<'a>(
             };
             actions.iter().find(|action| {
                 matches!(action.descriptor(), ActionDescriptor::Draw { zone: candidate } if *candidate == zone)
+                    || (policy_behavior_version >= DRAW_SITE_POLICY_BEHAVIOR_VERSION
+                        && zone == DeckZone::Atlas
+                        && matches!(action.descriptor(), ActionDescriptor::DrawSite))
             })
         }
         PolicyFeature::PoweredMovement => select_powered_movement(observation, actions),
@@ -511,6 +534,8 @@ struct RawPolicySnapshot {
     engine_version: String,
     generation: u64,
     observation_version: ObservationVersion,
+    #[serde(default = "default_policy_behavior_version")]
+    policy_behavior_version: u64,
     parent_policy_id: Option<IdentityHash>,
     policy_id: IdentityHash,
     schema_version: u64,
@@ -526,11 +551,17 @@ struct PolicyBody<'a> {
     engine_version: &'a str,
     generation: u32,
     observation_version: ObservationVersion,
+    #[serde(skip_serializing_if = "is_legacy_policy_behavior_version")]
+    policy_behavior_version: u8,
     #[serde(skip_serializing_if = "Option::is_none")]
     parent_policy_id: Option<&'a IdentityHash>,
     schema_version: u8,
     selector: &'a PolicySelector,
     tie_break: TieBreak,
+}
+
+const fn default_policy_behavior_version() -> u64 {
+    1
 }
 
 /// Policy parsing, validation, serialization, or hashing failed.
@@ -616,6 +647,7 @@ fn body_value(snapshot: &PolicySnapshot) -> Result<Value, PolicyError> {
         engine_version: &snapshot.engine_version,
         generation: snapshot.generation,
         observation_version: snapshot.observation_version,
+        policy_behavior_version: snapshot.policy_behavior_version,
         parent_policy_id: snapshot.parent_policy_id.as_ref(),
         schema_version: snapshot.schema_version,
         selector: &snapshot.selector,
@@ -634,6 +666,11 @@ fn validate(snapshot: &PolicySnapshot) -> Result<(), PolicyError> {
         ));
     }
     validate_engine_version(&snapshot.engine_version)?;
+    if !(LEGACY_POLICY_BEHAVIOR_VERSION..=DRAW_SITE_POLICY_BEHAVIOR_VERSION)
+        .contains(&snapshot.policy_behavior_version)
+    {
+        return Err(PolicyError::Invalid("policyBehaviorVersion is unsupported"));
+    }
     if snapshot.selector.atlas_reserve > MAX_ATLAS_RESERVE {
         return Err(PolicyError::Invalid(
             "selector atlasReserve exceeds the supported bound",
@@ -645,7 +682,7 @@ fn validate(snapshot: &PolicySnapshot) -> Result<(), PolicyError> {
     Ok(())
 }
 
-/// Builds the shared baseline selector used by demo, session, and self-play defaults.
+/// Builds the legacy baseline selector used by demo, game records, schedules, and self-play.
 ///
 /// # Errors
 ///
@@ -653,6 +690,34 @@ fn validate(snapshot: &PolicySnapshot) -> Result<(), PolicyError> {
 pub fn baseline_policy_snapshot(
     authority_hash: &IdentityHash,
     engine_version: &str,
+) -> Result<PolicySnapshot, PolicyError> {
+    baseline_policy_snapshot_with_behavior(
+        authority_hash,
+        engine_version,
+        LEGACY_POLICY_BEHAVIOR_VERSION,
+    )
+}
+
+/// Builds the explicitly versioned baseline selector used by interactive sessions.
+///
+/// # Errors
+///
+/// Returns [`PolicyError`] when the snapshot cannot be canonicalized or hashed.
+pub fn improved_baseline_policy_snapshot(
+    authority_hash: &IdentityHash,
+    engine_version: &str,
+) -> Result<PolicySnapshot, PolicyError> {
+    baseline_policy_snapshot_with_behavior(
+        authority_hash,
+        engine_version,
+        DRAW_SITE_POLICY_BEHAVIOR_VERSION,
+    )
+}
+
+fn baseline_policy_snapshot_with_behavior(
+    authority_hash: &IdentityHash,
+    engine_version: &str,
+    policy_behavior_version: u8,
 ) -> Result<PolicySnapshot, PolicyError> {
     let deck_id = IdentityHash::parse(BASELINE_POLICY_DECK_ID)
         .map_err(|_| PolicyError::Invalid("baseline policy deckId is invalid"))?;
@@ -679,6 +744,9 @@ pub fn baseline_policy_snapshot(
         },
         "tieBreak": "canonical-action-order-v1"
     });
+    if policy_behavior_version != LEGACY_POLICY_BEHAVIOR_VERSION {
+        body["policyBehaviorVersion"] = serde_json::json!(policy_behavior_version);
+    }
     body["policyId"] = serde_json::json!(identity_hash(&body)?);
     parse_policy_snapshot(&canonical_json(&body)?)
 }
@@ -718,6 +786,8 @@ pub fn parse_policy_snapshot(text: &str) -> Result<PolicySnapshot, PolicyError> 
         .map_err(|_| PolicyError::Invalid("policy schemaVersion is unsupported"))?;
     let generation = u32::try_from(raw.generation)
         .map_err(|_| PolicyError::Invalid("policy generation exceeds the supported bound"))?;
+    let policy_behavior_version = u8::try_from(raw.policy_behavior_version)
+        .map_err(|_| PolicyError::Invalid("policyBehaviorVersion is unsupported"))?;
     let atlas_reserve = u8::try_from(raw.selector.atlas_reserve)
         .map_err(|_| PolicyError::Invalid("selector atlasReserve exceeds the supported bound"))?;
     let snapshot = PolicySnapshot {
@@ -726,6 +796,7 @@ pub fn parse_policy_snapshot(text: &str) -> Result<PolicySnapshot, PolicyError> 
         engine_version: raw.engine_version,
         generation,
         observation_version: raw.observation_version,
+        policy_behavior_version,
         parent_policy_id: raw.parent_policy_id,
         policy_id: raw.policy_id,
         schema_version,
@@ -752,7 +823,10 @@ mod tests {
     use crate::contract::Seat;
     use crate::game::{IssuedAction, SeatObservation};
 
-    use super::{PolicyFeature, baseline_policy_snapshot, beneficial_tactic_index, select_feature};
+    use super::{
+        PolicyFeature, baseline_policy_snapshot, beneficial_tactic_index,
+        improved_baseline_policy_snapshot, select_feature, serialize_policy_snapshot,
+    };
 
     fn move_toward(unit: IdentityHash, from: &str, to: &str) -> IssuedAction {
         let from_cell = Cell::parse(from).expect("from cell");
@@ -1039,6 +1113,48 @@ mod tests {
     }
 
     #[test]
+    fn draw_site_behavior_is_explicitly_versioned_and_changes_policy_identity() {
+        let observation = SeatObservation::for_test(
+            Seat::North,
+            Location {
+                cell: Cell::parse("C1").expect("C1"),
+                region: Region::Surface,
+            },
+            Vec::new(),
+            0,
+        );
+        let actions = [
+            IssuedAction::for_test(ActionDescriptor::DrawSite, Seat::North),
+            IssuedAction::for_test(ActionDescriptor::EndTurn, Seat::North),
+        ];
+        assert!(
+            select_feature(PolicyFeature::PreferredDraw, 3, &observation, &actions, 1).is_none(),
+            "legacy behavior must remain unchanged"
+        );
+        let improved = select_feature(PolicyFeature::PreferredDraw, 3, &observation, &actions, 2)
+            .expect("versioned DrawSite behavior");
+        assert!(matches!(improved.descriptor(), ActionDescriptor::DrawSite));
+
+        let legacy_policy = baseline_policy_snapshot(&identity('a'), "sorcery-core-v1")
+            .expect("legacy baseline policy");
+        let improved_policy = improved_baseline_policy_snapshot(&identity('a'), "sorcery-core-v1")
+            .expect("improved baseline policy");
+        assert_eq!(legacy_policy.policy_behavior_version(), 1);
+        assert_eq!(improved_policy.policy_behavior_version(), 2);
+        assert_ne!(improved_policy.policy_id(), legacy_policy.policy_id());
+        assert!(
+            !serialize_policy_snapshot(&legacy_policy)
+                .expect("legacy policy serialization")
+                .contains("policyBehaviorVersion")
+        );
+        assert!(
+            serialize_policy_snapshot(&improved_policy)
+                .expect("improved policy serialization")
+                .contains("policyBehaviorVersion")
+        );
+    }
+
+    #[test]
     fn beneficial_tactics_prefer_enemy_drag_projectiles_that_do_not_fight() {
         let drag = |fight_on_arrival, hit| ActionDescriptor::ShootDragProjectile {
             direction: ProjectileDirection::North,
@@ -1084,7 +1200,7 @@ mod tests {
             IssuedAction::for_test(ActionDescriptor::EndTurn, Seat::North),
         ];
         assert!(
-            select_feature(PolicyFeature::PoweredMovement, 0, &observation, &mixed).is_none(),
+            select_feature(PolicyFeature::PoweredMovement, 0, &observation, &mixed, 1).is_none(),
             "the closer unpowered unit keeps PoweredMovement inactive"
         );
 
@@ -1097,6 +1213,7 @@ mod tests {
             0,
             &observation,
             &only_powered,
+            1,
         )
         .expect("temporarily powered toward-enemy move");
         let ActionDescriptor::MoveAndAttack {

@@ -23,7 +23,9 @@ use sorcery_engine::game_record::{
 use sorcery_engine::gauntlet::{
     GauntletOrientation, GauntletPair, run_gauntlet, run_gauntlet_to_dir,
 };
-use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
+use sorcery_engine::policy::{
+    DRAW_SITE_POLICY_BEHAVIOR_VERSION, PolicySnapshot, parse_policy_snapshot,
+};
 use sorcery_engine::schedule::{FailurePolicy, SeedBlock, run_synthetic_schedule};
 use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
@@ -815,6 +817,7 @@ fn policy_for_deck(manifest_json: &str, deck_id: &str) -> CliResult<PolicySnapsh
         "engineVersion": manifest["engineVersion"],
         "generation": 0,
         "observationVersion": "seat-observation-v1",
+        "policyBehaviorVersion": DRAW_SITE_POLICY_BEHAVIOR_VERSION,
         "schemaVersion": 1,
         "selector": {
             "atlasReserve": 3,

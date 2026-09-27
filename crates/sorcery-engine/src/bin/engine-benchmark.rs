@@ -8,7 +8,9 @@ use serde_json::{Value, json};
 use sorcery_engine::batch::{BatchJob, MAX_GAME_ACTIONS, run_game_batch};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::game::Game;
-use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
+use sorcery_engine::policy::{
+    DRAW_SITE_POLICY_BEHAVIOR_VERSION, PolicySnapshot, parse_policy_snapshot,
+};
 use sorcery_engine::session::Session;
 use sorcery_engine::simulator::{replay_selected, run_game};
 use sorcery_engine::synthetic::synthetic_demo_manifest_json;
@@ -707,6 +709,7 @@ fn baseline_policy(manifest_json: &str) -> BenchmarkResult<PolicySnapshot> {
         "engineVersion": manifest["engineVersion"],
         "generation": 0,
         "observationVersion": "seat-observation-v1",
+        "policyBehaviorVersion": DRAW_SITE_POLICY_BEHAVIOR_VERSION,
         "schemaVersion": 1,
         "selector": {
             "atlasReserve": 3,
