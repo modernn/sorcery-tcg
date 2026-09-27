@@ -36,6 +36,12 @@ Prepare it with `game:experiment-private --decks <path-within-authority> --outpu
 The interface takes both decks, seeds, and workers. Read both the rejection diagnostics
 and result limitations. Failed admission is evidence of missing support, not a loss.
 
+Do not paper over missing format metadata. The private catalog can retain source rarity
+while a prepared manifest still reports `MissingRarity`; until that boundary preserves
+rarity for every deck card, such a run is engine-admitted but not engine-confirmed
+Constructed-legal. A separate source-side copy-limit check is useful audit evidence,
+not permission to relabel `formatLegal: false`.
+
 ## Play a position
 
 Reuse `RustSessionClient` in `src/engine/rust-engine.ts` or the persistent
@@ -69,6 +75,12 @@ The baseline is an experiment control, not an expert teacher. Inspect missed spe
 activations, attacks, defenses, and positional opportunities before trusting its deck
 rankings. A few wins or guided opening seeds establish neither strength nor value.
 Track paired outcomes and uncertainty, not just a winning percentage.
+
+Count offered and committed action kinds during at least one representative session.
+If a kind is repeatedly legal but never selected, label it a policy blind spot and do
+not interpret cards depending on that kind as weak. If the changed card is played but
+its distinguishing mechanic never occurs, the batch tests only draw and board exposure,
+not that mechanic's tactical value.
 
 Run independent games with native workers, bounded by jobs and actual CPU/memory
 availability. Check memory pressure before concurrent builds or agents. Use the release
