@@ -19,6 +19,18 @@ for the configured horizon. The paired-rollout workload repeats one deterministi
 two-seat speculative pair in memory, after replay-verifying both orientations once,
 and reports its single-thread 60-second capacity estimate.
 
+To separate the authoritative replay phases on one fixed synthetic game, run:
+
+```powershell
+$env:BENCHMARK_SAMPLES = '9'
+cargo run --release --locked -p sorcery-engine --bin engine-benchmark -- --replay-profile
+```
+
+The report times speculative rollout, one recorded replay, verification of an
+existing recorded session, and the complete selected-rollout replay separately.
+Every sample checks the same final state and transcript hashes. The report also
+includes accepted action count and peak RSS when `/proc/self/status` is available.
+
 For a bounded estimate before the clean-reboot benchmark, run without redirecting
 or replacing a checked-in baseline:
 

@@ -107,6 +107,15 @@ fn main() -> BenchmarkResult<()> {
         writeln!(output)?;
         return Ok(());
     }
+    if std::env::args().any(|arg| arg == "--replay-profile") {
+        let samples = positive_integer("BENCHMARK_SAMPLES", 5, MAX_SAMPLES)?;
+        let report = replay_profile_report(samples)?;
+        let stdout = io::stdout();
+        let mut output = stdout.lock();
+        serde_json::to_writer(&mut output, &report)?;
+        writeln!(output)?;
+        return Ok(());
+    }
 
     let configuration = BenchmarkConfiguration {
         sample_count: positive_integer("BENCHMARK_SAMPLES", 5, MAX_SAMPLES)?,
@@ -155,6 +164,108 @@ fn main() -> BenchmarkResult<()> {
     let mut output = stdout.lock();
     serde_json::to_writer(&mut output, &report)?;
     writeln!(output)?;
+    Ok(())
+}
+
+fn replay_profile_report(sample_count: u32) -> BenchmarkResult<Value> {
+    let manifest_json = synthetic_demo_manifest_json(31)?;
+    let game = Game::from_manifest_json(&manifest_json)?;
+    let policy = baseline_policy(&manifest_json)?;
+    let rollout = run_game(game.clone(), &policy, &policy, MAX_GAME_ACTIONS)?;
+    if !rollout.is_terminal() {
+        return Err(io::Error::other("replay profile rollout did not terminate").into());
+    }
+    let reference = replay_selected(&manifest_json, &rollout)?;
+    let action_ids = reference
+        .transcript()
+        .iter()
+        .map(|receipt| receipt.action_id.clone())
+        .collect::<Vec<_>>();
+    let expected_state_hash = reference.state_hash()?;
+    let expected_transcript_hash = reference.transcript_hash()?;
+
+    black_box(run_game(game.clone(), &policy, &policy, MAX_GAME_ACTIONS)?);
+    black_box(Session::replay(&manifest_json, &action_ids)?);
+    if !reference.verify_replay()? {
+        return Err(io::Error::other("replay profile warmup verification failed").into());
+    }
+    black_box(replay_selected(&manifest_json, &rollout)?);
+
+    let mut speculative = Vec::with_capacity(usize::try_from(sample_count)?);
+    let mut recorded = Vec::with_capacity(usize::try_from(sample_count)?);
+    let mut verification = Vec::with_capacity(usize::try_from(sample_count)?);
+    let mut selected = Vec::with_capacity(usize::try_from(sample_count)?);
+    for _ in 0..sample_count {
+        let started = Instant::now();
+        let measured_rollout = run_game(game.clone(), &policy, &policy, MAX_GAME_ACTIONS)?;
+        speculative.push(single_operation_sample(started.elapsed()));
+        if measured_rollout != rollout {
+            return Err(io::Error::other("replay profile speculative rollout changed").into());
+        }
+
+        let started = Instant::now();
+        let measured_replay = Session::replay(&manifest_json, &action_ids)?;
+        recorded.push(single_operation_sample(started.elapsed()));
+        ensure_replay_identity(
+            &measured_replay,
+            &expected_state_hash,
+            &expected_transcript_hash,
+        )?;
+
+        let started = Instant::now();
+        let verified = reference.verify_replay()?;
+        verification.push(single_operation_sample(started.elapsed()));
+        if !verified {
+            return Err(io::Error::other("replay profile verification diverged").into());
+        }
+
+        let started = Instant::now();
+        let measured_selected = replay_selected(&manifest_json, &rollout)?;
+        selected.push(single_operation_sample(started.elapsed()));
+        ensure_replay_identity(
+            &measured_selected,
+            &expected_state_hash,
+            &expected_transcript_hash,
+        )?;
+    }
+
+    Ok(json!({
+        "acceptedActionCount": action_ids.len(),
+        "benchmarkVersion": 1,
+        "deterministicResult": {
+            "manifestId": reference.manifest_id(),
+            "stateHash": expected_state_hash,
+            "transcriptHash": expected_transcript_hash,
+        },
+        "mode": "replay-profile",
+        "peakRssBytes": peak_rss_bytes(),
+        "recordedReplay": summarize(&recorded)?,
+        "replayVerification": summarize(&verification)?,
+        "sampleCount": sample_count,
+        "seed": 31,
+        "selectedReplay": summarize(&selected)?,
+        "speculativeRollout": summarize(&speculative)?,
+    }))
+}
+
+fn single_operation_sample(duration: Duration) -> Sample {
+    Sample {
+        duration,
+        latencies: vec![duration],
+        operations: 1,
+    }
+}
+
+fn ensure_replay_identity(
+    session: &Session,
+    expected_state_hash: &IdentityHash,
+    expected_transcript_hash: &IdentityHash,
+) -> BenchmarkResult<()> {
+    if session.state_hash()? != *expected_state_hash
+        || session.transcript_hash()? != *expected_transcript_hash
+    {
+        return Err(io::Error::other("replay profile identity changed").into());
+    }
     Ok(())
 }
 
