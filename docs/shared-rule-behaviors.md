@@ -214,3 +214,12 @@ Disabled and Silence both suppress printed prevention, including existing numeri
 reduction and power-based immunity. Competing printed prevention
 facts remain rejected, and an exercised Ward-ordering choice that could change
 Ward consumption remains explicitly unsupported.
+
+Printed `takesLessDamage` is a bounded positive amount for both Avatars and
+Minions. Both use the same per-source prevention helper: simultaneous sources
+are each reduced, rather than reducing their combined total once. Reduction
+saturates at zero. Avatar damage is reduced before life loss or Death's Door
+settlement; direct life loss (including a strike on a controlled site) bypasses
+this damage rule. A fully prevented hit cannot deliver a death blow.
+This does not yet admit protection granted by nearby units or temporary
+proximity-dependent reduction.

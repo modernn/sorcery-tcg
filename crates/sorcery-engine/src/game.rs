@@ -1633,6 +1633,7 @@ fn unsupported_selfplay_site(facts: &SiteFacts) -> Option<&'static str> {
 
 fn account_for_selfplay_avatar_fields(facts: AvatarFacts) {
     let AvatarFacts {
+        damage_prevention: _,
         attack: _,
         defense: _,
         draw_spell: _,
@@ -13165,6 +13166,35 @@ impl Game {
         )
     }
 
+    fn damage_after_prevention(
+        sources: &[(u16, UnitDamageSource)],
+        prevention: Option<DamagePrevention>,
+    ) -> Result<(u16, bool), GameError> {
+        sources
+            .iter()
+            .try_fold((0_u16, false), |(total, any_lethal), (amount, source)| {
+                let dealt =
+                    match prevention {
+                        Some(DamagePrevention::PreventsDamageFrom(filter))
+                            if source.origin.matches(filter) =>
+                        {
+                            0
+                        }
+                        Some(DamagePrevention::PreventsDamageFromUnitsWithPowerAtLeast(
+                            threshold,
+                        )) if source.current_power >= u16::from(threshold) => 0,
+                        Some(DamagePrevention::TakesLessDamage(reduction)) => {
+                            amount.saturating_sub(u16::from(reduction))
+                        }
+                        _ => *amount,
+                    };
+                total
+                    .checked_add(dealt)
+                    .map(|next| (next, any_lethal || source.lethal && dealt > 0))
+                    .ok_or(GameError::IllegalAction)
+            })
+    }
+
     /// Resolves one recipient's simultaneous damage group. Prevention applies to each source;
     /// one Ward protects against the entire group, and only damage actually dealt can be Lethal.
     #[expect(
@@ -13200,33 +13230,12 @@ impl Game {
                 {
                     return Err(GameError::IllegalAction);
                 }
-                let (unwarded, lethal_dealt) = sources.iter().try_fold(
-                    (0_u16, false),
-                    |(total, any_lethal), (amount, source)| {
-                        let dealt = if abilities_lost {
-                            *amount
-                        } else {
-                            match damage_prevention {
-                                Some(DamagePrevention::PreventsDamageFrom(filter))
-                                    if source.origin.matches(filter) =>
-                                {
-                                    0
-                                }
-                                Some(
-                                    DamagePrevention::PreventsDamageFromUnitsWithPowerAtLeast(
-                                        threshold,
-                                    ),
-                                ) if source.current_power >= u16::from(threshold) => 0,
-                                Some(DamagePrevention::TakesOneLessDamage) => {
-                                    amount.saturating_sub(1)
-                                }
-                                _ => *amount,
-                            }
-                        };
-                        total
-                            .checked_add(dealt)
-                            .map(|next| (next, any_lethal || source.lethal && dealt > 0))
-                            .ok_or(GameError::IllegalAction)
+                let (unwarded, lethal_dealt) = Self::damage_after_prevention(
+                    sources,
+                    if abilities_lost {
+                        None
+                    } else {
+                        damage_prevention
                     },
                 )?;
                 // Codex Damage lets the controller order prevention. If innate prevention
@@ -13286,9 +13295,37 @@ impl Game {
             }
             UnitKind::Avatar => {
                 let avatar = &mut self.position.players[seat_index(seat)].avatar;
+                let CardFacts::Avatar(facts) =
+                    &self.rules.cards[usize::from(avatar.card.card_id.0)].facts
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                let attempted = amount;
+                let (amount, _) = Self::damage_after_prevention(sources, facts.damage_prevention)?;
                 if avatar.card.instance_id != *instance_id {
                     return Err(GameError::IllegalAction);
                 }
+                if amount == 0 && attempted > 0 {
+                    outcomes.push("damage-dealt", || {
+                        json!({
+                            "amount": 0, "attemptedAmount": attempted, "direct": true,
+                            "instanceId": instance_id, "prevented": true, "seat": seat,
+                        })
+                    });
+                    return Ok(DamageResult {
+                        minion_died: false,
+                        avatar_defeated: false,
+                    });
+                }
+                let damage_event = || {
+                    let mut event = json!({"amount": amount, "direct": true,
+                        "instanceId": instance_id, "seat": seat});
+                    if amount < attempted {
+                        event["attemptedAmount"] = json!(attempted);
+                        event["prevented"] = json!(true);
+                    }
+                    event
+                };
                 if avatar.life == 0 {
                     if amount == 0 {
                         return Ok(DamageResult {
@@ -13297,14 +13334,7 @@ impl Game {
                         });
                     }
                     if avatar.death_door_turn != Some(self.position.turn_number) {
-                        outcomes.push("damage-dealt", || {
-                            json!({
-                                "amount": amount,
-                                "direct": true,
-                                "instanceId": instance_id,
-                                "seat": seat,
-                            })
-                        });
+                        outcomes.push("damage-dealt", damage_event);
                         outcomes.push(
                             "death-blow",
                             || json!({ "instanceId": instance_id, "seat": seat }),
@@ -13317,7 +13347,7 @@ impl Game {
                     outcomes.push("damage-dealt", || {
                         json!({
                             "amount": 0,
-                            "attemptedAmount": amount,
+                            "attemptedAmount": attempted,
                             "direct": true,
                             "instanceId": instance_id,
                             "prevented": true,
@@ -13343,14 +13373,7 @@ impl Game {
                     avatar.death_door_turn = Some(self.position.turn_number);
                 }
                 let life = avatar.life;
-                outcomes.push("damage-dealt", || {
-                    json!({
-                        "amount": amount,
-                        "direct": true,
-                        "instanceId": instance_id,
-                        "seat": seat,
-                    })
-                });
+                outcomes.push("damage-dealt", damage_event);
                 outcomes.push(
                     "avatar-life-lost",
                     || json!({ "amount": lost, "life": life, "seat": seat }),
@@ -30407,9 +30430,108 @@ mod tests {
     }
 
     #[test]
+    fn avatar_reduction_precedes_death_blow_and_protected_turn_checks() {
+        let (mut game, _) = damage_transaction_fixture(None);
+        let avatar = &mut game.position.players[seat_index(Seat::South)].avatar;
+        let id = avatar.card.instance_id.clone();
+        let card_id = avatar.card.card_id;
+        avatar.life = 0;
+        avatar.death_door_turn = Some(game.position.turn_number);
+        let CardFacts::Avatar(facts) =
+            &mut Arc::get_mut(&mut game.rules).unwrap().cards[usize::from(card_id.0)].facts
+        else {
+            panic!("avatar fixture");
+        };
+        facts.damage_prevention = Some(DamagePrevention::TakesLessDamage(2));
+        let source = UnitDamageSource {
+            origin: DamageOrigin::Other,
+            current_power: 3,
+            lethal: false,
+        };
+        let mut events = Vec::new();
+        let result = game
+            .apply_simultaneous_unit_damage(
+                UnitKind::Avatar,
+                Seat::South,
+                &id,
+                &[(3, source)],
+                &mut OutcomeLog::Record(&mut events),
+            )
+            .unwrap();
+        assert!(
+            !result.avatar_defeated,
+            "protected turn still prevents remaining damage"
+        );
+        game.position.turn_number += 1;
+        for amount in [1, 2, 3] {
+            let result = game
+                .apply_simultaneous_unit_damage(
+                    UnitKind::Avatar,
+                    Seat::South,
+                    &id,
+                    &[(amount, source)],
+                    &mut OutcomeLog::Record(&mut events),
+                )
+                .unwrap();
+            assert_eq!(result.avatar_defeated, amount == 3);
+        }
+        assert_eq!(
+            events
+                .iter()
+                .filter(|(kind, _)| *kind == "death-blow")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn numeric_prevention_reduces_each_simultaneous_source_for_any_unit() {
+        let (mut game, minion_id) = damage_transaction_fixture(Some(("takesLessDamage", 2)));
+        let source = UnitDamageSource {
+            origin: DamageOrigin::Other,
+            current_power: 4,
+            lethal: false,
+        };
+        let sources = [(1, source), (2, source), (3, source)];
+        let mut events = Vec::new();
+        game.apply_simultaneous_unit_damage(
+            UnitKind::Minion,
+            Seat::South,
+            &minion_id,
+            &sources,
+            &mut OutcomeLog::Record(&mut events),
+        )
+        .unwrap();
+        assert_eq!(game.position.units[0].damage, 1);
+        let avatar = &game.position.players[seat_index(Seat::South)].avatar;
+        let avatar_id = avatar.card.instance_id.clone();
+        let card_id = avatar.card.card_id;
+        let old_life = avatar.life;
+        let CardFacts::Avatar(facts) =
+            &mut Arc::get_mut(&mut game.rules).unwrap().cards[usize::from(card_id.0)].facts
+        else {
+            panic!("avatar fixture");
+        };
+        facts.damage_prevention = Some(DamagePrevention::TakesLessDamage(2));
+        game.apply_simultaneous_unit_damage(
+            UnitKind::Avatar,
+            Seat::South,
+            &avatar_id,
+            &sources,
+            &mut OutcomeLog::Record(&mut events),
+        )
+        .unwrap();
+        assert_eq!(
+            game.position.players[seat_index(Seat::South)].avatar.life,
+            old_life - 1
+        );
+    }
+
+    #[test]
     fn silence_suppresses_printed_damage_prevention() {
         for prevention in [
-            DamagePrevention::TakesOneLessDamage,
+            DamagePrevention::TakesLessDamage(1),
+            DamagePrevention::TakesLessDamage(2),
             DamagePrevention::PreventsDamageFromUnitsWithPowerAtLeast(4),
             DamagePrevention::PreventsDamageFrom(DamageSourceFilter::RangedStrikes),
             DamagePrevention::PreventsDamageFrom(DamageSourceFilter::Magic(None)),

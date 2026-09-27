@@ -3271,7 +3271,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       ...cards,
       [firstSpell]: {
         ...cards[firstSpell]!,
-        takesLessDamage: 2,
+        takesLessDamage: 101,
       } as unknown as GameCardDefinition,
     },
   }), /takesLessDamage/);

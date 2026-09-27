@@ -192,6 +192,7 @@ export type GameCardDefinition =
     life: number;
     replaceAdjacentRubbleWithTopAtlasSite?: true;
     tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn?: true;
+    takesLessDamage?: number;
   }>
   | Readonly<{
     atEndOfControllerTurnUntapNearbyAllies?: never;
@@ -732,7 +733,7 @@ export type GameCardDefinition =
     mustBeCastToOuterColumn?: boolean;
     tapToDamageEachUnitAtAdjacentLocation?: 2;
     tapForMana?: number;
-    takesLessDamage?: 1;
+    takesLessDamage?: number;
     thresholds: GameThresholds;
     token?: true;
     doesNotUntapDuringControllersStartPhase?: true;
@@ -1604,6 +1605,7 @@ const SUPPORTED_CARD_FIELDS = {
     attack cardType defense drawSpell earthSitePlayCreatesAdjacentRubble life
     replaceAdjacentRubbleWithTopAtlasSite
     tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn
+    takesLessDamage
   `.trim().split(/\s+/)),
   magic: new Set(`
     burrowAllMinionsAndArtifactsAtTargetLandSite burrowTargetAdjacentMinion burrowTargetMinionOrArtifact cardType
@@ -1860,6 +1862,14 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
       && card.tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn !== true) {
       throw new RangeError(
         `${path}.tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn must be true when defined`,
+      );
+    }
+    if (card.takesLessDamage !== undefined
+      && (!Number.isSafeInteger(card.takesLessDamage)
+        || card.takesLessDamage < 1
+        || card.takesLessDamage > MAX_COMBAT_STAT)) {
+      throw new RangeError(
+        `${path}.takesLessDamage must be a safe integer between 1 and ${MAX_COMBAT_STAT}`,
       );
     }
     for (const field of ['attack', 'defense', 'life'] as const) {
@@ -3119,8 +3129,11 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
   if (card.submerge !== undefined && typeof card.submerge !== 'boolean') {
     throw new RangeError(`${path}.submerge must be boolean`);
   }
-  if (card.takesLessDamage !== undefined && card.takesLessDamage !== 1) {
-    throw new RangeError(`${path}.takesLessDamage must be 1`);
+  if (card.takesLessDamage !== undefined
+    && (!Number.isSafeInteger(card.takesLessDamage) || card.takesLessDamage < 1 || card.takesLessDamage > MAX_COMBAT_STAT)) {
+    throw new RangeError(
+      `${path}.takesLessDamage must be a safe integer between 1 and ${MAX_COMBAT_STAT}`,
+    );
   }
   if (card.preventsDamageFrom !== undefined
     && !['ranged-strikes', 'magic', 'earth-magic', 'fire-magic', 'water-magic', 'air-magic'].includes(card.preventsDamageFrom)) {
@@ -3132,7 +3145,7 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
   if (card.ward !== undefined && typeof card.ward !== 'boolean') {
     throw new RangeError(`${path}.ward must be boolean`);
   }
-  if (Number(card.takesLessDamage === 1)
+  if (Number(card.takesLessDamage !== undefined)
       + Number(card.ward === true)
       + Number(card.preventsDamageFrom !== undefined)
       + Number(card.preventsDamageFromUnitsWithPowerAtLeast !== undefined) > 1) {
@@ -3293,6 +3306,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
           ...(card.replaceAdjacentRubbleWithTopAtlasSite === true
             ? { replaceAdjacentRubbleWithTopAtlasSite: true as const }
             : {}),
+          ...(card.takesLessDamage !== undefined ? { takesLessDamage: card.takesLessDamage } : {}),
           ...(card.tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn === true
             ? { tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn: true as const }
             : {}),
@@ -3865,7 +3879,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? { tapToDamageEachUnitAtAdjacentLocation: 2 as const }
               : {}),
             ...(card.tapForMana ? { tapForMana: card.tapForMana } : {}),
-            ...(card.takesLessDamage === 1 ? { takesLessDamage: 1 as const } : {}),
+            ...(card.takesLessDamage !== undefined ? { takesLessDamage: card.takesLessDamage } : {}),
             thresholds: { ...card.thresholds },
             ...(card.token === true ? { token: true as const } : {}),
             ...(card.doesNotUntapDuringControllersStartPhase === true

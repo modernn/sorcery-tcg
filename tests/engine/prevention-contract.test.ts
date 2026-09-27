@@ -9,11 +9,16 @@ const authority = {
   revisionId: 'synthetic-prevention-test',
 };
 
-function input(minion: GameCardDefinition): GameManifestInput {
+function input(
+  minion: GameCardDefinition,
+  avatar: Extract<GameCardDefinition, { cardType: 'avatar' }> = {
+    attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20,
+  },
+): GameManifestInput {
   return {
     authority,
     cards: {
-      avatar: { attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20 },
+      avatar,
       site: { cardType: 'site', elements: ['earth'] },
       minion,
     },
@@ -59,5 +64,20 @@ test('preventsDamageFrom rejects malformed values and competing prevention facts
       () => createGameManifest(input(minion({ preventsDamageFrom: 'magic', ...competing }))),
       /competing damage prevention effects/,
     );
+  }
+});
+
+test('takesLessDamage preserves bounded values for minions and avatars', () => {
+  const minionManifest = createGameManifest(input(minion({ takesLessDamage: 42 })));
+  assert.equal((minionManifest.cards.minion as Extract<GameCardDefinition, { cardType: 'minion' }>).takesLessDamage, 42);
+  const avatarManifest = createGameManifest(input(minion(), {
+    attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20, takesLessDamage: 100,
+  }));
+  assert.equal((avatarManifest.cards.avatar as Extract<GameCardDefinition, { cardType: 'avatar' }>).takesLessDamage, 100);
+  for (const value of [0, -1, 101, 1.5, null, '2']) {
+    assert.throws(() => createGameManifest(input(minion({ takesLessDamage: value } as never))), /takesLessDamage/);
+    assert.throws(() => createGameManifest(input(minion(), {
+      attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20, takesLessDamage: value,
+    } as never)), /takesLessDamage/);
   }
 });

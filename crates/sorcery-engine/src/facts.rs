@@ -131,6 +131,7 @@ pub enum CardFacts {
     reason = "named normalized rule facts avoid invalid Option<bool> states"
 )]
 pub struct AvatarFacts {
+    pub damage_prevention: Option<DamagePrevention>,
     pub attack: u8,
     pub defense: u8,
     pub draw_spell: bool,
@@ -407,10 +408,10 @@ pub enum DamageSourceFilter {
     Magic(Option<Element>),
 }
 
-/// A minion's single supported damage-prevention rule.
+/// A unit's single supported printed damage-prevention rule.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DamagePrevention {
-    TakesOneLessDamage,
+    TakesLessDamage(u8),
     PreventsDamageFrom(DamageSourceFilter),
     PreventsDamageFromUnitsWithPowerAtLeast(u8),
     Ward,
@@ -941,6 +942,7 @@ const AVATAR_FIELDS: &[&str] = &[
     "life",
     "replaceAdjacentRubbleWithTopAtlasSite",
     "tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn",
+    "takesLessDamage",
 ];
 
 const SITE_FIELDS: &[&str] = &[
@@ -1237,6 +1239,7 @@ pub fn parse_card_definition(card_id: &str, value: &Value) -> Result<CardFacts, 
 fn parse_avatar(object: &Map<String, Value>, path: &str) -> Result<AvatarFacts, FactError> {
     reject_unknown(object, AVATAR_FIELDS, path)?;
     Ok(AvatarFacts {
+        damage_prevention: parse_damage_prevention(object, path)?,
         attack: compact_u8(required_nonnegative_integer(
             object,
             "attack",
@@ -2146,8 +2149,8 @@ fn parse_damage_prevention(
     at_most_one(
         [
             parse_damage_source_filter(object, path)?.map(DamagePrevention::PreventsDamageFrom),
-            fixed_integer(object, "takesLessDamage", 1, path)?
-                .then_some(DamagePrevention::TakesOneLessDamage),
+            optional_bounded_integer(object, "takesLessDamage", 1, MAX_COMBAT_STAT, path)?
+                .map(|amount| DamagePrevention::TakesLessDamage(compact_u8(amount))),
             optional_bounded_integer(
                 object,
                 "preventsDamageFromUnitsWithPowerAtLeast",
