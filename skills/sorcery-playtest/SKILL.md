@@ -71,6 +71,12 @@ Use `game:engine batch-json` for explicit `northPolicy`/`southPolicy` comparison
 and manifest hashes. Keep screening seeds separate from a preregistered held-out set,
 evaluate the chosen candidate once on that set, and report negative results too.
 
+Treat policy behavior as part of reproducibility. Any selector change that can choose
+a different engine-issued action needs a behavior version in the canonical policy
+identity. Preserve old snapshot bytes and behavior through their original version;
+compare new behavior under a new policy ID. Count offered and committed actions before
+and after so a longer game or changed draw pattern is not mistaken for stronger play.
+
 The baseline is an experiment control, not an expert teacher. Inspect missed spells,
 activations, attacks, defenses, and positional opportunities before trusting its deck
 rankings. A few wins or guided opening seeds establish neither strength nor value.
@@ -86,6 +92,10 @@ Run independent games with native workers, bounded by jobs and actual CPU/memory
 availability. Check memory pressure before concurrent builds or agents. Use the release
 worker benchmark in the README to choose concurrency; do not infer it from swap size.
 Check output identity across worker counts after changes to scheduling or determinism.
+Give one layer ownership of the worker budget. When an outer batch already parallelizes
+games, keep each game's checkpoint search serial unless a measured nested budget shows a
+gain. When analyzing one position, parallelize independent checkpoint branches, retain
+canonical branch order, and verify byte-identical output at one and many workers.
 
 ## Keep useful knowledge
 
@@ -94,6 +104,13 @@ binary identity, authority/deck/policy hashes, training and held-out seeds, actu
 mechanics exercised, result limitations, and a reproducible command or driver path.
 Promote a tactical lesson into this skill only after it survives an independent check.
 Preserve counterexamples and scope; never learn a rule by changing official legality.
+
+For price-sensitive deck work, first validate and deduplicate exact lists against one
+dated price snapshot. Rank incomplete lists only as research priorities. A “best value”
+claim requires complete engine admission, legal copy/rarity evidence, both seat
+orientations, fixed opponent policies, and a held-out seed result. Keep purchase price,
+tournament evidence, engine coverage, policy competence, and simulated strength as
+separate fields; unknown or stale prices stay explicit.
 
 For best-value deck recommendations, compare current priced, complete lists and source
 dates. Keep unknown prices explicit, separate purchase cost from simulation outcomes,
