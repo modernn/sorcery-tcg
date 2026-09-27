@@ -722,6 +722,7 @@ export type GameCardDefinition =
     shootsDragProjectile?: boolean;
     siteProvidesNoThreshold?: true;
     spellcaster?: boolean;
+    spellcasterElements?: readonly GameElement[];
     stealth?: boolean;
     strikesFirstWhileAttacking?: boolean;
     strikesFirstWhileDefending?: boolean;
@@ -1644,7 +1645,7 @@ const SUPPORTED_CARD_FIELDS = {
     nearbyAvatarsMayDiscardCardToGainControlOfThis nearbyEnemiesPermanentlyLoseStealth occupiesSquareArea ordinary otherControlledMortalsPowerBonus
     otherNearbyAlliesPowerBonus preventsDamageFromUnitsWithPowerAtLeast provides ranged
     sacrificeMinionAtSummoningLocationForManaDiscount shootsDragProjectile siteProvidesNoThreshold
-    spellcaster stealth strikesFirstWhileAttacking strikesFirstWhileDefending submerge summonToAnySite
+    spellcaster spellcasterElements stealth strikesFirstWhileAttacking strikesFirstWhileDefending submerge summonToAnySite
     tapToDamageEachUnitAtAdjacentLocation tapToShootProjectileDamage tapForMana takesLessDamage thresholds token
     doesNotUntapDuringControllersStartPhase untapsAtEndOfControllerTurn voidwalk ward waterbound
   `.trim().split(/\s+/)),
@@ -1763,6 +1764,20 @@ function validateMinionMetadata(
   path: string,
   elements: readonly GameElement[],
 ): void {
+  if (card.spellcasterElements !== undefined) {
+    if (card.spellcaster !== true) {
+      throw new RangeError(`${path}.spellcasterElements requires spellcaster`);
+    }
+    const spellcasterElements = card.spellcasterElements;
+    if (!Array.isArray(spellcasterElements)
+      || spellcasterElements.length < 1
+      || spellcasterElements.some((element) => !elements.includes(element))
+      || new Set(spellcasterElements).size !== spellcasterElements.length
+      || spellcasterElements.some((element, index) =>
+        elements.indexOf(element) <= elements.indexOf(spellcasterElements[index - 1]!))) {
+      throw new RangeError(`${path}.spellcasterElements must contain unique elements in canonical order`);
+    }
+  }
   if (card.entersCarrying !== undefined) {
     if (!Array.isArray(card.entersCarrying) || card.entersCarrying.length < 1 || card.entersCarrying.length > 32) {
       throw new RangeError(`${path}.entersCarrying must contain 1-32 card references`);
@@ -3828,6 +3843,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : {}),
             ...(card.subtypes !== undefined ? { subtypes: [...card.subtypes] } : {}),
             ...(card.spellcaster === true ? { spellcaster: true } : {}),
+            ...(card.spellcasterElements !== undefined
+              ? { spellcasterElements: [...card.spellcasterElements] }
+              : {}),
             ...(card.stealth === true ? { stealth: true } : {}),
             ...(card.strikesFirstWhileAttacking === true ? { strikesFirstWhileAttacking: true } : {}),
             ...(card.strikesFirstWhileDefending === true ? { strikesFirstWhileDefending: true } : {}),

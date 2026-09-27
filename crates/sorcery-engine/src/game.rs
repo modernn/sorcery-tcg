@@ -36,6 +36,8 @@ mod damage_order_tests;
 mod effect;
 mod effect_strikes;
 #[cfg(test)]
+mod elemental_spellcaster_tests;
+#[cfg(test)]
 mod entry_equipment_tests;
 mod modifiers;
 mod resolution;
@@ -1711,6 +1713,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         shoots_drag_projectile: _,
         site_provides_no_threshold: _,
         spellcaster: _,
+        spellcaster_elements: _,
         stealth: _,
         strikes_first_while_attacking: _,
         strikes_first_while_defending: _,
@@ -2496,8 +2499,10 @@ impl Game {
         let caster_kind = self
             .spellcasters(pending.seat)
             .into_iter()
-            .find_map(|(kind, instance_id)| {
-                (instance_id == pending.caster_instance_id).then_some(kind)
+            .find_map(|(kind, instance_id, element)| {
+                (instance_id == pending.caster_instance_id
+                    && Self::caster_element_accepts(element, facts.thresholds))
+                .then_some(kind)
             })
             .ok_or(GameError::IllegalAction)?;
         let caster = match caster_kind {
@@ -3603,7 +3608,10 @@ impl Game {
             {
                 continue;
             }
-            for (caster_kind, caster_instance_id) in &spellcasters {
+            for (caster_kind, caster_instance_id, element) in &spellcasters {
+                if !Self::caster_element_accepts(*element, facts.thresholds) {
+                    continue;
+                }
                 if facts.effect == MagicEffect::DamageChainNearbyUnits {
                     let discard_ids = if facts.discard_card_as_additional_cost {
                         let options = self.chain_magic_discard_options(seat, &card.instance_id);
@@ -3867,7 +3875,10 @@ impl Game {
                 for (mana_cost, payment_mode, sacrificed_minion_instance_ids) in
                     payments.into_iter().flatten().chain(sacrifice_payments)
                 {
-                    for (caster_kind, caster_instance_id) in &spellcasters {
+                    for (caster_kind, caster_instance_id, element) in &spellcasters {
+                        if !Self::caster_element_accepts(*element, facts.thresholds) {
+                            continue;
+                        }
                         let caster_suffix = if *caster_kind == UnitKind::Minion {
                             self.minion_caster_suffix(seat, caster_instance_id)
                         } else {
@@ -4863,22 +4874,73 @@ impl Game {
         }
     }
 
-    fn spellcasters(&self, seat: Seat) -> Vec<(UnitKind, IdentityHash)> {
+    fn spellcasters(&self, seat: Seat) -> Vec<(UnitKind, IdentityHash, Option<ElementSet>)> {
         let player = &self.position.players[seat_index(seat)];
-        std::iter::once((UnitKind::Avatar, player.avatar.card.instance_id.clone()))
-            .chain(self.position.units.iter().filter_map(|unit| {
-                if unit.controller != seat || self.minion_abilities_lost(unit) {
-                    return None;
-                }
-                let CardFacts::Minion(facts) =
-                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts
-                else {
-                    return None;
-                };
-                (facts.spellcaster || self.minion_atop_tower(unit))
-                    .then(|| (UnitKind::Minion, unit.card.instance_id.clone()))
-            }))
-            .collect()
+        std::iter::once((
+            UnitKind::Avatar,
+            player.avatar.card.instance_id.clone(),
+            None,
+        ))
+        .chain(self.position.units.iter().filter_map(|unit| {
+            if unit.controller != seat || self.minion_abilities_lost(unit) {
+                return None;
+            }
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return None;
+            };
+            let atop_tower = self.minion_atop_tower(unit);
+            (facts.spellcaster || atop_tower).then(|| {
+                (
+                    UnitKind::Minion,
+                    unit.card.instance_id.clone(),
+                    if atop_tower {
+                        None
+                    } else {
+                        facts.spellcaster_elements
+                    },
+                )
+            })
+        }))
+        .collect()
+    }
+
+    /// Elemental Spellcaster uses the spell's threshold, not the caster's identity.
+    fn caster_element_accepts(elements: Option<ElementSet>, thresholds: Thresholds) -> bool {
+        elements.is_none_or(|elements| elements.iter().any(|element| thresholds.get(element) > 0))
+    }
+
+    fn spellcaster_can_cast(
+        &self,
+        seat: Seat,
+        instance_id: &IdentityHash,
+        thresholds: Thresholds,
+    ) -> bool {
+        if self.position.players[seat_index(seat)]
+            .avatar
+            .card
+            .instance_id
+            == *instance_id
+        {
+            return true;
+        }
+        self.position.units.iter().any(|unit| {
+            if unit.controller != seat
+                || unit.card.instance_id != *instance_id
+                || self.minion_abilities_lost(unit)
+            {
+                return false;
+            }
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return false;
+            };
+            self.minion_atop_tower(unit)
+                || (facts.spellcaster
+                    && Self::caster_element_accepts(facts.spellcaster_elements, thresholds))
+        })
     }
 
     fn spellcaster_kind(&self, seat: Seat, instance_id: &IdentityHash) -> Option<UnitKind> {
@@ -4941,7 +5003,10 @@ impl Game {
             {
                 continue;
             }
-            for (_, caster_instance_id) in &spellcasters {
+            for (_, caster_instance_id, element) in &spellcasters {
+                if !Self::caster_element_accepts(*element, facts.thresholds) {
+                    continue;
+                }
                 let conjure = |bearer, bearer_cell, cell| ActionDescriptor::CastArtifact {
                     bearer,
                     bearer_cell,
@@ -9510,7 +9575,10 @@ impl Game {
             {
                 continue;
             }
-            for (_, caster_instance_id) in &spellcasters {
+            for (_, caster_instance_id, element) in &spellcasters {
+                if !Self::caster_element_accepts(*element, facts.thresholds) {
+                    continue;
+                }
                 match facts.effect {
                     AuraEffect::AffectedSitesAreFlooded
                     | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
@@ -19959,7 +20027,8 @@ impl Game {
             return Err(GameError::IllegalAction);
         };
         let compiled_magic = definition.abilities.magic.is_some();
-        if facts.mana_cost > u64::from(player.mana)
+        if !self.spellcaster_can_cast(seat, caster_instance_id, facts.thresholds)
+            || facts.mana_cost > u64::from(player.mana)
             || !self.thresholds_met(seat, facts.thresholds)
             || facts
                 .pay_life_as_additional_cost
@@ -22427,6 +22496,9 @@ impl Game {
         let CardFacts::Minion(facts) = &definition.facts else {
             return Err(GameError::IllegalAction);
         };
+        if !self.spellcaster_can_cast(seat, caster_instance_id, facts.thresholds) {
+            return Err(GameError::IllegalAction);
+        }
         let lance_count = facts.lance_count;
         let starts_stealthed = facts.stealth;
         let starts_warded = facts.damage_prevention == Some(DamagePrevention::Ward);

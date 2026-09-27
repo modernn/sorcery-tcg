@@ -495,6 +495,7 @@ pub struct MinionFacts {
     pub shoots_drag_projectile: bool,
     pub site_provides_no_threshold: bool,
     pub spellcaster: bool,
+    pub spellcaster_elements: Option<ElementSet>,
     pub stealth: bool,
     pub strikes_first_while_attacking: bool,
     pub strikes_first_while_defending: bool,
@@ -741,9 +742,17 @@ fn parse_thresholds(object: &Map<String, Value>, path: &str) -> Result<Threshold
 }
 
 fn parse_elements(object: &Map<String, Value>, path: &str) -> Result<ElementSet, FactError> {
-    let field_path = format!("{path}.elements");
+    parse_element_set(object, "elements", path)
+}
+
+fn parse_element_set(
+    object: &Map<String, Value>,
+    key: &str,
+    path: &str,
+) -> Result<ElementSet, FactError> {
+    let field_path = format!("{path}.{key}");
     let values = object
-        .get("elements")
+        .get(key)
         .and_then(Value::as_array)
         .ok_or_else(|| FactError::new(&field_path, "must be an array"))?;
     let mut set = ElementSet::default();
@@ -1170,6 +1179,7 @@ const MINION_FIELDS: &[&str] = &[
     "shootsDragProjectile",
     "siteProvidesNoThreshold",
     "spellcaster",
+    "spellcasterElements",
     "stealth",
     "strikesFirstWhileAttacking",
     "strikesFirstWhileDefending",
@@ -2311,6 +2321,22 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     let shoots_drag_projectile = optional_bool(object, "shootsDragProjectile", path)?;
     let site_provides_no_threshold = true_only(object, "siteProvidesNoThreshold", path)?;
     let spellcaster = optional_bool(object, "spellcaster", path)?;
+    let spellcaster_elements = object
+        .contains_key("spellcasterElements")
+        .then(|| parse_element_set(object, "spellcasterElements", path))
+        .transpose()?;
+    if spellcaster_elements == Some(ElementSet::empty()) {
+        return Err(FactError::new(
+            format!("{path}.spellcasterElements"),
+            "must not be empty",
+        ));
+    }
+    if spellcaster_elements.is_some() && !spellcaster {
+        return Err(FactError::new(
+            format!("{path}.spellcasterElements"),
+            "requires spellcaster: true",
+        ));
+    }
     let stealth = optional_bool(object, "stealth", path)?;
     let submerge = optional_bool(object, "submerge", path)?;
     let required_cast_region = parse_required_cast_region(object, path, burrowing, submerge)?;
@@ -2497,6 +2523,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         shoots_drag_projectile,
         site_provides_no_threshold,
         spellcaster,
+        spellcaster_elements,
         stealth,
         strikes_first_while_attacking: optional_bool(object, "strikesFirstWhileAttacking", path)?,
         strikes_first_while_defending: optional_bool(object, "strikesFirstWhileDefending", path)?,

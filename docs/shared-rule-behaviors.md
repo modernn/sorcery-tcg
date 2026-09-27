@@ -185,3 +185,14 @@ supplement may also fill absent rarity. These supplements cannot remove retained
 traits or change printed costs, stats, thresholds, or existing rarity. The
 references record the review's provenance; they do not automatically verify the
 referenced text or grant ranked eligibility. Authority snapshots remain unchanged.
+
+An intrinsic Minion Spellcaster may supply `spellcasterElements`, a nonempty set
+in canonical element order. This requires `spellcaster: true` and permits spells
+with a positive threshold in any listed element. It is independent of the caster's
+printed elemental identity and of the player's available thresholds. Magic,
+Minion, Aura, and Artifact action enumeration uses the same predicate; staged
+chain casting preserves that restriction. Ordinary Spellcasters and Avatars
+remain unrestricted. An existing unrestricted tower grant provides unrestricted
+casting while active; leaving its range restores the intrinsic restriction.
+This fact does not yet admit site or artifact Spellcasters, negative elemental
+qualifiers, or new bearer grants.
