@@ -49,6 +49,11 @@ Reuse `RustSessionClient` in `src/engine/rust-engine.ts` or the persistent
 Use `publicView` for the acting seat and request its engine-issued legal actions.
 Choose by issued action ID and current state version. Never invent a mutation.
 
+Existing session clients default to policy behavior v1 so old transcripts stay
+byte-compatible. For new LLM playtests, call `selectPolicyAction(2)` or send
+`{"policyBehaviorVersion":2}` with `selectPolicyAction`. Record that version with the
+run; omitting it deliberately selects the legacy behavior.
+
 Separate fair play from debugging. Do not use opponent hidden hands, deck order, or
 full replay state to choose moves in a fair-play experiment. Checkpoint branches of
 the true state can expose hidden outcomes; label those omniscient diagnostics unless
