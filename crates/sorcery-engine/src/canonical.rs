@@ -79,6 +79,10 @@ impl fmt::Display for IdentityHash {
 pub enum CanonicalError {
     /// Engine manifests, states, actions, and events permit integers only.
     NonIntegralNumber,
+    /// A helper that supplies an object field received a non-object value.
+    ExpectedObject,
+    /// A helper that supplies an object field would duplicate an existing key.
+    DuplicateObjectField,
     /// JSON string serialization failed.
     StringSerialization(serde_json::Error),
 }
@@ -89,6 +93,10 @@ impl fmt::Display for CanonicalError {
             Self::NonIntegralNumber => {
                 formatter.write_str("canonical engine JSON requires integers")
             }
+            Self::ExpectedObject => formatter.write_str("canonical helper requires an object"),
+            Self::DuplicateObjectField => {
+                formatter.write_str("canonical helper field already exists")
+            }
             Self::StringSerialization(error) => error.fmt(formatter),
         }
     }
@@ -97,7 +105,7 @@ impl fmt::Display for CanonicalError {
 impl Error for CanonicalError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::NonIntegralNumber => None,
+            Self::NonIntegralNumber | Self::ExpectedObject | Self::DuplicateObjectField => None,
             Self::StringSerialization(error) => Some(error),
         }
     }
@@ -165,6 +173,53 @@ pub fn canonical_json(value: &Value) -> Result<String, CanonicalError> {
 /// Returns [`CanonicalError`] when the value cannot be canonicalized.
 pub fn identity_hash(value: &Value) -> Result<IdentityHash, CanonicalError> {
     let bytes = canonical_json(value)?;
+    Ok(identity_hash_bytes(&bytes))
+}
+
+/// Hashes an object while supplying one canonical field value without cloning
+/// that field into the intermediate JSON tree.
+///
+/// # Errors
+///
+/// Returns [`CanonicalError`] when `value` is not an object, already contains
+/// `field_name`, or one of its other values cannot be canonicalized.
+pub fn identity_hash_with_object_field(
+    value: &Value,
+    field_name: &str,
+    field_value: &str,
+) -> Result<IdentityHash, CanonicalError> {
+    let Value::Object(values) = value else {
+        return Err(CanonicalError::ExpectedObject);
+    };
+    if values.contains_key(field_name) {
+        return Err(CanonicalError::DuplicateObjectField);
+    }
+    let mut entries: Vec<(&str, Option<&Value>)> = values
+        .iter()
+        .map(|(key, value)| (key.as_str(), Some(value)))
+        .collect();
+    entries.push((field_name, None));
+    entries.sort_unstable_by(|(left, _), (right, _)| compare_utf16(left, right));
+
+    let mut bytes = String::new();
+    bytes.push('{');
+    for (index, (key, value)) in entries.into_iter().enumerate() {
+        if index > 0 {
+            bytes.push(',');
+        }
+        bytes.push_str(&serde_json::to_string(key).map_err(CanonicalError::StringSerialization)?);
+        bytes.push(':');
+        if let Some(value) = value {
+            write_value(value, &mut bytes)?;
+        } else {
+            bytes.push_str(field_value);
+        }
+    }
+    bytes.push('}');
+    Ok(identity_hash_bytes(&bytes))
+}
+
+fn identity_hash_bytes(bytes: &str) -> IdentityHash {
     let digest = Sha256::digest(bytes.as_bytes());
     let mut hash = String::with_capacity(71);
     hash.push_str("sha256:");
@@ -172,7 +227,7 @@ pub fn identity_hash(value: &Value) -> Result<IdentityHash, CanonicalError> {
         hash.push(HEX[usize::from(byte >> 4)] as char);
         hash.push(HEX[usize::from(byte & 0x0f)] as char);
     }
-    Ok(IdentityHash(hash))
+    IdentityHash(hash)
 }
 
 /// Parses JSON while rejecting duplicate object keys at every depth.
@@ -277,7 +332,23 @@ pub fn parse_json_without_duplicate_keys(text: &str) -> Result<Value, serde_json
 mod tests {
     use serde_json::json;
 
-    use super::{canonical_json, identity_hash, parse_json_without_duplicate_keys};
+    use super::{
+        canonical_json, identity_hash, identity_hash_with_object_field,
+        parse_json_without_duplicate_keys,
+    };
+
+    #[test]
+    fn identity_hash_with_object_field_should_match_materialized_object() {
+        let dynamic = json!({"z": [1, 2], "a": true});
+        let materialized = json!({"cards": {"card": {"cost": 1}}, "z": [1, 2], "a": true});
+        let cards = canonical_json(&materialized["cards"]).expect("canonical cards");
+
+        assert_eq!(
+            identity_hash_with_object_field(&dynamic, "cards", &cards)
+                .expect("spliced object hash"),
+            identity_hash(&materialized).expect("materialized object hash")
+        );
+    }
 
     #[test]
     fn canonical_json_should_match_existing_engine_state_vector() {

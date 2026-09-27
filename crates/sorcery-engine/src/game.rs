@@ -15,7 +15,9 @@ use crate::action::{
     location_label,
 };
 use crate::board::{Cell, Location, LowerRegion, Region, SquareArea, translated_square_connecting};
-use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
+use crate::canonical::{
+    CanonicalError, IdentityHash, canonical_json, identity_hash, identity_hash_with_object_field,
+};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{
     AlternativeSummonPayment, ArtifactEffect, ArtifactFacts, AuraEffect, AuraFacts, AvatarFacts,
@@ -80,6 +82,7 @@ const AURA_CONTROLLER_TURNS: u8 = 3;
 pub struct RulesContext {
     authority_hash: IdentityHash,
     cards: Box<[CardDefinition]>,
+    canonical_cards_json: String,
     has_nearby_damage_prevention: bool,
     has_site_entry_effects: bool,
     first_seat: Seat,
@@ -1918,11 +1921,18 @@ impl Game {
             });
             card_ids.insert(id.clone(), CardId(id_number));
         }
+        let canonical_cards_json = canonical_json(&Value::Object(
+            cards
+                .iter()
+                .map(|card| (card.id.clone(), card.value.clone()))
+                .collect(),
+        ))?;
         let rules = Arc::new(RulesContext {
             authority_hash: manifest.authority.content_hash.clone(),
             has_nearby_damage_prevention: cards.iter().any(|card| matches!(&card.facts, CardFacts::Minion(facts) if facts.nearby_damage_prevention.is_some())),
             has_site_entry_effects: cards.iter().any(|card| matches!(&card.facts, CardFacts::Site(facts) if facts.site_entry_effect.is_some())),
             cards: cards.into_boxed_slice(),
+            canonical_cards_json,
             first_seat: manifest.first_seat,
             manifest_id: manifest.identity,
             seed: manifest.seed,
@@ -24603,14 +24613,17 @@ impl Game {
 
     /// Materializes the authoritative JSON state used for receipts and replay.
     #[must_use]
-    #[expect(clippy::too_many_lines)]
     pub fn authoritative_state(&self) -> Value {
-        let cards: Map<_, _> = self
-            .rules
-            .cards
-            .iter()
-            .map(|card| (card.id.clone(), card.value.clone()))
-            .collect();
+        self.authoritative_state_with_cards(true)
+    }
+
+    fn authoritative_state_without_cards(&self) -> Value {
+        self.authoritative_state_with_cards(false)
+    }
+
+    #[must_use]
+    #[expect(clippy::too_many_lines)]
+    fn authoritative_state_with_cards(&self, include_cards: bool) -> Value {
         let sites: Map<_, _> = Cell::ALL
             .into_iter()
             .filter_map(|cell| {
@@ -24646,7 +24659,6 @@ impl Game {
             .map_or(Value::Null, Self::pending_combat_value);
         let mut value = json!({
             "activeSeat": self.position.active_seat,
-            "cards": cards,
             "decisionSeat": self.position.decision_seat,
             "engine": {
                 "prng": self.position.prng,
@@ -24760,6 +24772,17 @@ impl Game {
                         ),
                     }),
                 );
+            }
+        }
+        if include_cards {
+            let cards: Map<_, _> = self
+                .rules
+                .cards
+                .iter()
+                .map(|card| (card.id.clone(), card.value.clone()))
+                .collect();
+            if let Value::Object(object) = &mut value {
+                object.insert("cards".to_owned(), Value::Object(cards));
             }
         }
         self.insert_realm_artifacts(&mut value);
@@ -25135,7 +25158,11 @@ impl Game {
     ///
     /// Returns [`CanonicalError`] if the boundary state cannot be canonicalized.
     pub fn state_hash(&self) -> Result<IdentityHash, CanonicalError> {
-        identity_hash(&self.authoritative_state())
+        identity_hash_with_object_field(
+            &self.authoritative_state_without_cards(),
+            "cards",
+            &self.rules.canonical_cards_json,
+        )
     }
 
     fn player_value(&self, player: &PlayerPosition) -> Value {
