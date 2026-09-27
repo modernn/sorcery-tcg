@@ -53,6 +53,13 @@ test('nearby damage prevention preserves each supported selector and alliedOnly'
     const manifest = createGameManifest(input(minion({ nearbyDamagePrevention })));
     assert.deepEqual((manifest.cards.minion as Extract<GameCardDefinition, { cardType: 'minion' }>).nearbyDamagePrevention, nearbyDamagePrevention);
   }
+  const withSubtype = createGameManifest(input(minion({
+    nearbyDamagePrevention: { recipientSubtype: 'Faerie', takesLessDamage: 1 },
+  })));
+  assert.deepEqual(
+    (withSubtype.cards.minion as Extract<GameCardDefinition, { cardType: 'minion' }>).nearbyDamagePrevention,
+    { recipientSubtype: 'Faerie', takesLessDamage: 1 },
+  );
 });
 
 test('nearby provider prevention is independent from target-local prevention', () => {
@@ -101,12 +108,38 @@ test('nearby provider prevention bounds numeric selectors', () => {
   }
 });
 
+test('nearby provider prevention rejects malformed recipient subtypes', () => {
+  for (const recipientSubtype of [
+    null,
+    1,
+    {},
+    '',
+    ' ',
+    '\uFEFFFairie',
+    'Faerie\uFEFF',
+    '\u0000Faerie',
+    'é'.repeat(33),
+  ]) {
+    assert.throws(
+      () => createGameManifest(input(minion({
+        nearbyDamagePrevention: { recipientSubtype, takesLessDamage: 1 } as never,
+      }))),
+      /nearbyDamagePrevention\.recipientSubtype/,
+    );
+  }
+});
+
 test('nearby provider prevention is cloned into the canonical manifest', () => {
-  const source: { alliedOnly?: true; takesLessDamage?: number } = { alliedOnly: true, takesLessDamage: 1 };
+  const source: { alliedOnly?: true; recipientSubtype?: string; takesLessDamage?: number } = {
+    alliedOnly: true,
+    recipientSubtype: 'Faerie',
+    takesLessDamage: 1,
+  };
   const manifest = createGameManifest(input(minion({ nearbyDamagePrevention: source })));
   source.takesLessDamage = 100;
+  source.recipientSubtype = 'Mortal';
   const cloned = (manifest.cards.minion as Extract<GameCardDefinition, { cardType: 'minion' }>).nearbyDamagePrevention;
   assert.notEqual(cloned, source);
-  assert.deepEqual(cloned, { alliedOnly: true, takesLessDamage: 1 });
+  assert.deepEqual(cloned, { alliedOnly: true, recipientSubtype: 'Faerie', takesLessDamage: 1 });
   assert.equal(Object.isFrozen(cloned), true);
 });

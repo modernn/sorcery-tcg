@@ -13423,6 +13423,23 @@ impl Game {
         Ok((index, attack, defense, facts.damage_prevention))
     }
 
+    /// Current admitted minion subtype membership. Subtype-changing effects must extend
+    /// this shared query when admitted; missing legacy metadata is not a negative match.
+    fn minion_has_subtype(&self, unit: &UnitPosition, required: &str) -> Result<bool, GameError> {
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let subtypes = facts.subtypes.as_deref().ok_or_else(|| {
+            GameError::UnsupportedMechanic(
+                "subtype predicate requires complete minion subtype metadata".to_owned(),
+            )
+        })?;
+        Ok(subtypes
+            .binary_search_by(|name| name.as_str().cmp(required))
+            .is_ok())
+    }
+
     fn unit_damage_status(
         &self,
         kind: UnitKind,
@@ -13478,7 +13495,7 @@ impl Game {
                 else {
                     return Err(GameError::IllegalAction);
                 };
-                let Some(grant) = facts.nearby_damage_prevention else {
+                let Some(grant) = &facts.nearby_damage_prevention else {
                     continue;
                 };
                 if source.region == region
@@ -13486,6 +13503,14 @@ impl Game {
                     && Self::footprints_nearby(Self::unit_occupied_cells(source), cells)
                     && !self.minion_abilities_lost(source)
                 {
+                    if let Some(required) = &grant.recipient_subtype {
+                        let Some((index, _)) = minion else {
+                            continue;
+                        };
+                        if !self.minion_has_subtype(&self.position.units[index], required)? {
+                            continue;
+                        }
+                    }
                     prevention.add(grant.prevention)?;
                 }
             }

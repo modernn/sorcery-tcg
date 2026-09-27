@@ -413,3 +413,142 @@ fn end_turn_aura_damage_snapshots_protection_before_waking_a_provider() {
     );
     assert_eq!(game.position.players[0].avatar.life, 17);
 }
+
+fn set_subtypes(game: &mut Game, id: &IdentityHash, names: &[&str]) {
+    let card_id = game
+        .position
+        .units
+        .iter()
+        .find(|unit| unit.card.instance_id == *id)
+        .unwrap()
+        .card
+        .card_id;
+    let CardFacts::Minion(facts) =
+        &mut Arc::get_mut(&mut game.rules).unwrap().cards[usize::from(card_id.0)].facts
+    else {
+        panic!("minion")
+    };
+    facts.subtypes = Some(names.iter().map(|name| (*name).to_owned()).collect());
+}
+
+#[test]
+fn subtype_filtered_protection_uses_recipient_characteristics_and_current_source_power() {
+    let mut game = fixture(
+        &json!({"alliedOnly":true,"recipientSubtype":"Faerie","preventsDamageFromUnitsWithPowerAtLeast":4}),
+    );
+    let provider = add_minion(&mut game, true, Seat::North, "C3", Region::Surface);
+    let target = add_minion(&mut game, false, Seat::North, "D2", Region::Surface);
+    set_subtypes(&mut game, &provider, &["Faerie"]);
+    set_subtypes(&mut game, &target, &["Mortal"]);
+    for (id, expected) in [(&provider, 0), (&target, 4)] {
+        let status = game
+            .unit_damage_status(UnitKind::Minion, Seat::North, id)
+            .unwrap();
+        let mut source = source(DamageOrigin::Other);
+        source.current_power = 4;
+        assert_eq!(
+            Game::damage_after_prevention(&[(4, source)], status.prevention)
+                .unwrap()
+                .0,
+            expected
+        );
+        source.current_power = 3;
+        assert_eq!(
+            Game::damage_after_prevention(&[(4, source)], status.prevention)
+                .unwrap()
+                .0,
+            4
+        );
+    }
+    set_subtypes(&mut game, &target, &["Faerie", "Mortal"]);
+    game.position.units[1].temporary_modifiers.grant(
+        TemporaryModifierKind::Silence,
+        1,
+        provider.clone(),
+    );
+    let protected = game
+        .unit_damage_status(UnitKind::Minion, Seat::North, &target)
+        .unwrap();
+    let high_power = UnitDamageSource {
+        current_power: 4,
+        ..source(DamageOrigin::Other)
+    };
+    assert_eq!(
+        Game::damage_after_prevention(&[(4, high_power)], protected.prevention)
+            .unwrap()
+            .0,
+        0
+    );
+    let magic = UnitDamageSource {
+        current_power: 0,
+        ..source(DamageOrigin::Magic(ElementSet::only(Element::Fire)))
+    };
+    assert_eq!(
+        Game::damage_after_prevention(&[(4, magic)], protected.prevention)
+            .unwrap()
+            .0,
+        4
+    );
+    game.position.units[1].controller = Seat::South;
+    let enemy = game
+        .unit_damage_status(UnitKind::Minion, Seat::South, &target)
+        .unwrap();
+    assert_eq!(
+        Game::damage_after_prevention(&[(4, high_power)], enemy.prevention)
+            .unwrap()
+            .0,
+        4
+    );
+    let avatar = &game.position.players[0].avatar.card.instance_id;
+    let status = game
+        .unit_damage_status(UnitKind::Avatar, Seat::North, avatar)
+        .unwrap();
+    assert_eq!(
+        Game::damage_after_prevention(&[(4, high_power)], status.prevention)
+            .unwrap()
+            .0,
+        4
+    );
+}
+
+#[test]
+fn missing_recipient_subtypes_fail_closed_only_when_an_active_grant_can_apply() {
+    let mut game = fixture(&json!({"recipientSubtype":"Faerie","takesLessDamage":1}));
+    let provider = add_minion(&mut game, true, Seat::North, "C3", Region::Surface);
+    let target = add_minion(&mut game, false, Seat::North, "C3", Region::Surface);
+    set_subtypes(&mut game, &provider, &["Faerie"]);
+    assert!(matches!(
+        game.unit_damage_status(UnitKind::Minion, Seat::North, &target),
+        Err(GameError::UnsupportedMechanic(_))
+    ));
+    game.position.units[0].disabled_until_damaged = true;
+    assert!(
+        game.unit_damage_status(UnitKind::Minion, Seat::North, &target)
+            .is_ok()
+    );
+    game.position.units[0].disabled_until_damaged = false;
+    game.position.units[1].location = Cell::parse("A1").unwrap();
+    assert!(
+        game.unit_damage_status(UnitKind::Minion, Seat::North, &target)
+            .is_ok()
+    );
+}
+
+#[test]
+fn recipient_subtype_names_are_strictly_validated() {
+    for name in [
+        json!(null),
+        json!(false),
+        json!(4),
+        json!(""),
+        json!(" Faerie"),
+        json!("Faerie\n"),
+        json!("F\u{0000}ae"),
+        json!("x".repeat(65)),
+        json!("é".repeat(33)),
+    ] {
+        let card = json!({"cardType":"minion","attack":1,"defense":1,"manaCost":0,
+            "thresholds":{"earth":0,"fire":0,"water":0,"air":0},"nearbyDamagePrevention":{"recipientSubtype":name,"takesLessDamage":1}});
+        assert!(crate::facts::parse_card_definition("invalid", &card).is_err());
+    }
+}

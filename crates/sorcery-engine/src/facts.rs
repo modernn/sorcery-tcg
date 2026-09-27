@@ -424,9 +424,10 @@ pub enum DamagePrevention {
 }
 
 /// A continuous nearby protection grant from a minion.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NearbyDamagePrevention {
     pub allied_only: bool,
+    pub recipient_subtype: Option<String>,
     pub prevention: DamagePrevention,
 }
 
@@ -816,6 +817,13 @@ fn parse_optional_rarity(
     Ok(Some(rarity))
 }
 
+fn valid_subtype_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}') == name
+        && !name.chars().any(char::is_control)
+}
+
 /// Full subtype data is optional for legacy bindings, but explicit lists are canonical.
 fn parse_subtypes(
     object: &Map<String, Value>,
@@ -833,12 +841,7 @@ fn parse_subtypes(
     for value in values {
         let name = value
             .as_str()
-            .filter(|name| {
-                !name.is_empty()
-                    && name.len() <= 64
-                    && name.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}') == *name
-                    && !name.chars().any(char::is_control)
-            })
+            .filter(|name| valid_subtype_name(name))
             .ok_or_else(|| {
                 FactError::new(
                     &field,
@@ -2198,6 +2201,7 @@ fn parse_nearby_damage_prevention(
         grant,
         &[
             "alliedOnly",
+            "recipientSubtype",
             "takesLessDamage",
             "preventsDamageFrom",
             "preventsDamageFromUnitsWithPowerAtLeast",
@@ -2206,6 +2210,21 @@ fn parse_nearby_damage_prevention(
     )?;
     Ok(Some(NearbyDamagePrevention {
         allied_only: true_only(grant, "alliedOnly", &nested_path)?,
+        recipient_subtype: grant
+            .get("recipientSubtype")
+            .map(|value| {
+                value
+                    .as_str()
+                    .filter(|name| valid_subtype_name(name))
+                    .map(str::to_owned)
+                    .ok_or_else(|| {
+                        FactError::new(
+                            &nested_path,
+                            "recipientSubtype must be a nonempty subtype name of at most 64 bytes",
+                        )
+                    })
+            })
+            .transpose()?,
         prevention: parse_damage_prevention(grant, &nested_path)?
             .ok_or_else(|| FactError::new(&nested_path, "must contain one prevention selector"))?,
     }))

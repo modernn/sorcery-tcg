@@ -243,5 +243,15 @@ prospective minion entry power.
 The immutable rules context records whether any provider exists in the manifest,
 so decks without this mechanic skip the provider scan. Protection snapshots
 combine numeric values and elemental bits without allocating a provider list.
-This does not yet admit arbitrary recipient subtype filters, equipment providers,
+This does not yet admit equipment providers,
 or consumable prevention ordering; the existing Ward-order guard remains.
+
+Nearby protection accepts an optional `recipientSubtype` filter. It queries the
+recipient minion's subtype metadata, independently of its abilities, controller,
+and the damage source's power. Avatars do not match a minion subtype filter.
+Missing legacy subtype metadata raises an unsupported-mechanic error when an
+active nearby grant could apply; it is not treated as an empty subtype list.
+Currently admitted minions use their complete bound subtype lists. Future
+subtype-changing effects must extend this shared membership query before being
+admitted; this does not yet support subtype grants from equipment or global
+subtype transformations.

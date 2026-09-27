@@ -34,6 +34,7 @@ const DAMAGE_PREVENTION_SOURCES = [
 type DamagePreventionSource = typeof DAMAGE_PREVENTION_SOURCES[number];
 type NearbyDamagePrevention = Readonly<{
   alliedOnly?: true;
+  recipientSubtype?: string;
   takesLessDamage?: number;
   preventsDamageFrom?: DamagePreventionSource;
   preventsDamageFromUnitsWithPowerAtLeast?: number;
@@ -1769,6 +1770,20 @@ function cloneEffectProgram(program: EffectProgram): EffectProgram {
   return structuredClone(program);
 }
 
+function isValidSubtypeName(value: unknown): value is string {
+  return typeof value === 'string'
+    && value.length > 0
+    && value === value.trim()
+    && Buffer.byteLength(value, 'utf8') <= 64
+    && !/\p{Cc}/u.test(value);
+}
+
+function validateSubtypeName(value: unknown, path: string): asserts value is string {
+  if (!isValidSubtypeName(value)) {
+    throw new RangeError(`${path} must be a trimmed string of 1-64 UTF-8 bytes without controls`);
+  }
+}
+
 function validateNearbyDamagePrevention(value: unknown, path: string): asserts value is NearbyDamagePrevention {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new RangeError(`${path} must be an object`);
@@ -1776,6 +1791,7 @@ function validateNearbyDamagePrevention(value: unknown, path: string): asserts v
   const candidate = value as Record<string, unknown>;
   const unknown = Object.keys(candidate).find((field) => ![
     'alliedOnly',
+    'recipientSubtype',
     'takesLessDamage',
     'preventsDamageFrom',
     'preventsDamageFromUnitsWithPowerAtLeast',
@@ -1783,6 +1799,9 @@ function validateNearbyDamagePrevention(value: unknown, path: string): asserts v
   if (unknown) throw new RangeError(`${path}.${unknown} is unsupported`);
   if (candidate.alliedOnly !== undefined && candidate.alliedOnly !== true) {
     throw new RangeError(`${path}.alliedOnly must be true when defined`);
+  }
+  if (candidate.recipientSubtype !== undefined) {
+    validateSubtypeName(candidate.recipientSubtype, `${path}.recipientSubtype`);
   }
   const selectorCount = Number(candidate.takesLessDamage !== undefined)
     + Number(candidate.preventsDamageFrom !== undefined)
@@ -1876,12 +1895,7 @@ function validateCardCharacteristics(
   if (!Array.isArray(subtypes) || subtypes.length > 16) {
     throw new RangeError(`${path}.subtypes must contain at most 16 strings`);
   }
-  if (subtypes.some((subtype) => typeof subtype !== 'string'
-    || subtype.length === 0
-    || subtype !== subtype.trim()
-    || Array.from(subtype).length > 64
-    || Buffer.byteLength(subtype, 'utf8') > 64
-    || /\p{Cc}/u.test(subtype))) {
+  if (subtypes.some((subtype) => !isValidSubtypeName(subtype))) {
     throw new RangeError(`${path}.subtypes must contain trimmed strings of 1-64 characters/bytes without controls`);
   }
   if (subtypes.some((subtype, index) => index > 0
