@@ -11,7 +11,7 @@
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
-use sorcery_engine::contract::{ActionRequest, Receipt};
+use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::session::{Session, StepResult};
 
 const TOKEN_ID: &str = "foot-soldier-token";
@@ -258,6 +258,75 @@ fn expected_token_ids(source_id: &str, pre_cast_version: u64) -> Vec<String> {
         .collect()
 }
 
+fn assert_summoned_token_state_and_visibility(session: &Session) {
+    let snapshot = state(session);
+    let mut tokens = snapshot["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .filter(|unit| unit["source"] == "token")
+        .collect::<Vec<_>>();
+    tokens.sort_by_key(|unit| unit["location"].as_str().expect("token location"));
+    let token_state = tokens
+        .iter()
+        .map(|unit| {
+            json!({
+                "controller": unit["controller"],
+                "damage": unit["damage"],
+                "location": unit["location"],
+                "owner": unit["owner"],
+                "region": unit["region"],
+                "source": unit["source"],
+                "summoningSickness": unit["summoningSickness"],
+                "tapped": unit["tapped"],
+            })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        token_state,
+        [
+            json!({
+                "controller": "north", "damage": 0, "location": "B3", "owner": "north",
+                "region": "surface", "source": "token", "summoningSickness": true,
+                "tapped": false,
+            }),
+            json!({
+                "controller": "north", "damage": 0, "location": "C3", "owner": "north",
+                "region": "surface", "source": "token", "summoningSickness": true,
+                "tapped": false,
+            }),
+        ]
+    );
+
+    let opponent_view = session
+        .public_view(Seat::South)
+        .expect("opponent view with summoned tokens");
+    let observed_tokens = opponent_view["realm"]["units"]
+        .as_array()
+        .expect("public realm units")
+        .iter()
+        .filter(|unit| unit["token"] == true)
+        .map(|unit| {
+            json!({
+                "attack": unit["attack"],
+                "defense": unit["defense"],
+                "instanceId": unit["instanceId"],
+            })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        observed_tokens,
+        tokens
+            .iter()
+            .map(|unit| json!({
+                "attack": 1,
+                "defense": 1,
+                "instanceId": unit["instanceId"],
+            }))
+            .collect::<Vec<_>>()
+    );
+}
+
 #[test]
 fn rule_catalog_0687_token_magic_summons_in_cell_order_with_deterministic_identities() {
     let encoded = seed_with(687);
@@ -295,6 +364,7 @@ fn rule_catalog_0687_token_magic_summons_in_cell_order_with_deterministic_identi
             .collect::<Vec<_>>(),
         expected_token_ids(source_id, pre_cast_version)
     );
+    assert_summoned_token_state_and_visibility(&session);
     assert_exact_replay(&session);
 }
 
@@ -333,13 +403,16 @@ fn rule_catalog_0688_dead_token_banishes_instead_of_entering_a_cemetery() {
         .filter(|event_type| matches!(*event_type, "minion-died" | "minion-banished"))
         .collect();
     assert_eq!(token_exits, ["minion-died", "minion-banished"]);
-    assert!(
-        state(&session)["players"]["north"]["cemetery"]
-            .as_array()
-            .expect("north cemetery")
-            .iter()
-            .all(|card| card["instanceId"] != killed_id)
-    );
+    let after = state(&session);
+    for seat in ["north", "south"] {
+        assert!(
+            after["players"][seat]["cemetery"]
+                .as_array()
+                .expect("player cemetery")
+                .iter()
+                .all(|card| card["instanceId"] != killed_id)
+        );
+    }
     assert_exact_replay(&session);
 }
 

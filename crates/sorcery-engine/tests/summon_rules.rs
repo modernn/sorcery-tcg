@@ -466,6 +466,10 @@ fn rule_catalog_0872_aramos_discards_deterministic_random_hand_card_instead_of_m
     };
     assert_eq!(first, second);
     assert_eq!(
+        session.replay_value().expect("first Aramos state"),
+        repeated.replay_value().expect("repeated Aramos state")
+    );
+    assert_eq!(
         first
             .events
             .iter()
@@ -647,6 +651,24 @@ fn rule_catalog_0873_gnarled_wendigo_sacrifices_local_allies_before_paying_mana(
         seat: cast.seat,
         state_version: cast.state_version,
     };
+    let before_hash = session.state_hash().expect("Wendigo pre-summon state hash");
+    let before_transcript = session.transcript().len();
+    let StepResult::Rejected(forged) = session
+        .step(ActionRequest {
+            action_id: format!("{}:forged", request.action_id),
+            seat: request.seat,
+            state_version: request.state_version,
+        })
+        .expect("forged Wendigo action")
+    else {
+        panic!("forged Wendigo action must be rejected");
+    };
+    assert_eq!(forged.code, RejectionCode::UnknownAction);
+    assert_eq!(
+        session.state_hash().expect("unchanged state hash"),
+        before_hash
+    );
+    assert_eq!(session.transcript().len(), before_transcript);
     let checkpoint = create_game_checkpoint(&session).expect("captured Wendigo checkpoint");
     let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized checkpoint");
     let mut repeated = resume_game_checkpoint(
@@ -1417,6 +1439,44 @@ fn rule_catalog_0830_hamlet_discounts_ordinary_payments_across_modes() {
             .verify_replay()
             .expect("verified ordinary Hamlet replay")
     );
+}
+
+#[test]
+fn summon_manifest_rejects_invalid_payment_and_ordinary_facts() {
+    let base = scenario_manifest(
+        1,
+        &site("earth", false),
+        &minion(1, &thresholds(None, 0)),
+        &site("earth", false),
+    );
+    let invalid_facts = [
+        ("north-site", "ordinaryMinionManaDiscount", json!(0)),
+        ("north-site", "ordinary", json!(false)),
+        ("north-minion", "ordinary", json!(false)),
+        (
+            "north-minion",
+            "discardRandomCardInsteadOfMana",
+            json!(false),
+        ),
+        (
+            "north-minion",
+            "sacrificeMinionAtSummoningLocationForManaDiscount",
+            json!(1),
+        ),
+    ];
+
+    for (card_id, fact, value) in invalid_facts {
+        let mut manifest: Value = serde_json::from_str(&base).expect("manifest value");
+        manifest
+            .as_object_mut()
+            .expect("manifest object")
+            .remove("manifestId");
+        manifest["cards"][card_id][fact] = value;
+        manifest["manifestId"] = json!(identity_hash(&manifest).expect("manifest identity"));
+        let error = Session::new(&canonical_json(&manifest).expect("canonical manifest"))
+            .expect_err("invalid summon fact must be rejected");
+        assert!(error.to_string().contains(fact), "{error}");
+    }
 }
 
 #[test]

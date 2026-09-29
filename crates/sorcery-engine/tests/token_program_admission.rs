@@ -77,6 +77,14 @@ fn token_program_rejects_missing_and_non_token_references() {
             .remove("token");
     });
     rejected(&non_token, "token effect must reference a token minion");
+
+    let unreferenced = selfplay_manifest_with(7114, |manifest| {
+        manifest["cards"]["orphan-token"] = token_minion(None);
+    });
+    rejected(
+        &unreferenced,
+        "cards must contain exactly the deck-referenced definitions",
+    );
 }
 
 #[test]

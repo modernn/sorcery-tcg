@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::game::{Game, IssuedAction};
+use sorcery_engine::session::Session;
 use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
 #[derive(Deserialize)]
@@ -54,6 +55,59 @@ fn action_identity(action: &IssuedAction) -> String {
         .expect("materialized legal action")
         .action_id
         .to_string()
+}
+
+#[test]
+fn synthetic_setup_should_deal_hidden_hands_and_place_avatars() {
+    let manifest = synthetic_demo_manifest_json(7).expect("synthetic manifest");
+    let session = Session::new(&manifest).expect("valid session");
+    let replay = session.replay_value().expect("session replay value");
+    let state = &replay["state"];
+    let north = &state["players"]["north"];
+
+    assert_eq!(state["phase"], "mulligan");
+    assert_eq!(state["activeSeat"], "north");
+    assert_eq!(state["turnNumber"], 0);
+    assert_eq!(north["hand"]["atlas"].as_array().map(Vec::len), Some(3));
+    assert_eq!(north["hand"]["spellbook"].as_array().map(Vec::len), Some(3));
+    assert_eq!(north["atlas"].as_array().map(Vec::len), Some(27));
+    assert_eq!(north["spellbook"].as_array().map(Vec::len), Some(47));
+    assert_eq!(north["avatar"]["location"], "C4");
+    assert_eq!(north["avatar"]["region"], "surface");
+    assert_eq!(north["avatar"]["life"], 20);
+    assert_eq!(north["cemetery"], json!([]));
+    assert_eq!(state["players"]["south"]["avatar"]["location"], "C1");
+    assert_eq!(state["decisionSeat"], "north");
+
+    let setup_draws = replay["initialRandomDraws"]
+        .as_array()
+        .expect("initial setup draws");
+    assert!(setup_draws.len() >= 156);
+    assert!(setup_draws.iter().all(|draw| {
+        draw["purpose"]
+            .as_str()
+            .is_some_and(|purpose| purpose.starts_with("setup_"))
+    }));
+    let opponent_view = session
+        .public_view(sorcery_engine::contract::Seat::South)
+        .expect("south public view");
+    let opponent_json = serde_json::to_string(&opponent_view).expect("public view JSON");
+    assert_eq!(opponent_view["players"]["north"]["hand"]["atlas"], 3);
+    assert_eq!(opponent_view["players"]["north"]["hand"]["spellbook"], 3);
+    assert!(!opponent_json.contains("north-site-"));
+    assert!(!opponent_json.contains("north-spell-"));
+
+    let north_actions = session.legal_actions().expect("north setup actions");
+    assert_eq!(north_actions.len(), 76);
+    assert_eq!(
+        session.legal_actions().expect("repeat actions"),
+        north_actions
+    );
+    assert!(
+        north_actions
+            .iter()
+            .all(|action| action.seat == sorcery_engine::contract::Seat::North)
+    );
 }
 
 #[test]

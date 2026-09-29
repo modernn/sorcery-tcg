@@ -219,6 +219,15 @@ fn rule_catalog_0809_first_player_skips_draw_second_chooses_deck() {
     assert_eq!(after_site["players"]["north"]["domainEstablished"], true);
     assert_eq!(after_site["players"]["north"]["mana"], 1);
     assert_eq!(after_site["players"]["north"]["avatar"]["tapped"], true);
+    let after_site_kinds = session
+        .legal_actions()
+        .expect("actions after domain establishment")
+        .into_iter()
+        .map(|action| action.descriptor["kind"].clone())
+        .collect::<Vec<_>>();
+    assert!(!after_site_kinds.contains(&json!("play-site")));
+    assert!(!after_site_kinds.contains(&json!("draw-site")));
+    assert!(after_site_kinds.contains(&json!("end-turn")));
     let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     assert_eq!(
         events(&ended),
@@ -239,6 +248,10 @@ fn rule_catalog_0809_first_player_skips_draw_second_chooses_deck() {
             .collect::<Vec<_>>(),
         vec![json!("atlas"), json!("spellbook")]
     );
+    let draw_step = state(&session);
+    assert_eq!(draw_step["turnNumber"], 2);
+    assert_eq!(draw_step["activeSeat"], "south");
+    assert_eq!(draw_step["phase"], "draw");
     let south_before = state(&session);
     let drawn = south_before["players"]["south"]["atlas"][0].clone();
     let (_, receipt) = accept_where(&mut session, |descriptor| {
@@ -258,6 +271,15 @@ fn rule_catalog_0809_first_player_skips_draw_second_chooses_deck() {
         !serde_json::to_string(&receipt.events)
             .expect("event JSON")
             .contains(drawn["cardId"].as_str().expect("drawn card ID"))
+    );
+    assert!(
+        !serde_json::to_string(
+            &replay_game(&session)
+                .public_view(Seat::North)
+                .expect("opponent view after draw")
+        )
+        .expect("opponent view JSON")
+        .contains(drawn["cardId"].as_str().expect("drawn card ID"))
     );
     assert_exact_replay(&session);
 }
@@ -303,6 +325,37 @@ fn rule_catalog_0810_sites_expand_through_unoccupied_orthogonal_cells() {
     assert_eq!(after["realm"]["sites"]["C3"]["controller"], "north");
     assert_eq!(after["players"]["north"]["mana"], 2);
     assert_exact_replay(&session);
+
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let mut expanded_cells = session
+        .legal_actions()
+        .expect("second expansion actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "play-site")
+        .map(|action| {
+            action.descriptor["cell"]
+                .as_str()
+                .expect("site cell")
+                .to_owned()
+        })
+        .collect::<Vec<_>>();
+    expanded_cells.sort();
+    expanded_cells.dedup();
+    assert_eq!(expanded_cells, ["B3", "B4", "D3", "D4"]);
+    let final_state = state(&session);
+    assert_eq!(final_state["players"]["north"]["avatar"]["tapped"], false);
+    assert_eq!(final_state["players"]["north"]["mana"], 2);
+    assert_exact_replay(&session);
 }
 
 #[test]
@@ -310,7 +363,6 @@ fn rule_catalog_0811_avatar_draws_private_site_pays_tap_cost() {
     let mut session = north_second_main(29, false);
     let before = state(&session);
     let drawn = before["players"]["north"]["atlas"][0].clone();
-    let opponent_before = replay_game(&session).observe(Seat::South);
     let (_, receipt) = accept_where(&mut session, |descriptor| descriptor["kind"] == "draw-site");
     assert_eq!(
         events(&receipt),
@@ -335,7 +387,15 @@ fn rule_catalog_0811_avatar_draws_private_site_pays_tap_cost() {
         Some(&drawn)
     );
     assert_eq!(after["players"]["north"]["avatar"]["tapped"], true);
-    assert_eq!(replay_game(&session).observe(Seat::South), opponent_before);
+    assert!(
+        !serde_json::to_string(
+            &replay_game(&session)
+                .public_view(Seat::South)
+                .expect("opponent view after draw")
+        )
+        .expect("opponent view JSON")
+        .contains(drawn["cardId"].as_str().expect("drawn card ID"))
+    );
     let kinds = session
         .legal_actions()
         .expect("post-draw actions")
