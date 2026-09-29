@@ -235,6 +235,16 @@ during migration, but old and new definitions must execute through the same migr
 runtime. Delete superseded dispatch after each cutover. Do not retain two legality
 engines, including a permanent TypeScript fallback.
 
+Rule scenarios, deterministic random streams, action contracts, checkpoint continuity,
+and simulator/search assertions belong in Rust. Replace their TypeScript suites only
+after Rust proves the same behavior, including negative cases and pinned identity
+vectors. Browser objects can still require JavaScript-specific tests for runtime input
+validation and immutability. Authority ingestion, browser/server transport, and the
+optional Jev HTTPS client remain TypeScript boundaries; none may decide legality or
+provide a second rollout engine. Move private scenario execution into Rust as its
+manifest ingestion boundary is separated, rather than retaining a permanent Node
+scenario runner.
+
 Version semantic changes. The constant `sorcery-core-v1` alone is insufficient to
 identify a changing executable. Run evidence must pin the engine implementation/build,
 authority, compiled definitions, decks, policies, and seeds. Correcting an old rule

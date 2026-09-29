@@ -98,16 +98,3 @@ test('random-card-discard summon fixture regenerates byte-identically from Rust 
   assert.match(fixture.transition.receipt.postStateHash, /^sha256:[0-9a-f]{64}$/);
   assert.match(fixture.transition.receipt.receiptId, /^sha256:[0-9a-f]{64}$/);
 });
-
-test('canonical action ordering keeps a shorter numeric prefix before its extension', () => {
-  const base = fixture.actions[1]!.descriptor;
-  const descriptors = [1, 10].map((manaCost) => ({ ...base, manaCost }));
-  const ordered = orderLegalActions(descriptors.map((descriptor) => ({
-    actionId: opaqueActionId(fixture.contract, fixture.seat, fixture.stateVersion, descriptor),
-    descriptor,
-    label: '',
-    seat: fixture.seat,
-    stateVersion: fixture.stateVersion,
-  })));
-  assert.deepEqual(ordered.map(({ descriptor }) => descriptor.manaCost), [1, 10]);
-});

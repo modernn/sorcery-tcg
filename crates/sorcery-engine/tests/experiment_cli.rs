@@ -41,6 +41,26 @@ fn example() -> Value {
 }
 
 #[test]
+fn fresh_processes_emit_byte_identical_deterministic_game_evidence() {
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_sorcery-engine"))
+            .args(["demo", "31"])
+            .output()
+            .expect("run deterministic demo in a fresh process")
+    };
+    let first = run();
+    let second = run();
+
+    assert!(first.status.success());
+    assert!(second.status.success());
+    assert!(first.stderr.is_empty());
+    assert!(second.stderr.is_empty());
+    assert_eq!(first.stdout, second.stdout);
+    let report: Value = serde_json::from_slice(&first.stdout).expect("demo report JSON");
+    assert_eq!(report["replayVerified"], true);
+}
+
+#[test]
 fn experiments_preserve_facts_and_replay_across_workers_and_deck_encodings() {
     let mut request = example();
     request["seeds"] = json!([31]);

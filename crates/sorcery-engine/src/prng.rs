@@ -54,7 +54,8 @@ mod tests {
 
     #[test]
     fn mulberry32_should_match_existing_five_draw_vector() {
-        let mut state = PrngState::new(0);
+        let initial = PrngState::new(0);
+        let mut state = initial;
         let values = std::array::from_fn::<_, 5, _>(|_| state.draw_u32());
 
         assert_eq!(
@@ -67,7 +68,27 @@ mod tests {
                 2_007_157_716
             ]
         );
+        assert_eq!(initial, PrngState::new(0));
         assert_eq!(state.word, 567_894_473);
         assert_eq!(state.draws, 5);
+    }
+
+    #[test]
+    fn serialized_prng_checkpoint_resumes_the_exact_random_stream() {
+        let mut uninterrupted = PrngState::new(123_456_789);
+        let _ = uninterrupted.draw_u32();
+        let _ = uninterrupted.draw_u32();
+
+        let encoded = serde_json::to_string(&uninterrupted).expect("checkpoint JSON");
+        let mut resumed: PrngState = serde_json::from_str(&encoded).expect("resumed PRNG");
+        let mut uninterrupted_values = Vec::new();
+        let mut resumed_values = Vec::new();
+        for _ in 0..5 {
+            uninterrupted_values.push(uninterrupted.draw_u32());
+            resumed_values.push(resumed.draw_u32());
+        }
+
+        assert_eq!(resumed_values, uninterrupted_values);
+        assert_eq!(resumed, uninterrupted);
     }
 }

@@ -2,7 +2,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use sorcery_engine::canonical::identity_hash;
 use sorcery_engine::checkpoint::{
-    create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+    CheckpointError, create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
     serialize_game_checkpoint,
 };
 use sorcery_engine::contract::{ActionRequest, Seat};
@@ -86,7 +86,7 @@ fn checkpoint_should_restore_accepted_and_rejected_attempts() {
     let checkpoint = create_game_checkpoint(&session).expect("captured checkpoint");
     let serialized = serialize_game_checkpoint(&checkpoint).expect("canonical checkpoint");
     let parsed = parse_game_checkpoint(&serialized).expect("parsed checkpoint");
-    let restored = resume_game_checkpoint(&parsed).expect("restored checkpoint");
+    let mut restored = resume_game_checkpoint(&parsed).expect("restored checkpoint");
 
     assert_eq!(restored.attempts(), session.attempts());
     assert_eq!(restored.transcript(), session.transcript());
@@ -95,6 +95,42 @@ fn checkpoint_should_restore_accepted_and_rejected_attempts() {
         session.session_hash().expect("original hash")
     );
     assert!(restored.verify_replay().expect("verified replay"));
+
+    let original_actions = session
+        .legal_actions()
+        .expect("original continuation actions");
+    let restored_actions = restored
+        .legal_actions()
+        .expect("restored continuation actions");
+    assert_eq!(restored_actions, original_actions);
+    let continuation = original_actions
+        .first()
+        .expect("continuation action")
+        .clone();
+    let request = ActionRequest {
+        action_id: continuation.action_id.to_string(),
+        seat: continuation.seat,
+        state_version: continuation.state_version,
+    };
+    let StepResult::Accepted(_) = session
+        .step(request.clone())
+        .expect("continue original session")
+    else {
+        panic!("original continuation action was rejected");
+    };
+    let StepResult::Accepted(_) = restored.step(request).expect("continue restored session") else {
+        panic!("restored continuation action was rejected");
+    };
+    assert_eq!(
+        restored
+            .replay_value()
+            .expect("restored continuation replay"),
+        session
+            .replay_value()
+            .expect("original continuation replay")
+    );
+    assert_eq!(restored.attempts(), session.attempts());
+    assert_eq!(restored.transcript(), session.transcript());
 }
 
 #[test]
@@ -124,5 +160,9 @@ fn checkpoint_should_reject_duplicates_and_tampered_history() {
     let changed = parse_game_checkpoint(&serde_json::to_string(&value).expect("changed JSON"))
         .expect("self-consistent changed checkpoint");
 
-    assert!(resume_game_checkpoint(&changed).is_err());
+    assert!(matches!(
+        resume_game_checkpoint(&changed),
+        Err(CheckpointError::Invalid(reason))
+            if reason == "checkpoint session hash does not match reconstructed history"
+    ));
 }

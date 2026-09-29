@@ -350,7 +350,12 @@ pub fn rejected_attempt(
 mod tests {
     use serde_json::json;
 
-    use super::{LegalAction, Seat, opaque_action_id, order_legal_actions};
+    use super::{
+        ActionRequest, AttemptOutcome, LegalAction, ReceiptInput, RejectionCode, Seat,
+        accepted_attempt, create_events, create_receipt, create_rejection, opaque_action_id,
+        order_legal_actions, rejected_attempt,
+    };
+    use crate::canonical::IdentityHash;
 
     fn action(descriptor: serde_json::Value) -> LegalAction {
         LegalAction {
@@ -373,6 +378,16 @@ mod tests {
                 .to_string(),
             "sha256:c6a0779245e80ea05b708f13f579f46c4f0674514b88cab86e8f3b1441ba0a5a"
         );
+        assert_ne!(
+            opaque_action_id("test-v1", Seat::South, 3, &descriptor).expect("other seat identity"),
+            opaque_action_id("test-v1", Seat::North, 3, &descriptor).expect("north identity")
+        );
+        assert_ne!(
+            opaque_action_id("test-v1", Seat::North, 4, &descriptor)
+                .expect("later version identity"),
+            opaque_action_id("test-v1", Seat::North, 3, &descriptor)
+                .expect("original version identity")
+        );
     }
 
     #[test]
@@ -385,5 +400,104 @@ mod tests {
 
         assert_eq!(ordered[0].descriptor["kind"], "draw");
         assert_eq!(ordered[1].descriptor["kind"], "pass");
+    }
+
+    #[test]
+    fn receipts_events_rejections_and_attempts_should_preserve_the_shared_contract() {
+        let action_id = opaque_action_id(
+            "test-v1",
+            Seat::North,
+            3,
+            &json!({"kind":"draw","zone":"atlas"}),
+        )
+        .expect("action identity");
+        let state_hash =
+            IdentityHash::parse(&format!("sha256:{}", "a".repeat(64))).expect("state hash");
+        let next_hash =
+            IdentityHash::parse(&format!("sha256:{}", "b".repeat(64))).expect("next state hash");
+        let events = create_events(
+            &action_id,
+            2,
+            4,
+            &[
+                (
+                    "card-drawn".to_owned(),
+                    json!({"seat":"north","zone":"atlas"}),
+                ),
+                ("priority-retained".to_owned(), json!({"seat":"north"})),
+            ],
+        )
+        .expect("causal events");
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.event_sequence)
+                .collect::<Vec<_>>(),
+            [4, 5]
+        );
+        assert!(events.iter().all(|event| {
+            event.cause.action_id == action_id && event.cause.receipt_sequence == 2
+        }));
+
+        let receipt = create_receipt(ReceiptInput {
+            action_id: action_id.clone(),
+            events,
+            next_state_version: 4,
+            post_state_hash: next_hash.clone(),
+            pre_state_hash: state_hash.clone(),
+            random_draws: vec![],
+            receipt_sequence: 2,
+            seat: Seat::North,
+            state_version: 3,
+        })
+        .expect("identified receipt");
+        assert!(IdentityHash::parse(receipt.receipt_id.as_str()).is_ok());
+        assert_eq!(receipt.pre_state_hash, state_hash);
+        assert_eq!(receipt.post_state_hash, next_hash.clone());
+        assert_eq!(receipt.events[0].event_type, "card-drawn");
+        assert!(
+            !serde_json::to_value(&receipt)
+                .expect("receipt JSON")
+                .as_object()
+                .expect("receipt object")
+                .contains_key("reasonCode")
+        );
+
+        let rejection = create_rejection(RejectionCode::StaleVersion, 4, next_hash.clone());
+        assert_eq!(rejection.code, RejectionCode::StaleVersion);
+        assert_eq!(rejection.current_state_hash, next_hash.clone());
+        assert_eq!(rejection.current_state_version, 4);
+        assert_eq!(
+            rejection.message,
+            "That action belongs to an earlier game state."
+        );
+        let accepted = accepted_attempt(
+            1,
+            ActionRequest {
+                action_id: action_id.to_string(),
+                seat: Seat::North,
+                state_version: 3,
+            },
+            3,
+            state_hash.clone(),
+            receipt.receipt_id.clone(),
+        );
+        let rejected = rejected_attempt(
+            2,
+            ActionRequest {
+                action_id: action_id.to_string(),
+                seat: Seat::North,
+                state_version: 3,
+            },
+            4,
+            next_hash,
+            rejection.code,
+        );
+        assert_eq!(accepted.outcome, AttemptOutcome::Accepted);
+        assert_eq!(accepted.receipt_id, Some(receipt.receipt_id));
+        assert_eq!(accepted.reason_code, None);
+        assert_eq!(rejected.outcome, AttemptOutcome::Rejected);
+        assert_eq!(rejected.reason_code, Some(RejectionCode::StaleVersion));
+        assert_eq!(rejected.receipt_id, None);
     }
 }

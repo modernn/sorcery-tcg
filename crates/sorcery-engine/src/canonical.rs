@@ -381,6 +381,26 @@ mod tests {
     }
 
     #[test]
+    fn identity_hash_should_match_existing_five_draw_engine_state_vector() {
+        let mut prng = crate::prng::PrngState::new(0);
+        for _ in 0..5 {
+            let _ = prng.draw_u32();
+        }
+        let value = json!({
+            "stateVersion": 0,
+            "schemaVersion": 1,
+            "prng": prng,
+        });
+
+        assert_eq!(
+            identity_hash(&value)
+                .expect("five-draw engine state hash")
+                .to_string(),
+            "sha256:7a06a448ee0b11752a630f6a16d51640c37c03d13d73fa328e420e018bafc5dc"
+        );
+    }
+
+    #[test]
     fn identity_hash_deserialization_should_reject_noncanonical_syntax() {
         let result = serde_json::from_str::<super::IdentityHash>(
             r#""SHA256:9EC0A8E3F08E46C6C6E2A44542DE0A7C20A50A1FE6AF9EA5B195DD0379D4E4B2""#,
