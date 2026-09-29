@@ -267,6 +267,38 @@ test('DATA-01 resolves current official authority and retains winning source ref
   assert.deepEqual(resolution.superseded, [ref(oldRulebook)]);
 });
 
+test('DATA-01 uses Codex for general rules while preserving scoped overrides and explicit supersession', () => {
+  const codex = manifestSource('source:primary-codex', { effectiveDate: '2026-01-01' });
+  const rulebook = manifestSource('source:newer-rulebook', { effectiveDate: '2026-07-15' });
+  const base = [record(codex, 'codex'), record(rulebook, 'rulebook')];
+  const general = resolveAuthorityPrecedence(base, null, '2026-08-20');
+  assert.deepEqual(general.winning, ref(codex));
+  assert.deepEqual(general.superseded, [ref(rulebook)]);
+
+  const overlay = manifestSource('source:selected-overlay', { effectiveDate: '2026-06-01' });
+  const scoped = [...base, record(overlay, 'format', { scope: 'format:synthetic' })];
+  assert.deepEqual(resolveAuthorityPrecedence(scoped, null, '2026-08-20').winning, ref(codex));
+  assert.deepEqual(
+    resolveAuthorityPrecedence(scoped, 'format:synthetic', '2026-08-20').winning,
+    ref(overlay),
+  );
+
+  const update = manifestSource('source:matching-card-update', { effectiveDate: '2026-06-01' });
+  const card = [...base, record(update, 'card-update', { scope: 'card:synthetic' })];
+  assert.deepEqual(resolveAuthorityPrecedence(card, null, '2026-08-20').winning, ref(codex));
+  assert.deepEqual(
+    resolveAuthorityPrecedence(card, 'card:synthetic', '2026-08-20').winning,
+    ref(update),
+  );
+
+  const supersession = resolveAuthorityPrecedence(
+    [record(codex, 'codex'), record(rulebook, 'rulebook', { supersedes: [codex.sourceId] })],
+    null,
+    '2026-08-20',
+  );
+  assert.deepEqual(supersession.winning, ref(rulebook));
+});
+
 test('DATA-01 resolves explicit official superseded authority by effective date', () => {
   const oldFaq = manifestSource('source:faq-old', { effectiveDate: '2026-01-01' });
   const update = manifestSource('source:card-update-current', { effectiveDate: '2026-07-15' });

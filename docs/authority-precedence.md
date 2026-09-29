@@ -2,6 +2,11 @@
 
 This document is the Sorcery Simulator's D-01/D-02 fail-closed policy. It is not a claim that Erik's Curiosa has published a complete hierarchy for conflicting official sources. The repository records policy and source references only; it does not reproduce rule or card text.
 
+The official Sorcery Codex is the project's primary source for shared rules semantics.
+Official card definitions and card-specific rulings supply the instructions composed
+through those rules. Rulebook material is supporting authority; a newer rulebook date
+alone does not displace an applicable Codex entry.
+
 ## Normative authority
 
 Only records whose `authorityClass` is `official` can determine an outcome. The five normative source classes are:
@@ -23,7 +28,7 @@ Community tools, deck sites, gameplay reports, and external implementations are 
 3. Apply an explicit official supersession or reversal first. Every `supersedes` reference must name an applicable official record; the newer record wins and displaced records remain recorded as superseded.
 4. Apply current card-specific official card updates or official card data only to the matching `card:*` scope.
 5. Apply an explicitly selected scoped overlay only inside its exact scope. A selected format overlay outranks compatible general material there; a scope never leaks into another format, event, or card.
-6. Use compatible official rulebook material for general rules and official Codex/FAQ material for detail or card clarification. At the same applicable rank, the uniquely newest effective date wins.
+6. Prefer applicable official Codex/FAQ material over rulebook material for general rules. Use rulebook material when no higher-ranked official record applies. At the same applicable rank, the uniquely newest effective date wins.
 
 A resolved result retains the winning source reference, all displaced or superseded references, and all non-normative provenance. Historical evidence is never silently flattened.
 
