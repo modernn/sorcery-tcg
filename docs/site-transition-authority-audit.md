@@ -11,11 +11,15 @@ against the Codex entries for [Enter](https://sorcerytcg.com/codex/5b927a70-2900
 
 ## Current status
 
-This is an authority and design audit, not a landed legality implementation. The experimental
-site-transition branch was removed after review because it added a second transition-specific
-runtime path before proving that it could replace the existing generic trigger and continuation
-protocol. The current engine therefore remains unchanged while this contract is used to shape the
-next small kernel extraction.
+The engine now extracts site-incarnation boundaries into one shared detector used by the
+existing minion-entry hook. It compares complete before/after footprints, de-duplicates boundaries,
+preserves footprint order, and distinguishes a physical card's new realm incarnation from its
+previous one. Existing movement and summon entry scenarios retain their event and replay behavior.
+
+This extraction does not add new card support or dispatch exit, Avatar, or Aura-owned triggers.
+The experimental site-transition branch was removed after review because it added a second
+transition-specific runtime path before proving that it could replace the existing generic
+trigger and continuation protocol. That continuation integration remains the next prerequisite.
 
 ## Decisions
 

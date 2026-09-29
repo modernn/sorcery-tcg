@@ -52,6 +52,7 @@ mod selection;
 mod site_affinity_tests;
 #[cfg(test)]
 mod site_entry_tests;
+mod site_transition;
 mod trigger_order;
 #[cfg(test)]
 mod trigger_tests;
@@ -63,6 +64,7 @@ use effect::{AbilityEntry, EffectFrame, RealmReference};
 use effect_strikes::EffectStrikes;
 use modifiers::{TemporaryModifierKind, TemporaryModifiers};
 use resolution::{SiteGenesisTail, TokenEntryContinuation};
+use site_transition::SiteTransition;
 use trigger_order::{TriggerBatch, TriggerIdentity, TriggerOrderStage, TriggerSource};
 use triggers::{GenesisTrigger, PendingTriggerOrder};
 
@@ -6380,13 +6382,15 @@ impl Game {
             .ok_or(GameError::IllegalAction)?;
         let seat = unit.controller;
         let cells = Self::unit_occupied_cells(unit).to_vec();
+        let new_sites = self.minion_occupied_site_incarnations(instance_id)?;
+        let transition = SiteTransition::between(old_sites, &new_sites);
         let mut entries = Vec::new();
         for cell in cells {
             let Some(site) = &self.position.sites[cell.index()] else {
                 continue;
             };
             let reference = RealmReference::from_card(&site.card);
-            if old_sites.contains(&reference)
+            if !transition.entered.contains(&reference)
                 || entries.iter().any(
                     |(_, prior, _, _): &(Cell, RealmReference, SiteEntryEffect, SiteEntryUsage)| {
                         *prior == reference

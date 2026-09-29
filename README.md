@@ -202,6 +202,16 @@ pnpm game:selfplay-soak
 
 `verify:all` runs locked Rust format/check/Clippy/tests with two build/test threads,
 then TypeScript typecheck/lint/tests. Tests need child processes and local loopback ports.
+When `/tmp` is backed by RAM, keep Cargo targets on disk and use a disk-backed
+temporary directory for full verification:
+
+```sh
+mkdir -p .local/recovery/test-tmp
+TMPDIR="$PWD/.local/recovery/test-tmp" pnpm verify:all
+```
+
+Check available RAM and temporary storage before running parallel build lanes. A full
+integration-test build can fill a small temporary filesystem even with spare swap.
 The acceptance and soak commands are bounded synthetic campaign contracts; they do not
 prove real-deck strategic strength. Private release verification is separate and requires
 the historical ignored inputs described in the authority policy.
