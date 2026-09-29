@@ -60,7 +60,7 @@ fn lash() -> Value {
     json!({
         "cardType": "magic",
         "damageTargetUnit": 1,
-        "manaCost": 0,
+        "manaCost": 1,
         "targetNearby": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
         "untapTargetMinionAfterDamage": true,
@@ -480,7 +480,12 @@ fn rule_catalog_0699_lash_damages_then_untaps_only_a_surviving_nearby_minion() {
         json!(true)
     );
 
-    let (_, survived) = accept_where(&mut session, |descriptor| {
+    let before = state(&session);
+    let mana_before = before["players"]["north"]["mana"]
+        .as_u64()
+        .expect("North mana before Lash");
+    let version_before = session.state_version();
+    let (cast, survived) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic"
             && descriptor["cardId"] == "north-lash"
             && descriptor["target"]["instanceId"] == nearby_id
@@ -499,6 +504,32 @@ fn rule_catalog_0699_lash_damages_then_untaps_only_a_surviving_nearby_minion() {
     let survivor = unit(&after, &nearby_id).expect("surviving nearby");
     assert_eq!(survivor["damage"], 1);
     assert_eq!(survivor["tapped"], false);
+    assert_eq!(
+        after["players"]["north"]["mana"].as_u64(),
+        Some(mana_before - 1)
+    );
+    let lash_id = cast["cardInstanceId"].as_str().expect("Lash identity");
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("North cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == lash_id)
+    );
+    assert_eq!(session.state_version(), version_before + 1);
+    let untapped = survived
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-untapped")
+        .expect("Lash untaps its surviving target");
+    assert_eq!(
+        untapped.payload,
+        json!({
+            "instanceId": nearby_id,
+            "seat": "south",
+            "sourceInstanceId": lash_id,
+        })
+    );
     assert_exact_replay(&session);
 }
 

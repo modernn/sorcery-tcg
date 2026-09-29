@@ -364,6 +364,34 @@ fn rule_catalog_0023_magic_targets_exclude_enemy_stealth() {
     assert_exact_replay(&session);
 }
 
+#[test]
+fn rule_catalog_magic_target_nearby_excludes_a_distant_minion_but_keeps_the_caster_avatar_legal() {
+    let encoded = seed_with(2459, &["north-magic", "north-minion"]);
+    let mut manifest: Value = serde_json::from_str(&encoded).expect("region-target manifest");
+    manifest["cards"]["north-magic"]["targetNearby"] = json!(true);
+    manifest
+        .as_object_mut()
+        .expect("manifest object")
+        .remove("manifestId");
+    let encoded = finish_manifest(manifest);
+    let mut session = opening_main(&encoded);
+    let (_, distant_id) = south_plays_c1_and_summons(&mut session, false, true);
+
+    let actions = session.legal_actions().expect("nearby Magic actions");
+    assert!(actions.iter().any(|action| {
+        action.descriptor["kind"] == "cast-magic"
+            && action.descriptor["cardId"] == "north-magic"
+            && action.descriptor["target"]["kind"] == "avatar"
+            && action.descriptor["target"]["seat"] == "north"
+    }));
+    assert!(!actions.iter().any(|action| {
+        action.descriptor["kind"] == "cast-magic"
+            && action.descriptor["cardId"] == "north-magic"
+            && action.descriptor["target"]["instanceId"] == distant_id
+    }));
+    assert_exact_replay(&session);
+}
+
 fn region_supplemental_manifest(seed: u32) -> String {
     finish_manifest(json!({
         "authority": {

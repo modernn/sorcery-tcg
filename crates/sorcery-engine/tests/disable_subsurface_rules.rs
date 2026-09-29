@@ -147,6 +147,67 @@ fn surface_manifest(seed: u32) -> String {
     }))
 }
 
+fn submerged_voidwalking_minion(spellcaster: bool) -> Value {
+    let mut value = json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "manaCost": 0,
+        "submerge": true,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        "voidwalk": true,
+    });
+    if spellcaster {
+        value["spellcaster"] = json!(true);
+    }
+    value
+}
+
+fn region_settlement_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "disable-region-settlement" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-disable-region-settlement-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-caster": submerged_voidwalking_minion(true),
+            "north-freeze": freeze(),
+            "north-site": { "cardType": "site", "elements": ["water"] },
+            "north-target": submerged_voidwalking_minion(false),
+            "south-avatar": avatar(),
+            "south-minion": burrower(false),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-caster",
+                    "north-target",
+                    "north-freeze",
+                    "north-caster",
+                    "north-target",
+                    "north-freeze",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
 fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
     let action = session
         .legal_actions()
@@ -230,6 +291,123 @@ fn south_opening_has(encoded: &str, card_ids: &[&str]) -> bool {
                     .all(|card_id| hand.iter().any(|card| card["cardId"] == *card_id))
             })
     })
+}
+
+fn north_opening_has(encoded: &str, card_ids: &[&str]) -> bool {
+    Session::new(encoded).ok().is_some_and(|preview| {
+        state(&preview)["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .is_some_and(|hand| {
+                card_ids
+                    .iter()
+                    .all(|card_id| hand.iter().any(|card| card["cardId"] == *card_id))
+            })
+    })
+}
+
+#[test]
+fn disable_immediately_settles_submerged_and_voidwalking_minions_when_supporting_facts_are_removed()
+{
+    let encoded = (0..512)
+        .map(region_settlement_manifest)
+        .find(|candidate| {
+            north_opening_has(candidate, &["north-caster", "north-target", "north-freeze"])
+        })
+        .expect("bounded seed with caster, target, and Freeze in North's opening hand");
+
+    for (region, cell, settlement_event, expected_region) in [
+        ("underwater", "C4", "minion-died", "underwater"),
+        ("void", "B4", "minion-banished", "void"),
+    ] {
+        let mut session = opening_main(&encoded);
+        let (caster, _) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == "north-caster"
+                && descriptor["cell"] == cell
+                && descriptor["region"] == region
+        });
+        let caster_id = caster["cardInstanceId"].as_str().expect("caster ID");
+        let (target, _) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == "north-target"
+                && descriptor["cell"] == cell
+                && descriptor["region"] == region
+        });
+        let target_id = target["cardInstanceId"].as_str().expect("target ID");
+        let freeze_id = state(&session)["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("North hand")
+            .iter()
+            .find(|card| card["cardId"] == "north-freeze")
+            .expect("Freeze in North hand")["instanceId"]
+            .as_str()
+            .expect("Freeze instance ID")
+            .to_owned();
+
+        let (_, receipt) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic"
+                && descriptor["cardInstanceId"] == freeze_id
+                && descriptor["casterInstanceId"] == caster_id
+                && descriptor["target"]["instanceId"] == target_id
+        });
+        let events = event_types(&receipt);
+        let expected_events = if settlement_event == "minion-died" {
+            [
+                "magic-cast",
+                "minion-disabled",
+                "minion-died",
+                "magic-resolved",
+            ]
+        } else {
+            [
+                "magic-cast",
+                "minion-disabled",
+                "minion-banished",
+                "magic-resolved",
+            ]
+        };
+        assert_eq!(events, expected_events);
+
+        let after = state(&session);
+        assert!(realm_unit(&after, target_id).is_none());
+        assert_eq!(
+            realm_unit(&after, caster_id).expect("caster survives")["region"],
+            expected_region
+        );
+        assert!(
+            after["players"]["north"]["cemetery"]
+                .as_array()
+                .expect("North cemetery")
+                .iter()
+                .any(|card| card["instanceId"] == freeze_id)
+        );
+        if settlement_event == "minion-died" {
+            assert!(
+                after["players"]["north"]["cemetery"]
+                    .as_array()
+                    .expect("North cemetery")
+                    .iter()
+                    .any(|card| card["instanceId"] == target_id)
+            );
+        } else {
+            assert!(
+                after["players"]["north"]["cemetery"]
+                    .as_array()
+                    .expect("North cemetery")
+                    .iter()
+                    .all(|card| card["instanceId"] != target_id)
+            );
+            assert!(
+                after["players"]["south"]["cemetery"]
+                    .as_array()
+                    .expect("South cemetery")
+                    .iter()
+                    .all(|card| card["instanceId"] != target_id)
+            );
+        }
+        assert!(receipt.random_draws.is_empty());
+        assert_exact_replay(&session);
+    }
 }
 
 fn seed_underground() -> String {
