@@ -644,6 +644,9 @@ fn map_novelty_error(error: SimulatorError) -> SessionError {
         SimulatorError::InvalidLimit => SessionError::Novelty {
             message: "novelty search requires at least one legal action".to_owned(),
         },
+        SimulatorError::InvalidRootActionOrder(reason) => SessionError::Novelty {
+            message: reason.to_owned(),
+        },
         SimulatorError::ReplayDiverged => SessionError::Novelty {
             message: "novelty search could not identify the baseline fallback".to_owned(),
         },

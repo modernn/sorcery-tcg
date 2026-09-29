@@ -1,11 +1,14 @@
 //! Deterministic policy rollouts and bounded root-action search.
 
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 use crate::canonical::IdentityHash;
 use crate::contract::{ActionRequest, Seat};
-use crate::game::{Game, GameError, GameOutcome, Position};
+use crate::game::{Game, GameError, GameOutcome, IssuedAction, Position};
 use crate::policy::{PolicyError, PolicySnapshot};
 use crate::session::{Session, SessionError};
 
@@ -26,8 +29,25 @@ pub struct CheckpointSearch {
     rollouts: Vec<Rollout>,
 }
 
+/// An advisory exploration prefix bound to one exact local session.
+///
+/// These fields identify existing actions; they cannot create actions or mutate state.
+/// Keep this binding local when sending a separate seat-scoped observation to a model.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RootActionOrder {
+    /// Authoritative session identity, including its journals.
+    pub root_session_hash: IdentityHash,
+    /// Version that issued the candidate actions.
+    pub state_version: u64,
+    /// Unique engine-issued action IDs in preferred exploration order.
+    /// Unlisted actions follow in their original canonical order.
+    pub action_ids: Vec<IdentityHash>,
+}
+
 impl CheckpointSearch {
-    /// Returns canonically ordered checkpoint branches.
+    /// Returns checkpoint branches in exploration order.
+    /// Each rollout still records original canonical legal-action indices.
     #[must_use]
     pub fn rollouts(&self) -> &[Rollout] {
         &self.rollouts
@@ -65,6 +85,8 @@ pub enum SimulatorError {
     Session(SessionError),
     /// A search bound was zero.
     InvalidLimit,
+    /// An exploration prefix was stale or did not name unique issued actions.
+    InvalidRootActionOrder(&'static str),
     /// Authoritative replay did not reproduce the rollout's final state.
     ReplayDiverged,
 }
@@ -78,6 +100,7 @@ impl fmt::Display for SimulatorError {
             Self::InvalidLimit => {
                 formatter.write_str("simulation limits must be greater than zero")
             }
+            Self::InvalidRootActionOrder(reason) => formatter.write_str(reason),
             Self::ReplayDiverged => {
                 formatter.write_str("authoritative replay diverged from the selected rollout")
             }
@@ -91,7 +114,7 @@ impl Error for SimulatorError {
             Self::Game(error) => Some(error),
             Self::Policy(error) => Some(error),
             Self::Session(error) => Some(error),
-            Self::InvalidLimit | Self::ReplayDiverged => None,
+            Self::InvalidLimit | Self::InvalidRootActionOrder(_) | Self::ReplayDiverged => None,
         }
     }
 }
@@ -153,9 +176,32 @@ pub fn search_root_actions(
         return Err(SimulatorError::InvalidLimit);
     }
     let root_actions = game.legal_actions()?;
+    let order = (0..root_actions.len()).collect::<Vec<_>>();
+    search_issued_root_actions(
+        game,
+        north_policy,
+        south_policy,
+        max_actions,
+        max_root_actions,
+        &root_actions,
+        &order,
+    )
+}
+
+fn search_issued_root_actions(
+    game: &Game,
+    north_policy: &PolicySnapshot,
+    south_policy: &PolicySnapshot,
+    max_actions: usize,
+    max_root_actions: usize,
+    root_actions: &[IssuedAction],
+    order: &[usize],
+) -> Result<Vec<Rollout>, SimulatorError> {
     let mut rollouts = Vec::with_capacity(root_actions.len().min(max_root_actions));
-    for (action_index, action) in root_actions.into_iter().take(max_root_actions).enumerate() {
-        let branch = game.clone().apply_action_owned(&action)?;
+    for &action_index in order.iter().take(max_root_actions) {
+        let branch = game
+            .clone()
+            .apply_action_owned(&root_actions[action_index])?;
         rollouts.push(continue_game(
             branch,
             north_policy,
@@ -182,14 +228,92 @@ pub fn search_from_checkpoint(
     max_actions: usize,
     max_root_actions: usize,
 ) -> Result<CheckpointSearch, SimulatorError> {
+    search_from_checkpoint_with_order(
+        session,
+        north_policy,
+        south_policy,
+        max_actions,
+        max_root_actions,
+        None,
+    )
+}
+
+/// Explores an optional engine-issued action prefix from an exact checkpoint.
+///
+/// The complete prefix is validated before any branch runs, including entries beyond
+/// `max_root_actions`. Unlisted actions follow canonically. `None` preserves the
+/// ordinary search order. No model is required, and the caller's session is unchanged.
+/// This changes exploration order only; it does not score unfinished branches or
+/// establish that a selected action is optimal.
+///
+/// # Errors
+///
+/// Returns [`SimulatorError`] for zero bounds, a stale/invalid prefix, or an engine,
+/// policy, or checkpoint-identity failure.
+pub fn search_from_checkpoint_with_order(
+    session: &Session,
+    north_policy: &PolicySnapshot,
+    south_policy: &PolicySnapshot,
+    max_actions: usize,
+    max_root_actions: usize,
+    order: Option<&RootActionOrder>,
+) -> Result<CheckpointSearch, SimulatorError> {
+    if max_actions == 0 || max_root_actions == 0 {
+        return Err(SimulatorError::InvalidLimit);
+    }
+    let root_session_hash = session.session_hash()?;
+    if let Some(order) = order
+        && (order.root_session_hash != root_session_hash
+            || order.state_version != session.state_version())
+    {
+        return Err(SimulatorError::InvalidRootActionOrder(
+            "root action order belongs to a different session or state version",
+        ));
+    }
+    let game = session.game_clone();
+    let root_actions = game.legal_actions()?;
+    let indices = if let Some(order) = order {
+        if order.action_ids.len() > root_actions.len() {
+            return Err(SimulatorError::InvalidRootActionOrder(
+                "root action order is longer than the issued action set",
+            ));
+        }
+        let by_id = root_actions
+            .iter()
+            .enumerate()
+            .map(|(index, action)| Ok((action.to_legal_action()?.action_id, index)))
+            .collect::<Result<BTreeMap<_, _>, GameError>>()?;
+        let mut selected = vec![false; root_actions.len()];
+        let mut indices = Vec::with_capacity(root_actions.len());
+        for id in &order.action_ids {
+            let Some(&index) = by_id.get(id) else {
+                return Err(SimulatorError::InvalidRootActionOrder(
+                    "root action order contains an unknown action ID",
+                ));
+            };
+            if selected[index] {
+                return Err(SimulatorError::InvalidRootActionOrder(
+                    "root action order contains a duplicate action ID",
+                ));
+            }
+            selected[index] = true;
+            indices.push(index);
+        }
+        indices.extend((0..root_actions.len()).filter(|&index| !selected[index]));
+        indices
+    } else {
+        (0..root_actions.len()).collect()
+    };
     Ok(CheckpointSearch {
-        root_session_hash: session.session_hash()?,
-        rollouts: search_root_actions(
-            &session.game_clone(),
+        root_session_hash,
+        rollouts: search_issued_root_actions(
+            &game,
             north_policy,
             south_policy,
             max_actions,
             max_root_actions,
+            &root_actions,
+            &indices,
         )?,
     })
 }

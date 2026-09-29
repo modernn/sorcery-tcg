@@ -65,11 +65,39 @@ then measure failure-to-verified-fix time on held-out failures.
 
 ## Playing-agent experiment
 
-If the development evaluation shows value, investigate an optional prior that ranks
-engine-issued legal actions for bounded search. Start with project-owned synthetic
-positions. Preserve exact action identity and state version, use only the acting
-seat's observation, and retain a deterministic fallback. Record model decisions for
-replay; fresh hosted inference is not assumed deterministic.
+An optional exploration prefix now ranks engine-issued actions for bounded native
+search. Rust validates the exact session hash, state version, and every action ID
+before branching. It preserves canonical action indices for replay, appends unlisted
+actions in their original order, and leaves ordinary search unchanged when advice is
+absent. Models cannot create actions or participate in deterministic continuations.
+
+Run the fixed synthetic integrations without credentials or network calls:
+
+```sh
+pnpm agents:probe-example
+pnpm agents:play-example
+```
+
+With `TYPESAFE_API_KEY` configured, the corresponding live commands are:
+
+```sh
+pnpm agents:probe-live
+pnpm agents:play-live
+```
+
+The Node entry point supplies only HTTPS and process transport. Rust creates the
+synthetic failure, executes the fixed probes, binds advice, runs search, and verifies
+replay. The transport permits only the reviewed hash-pinned packets. Offline play
+uses an explicitly synthetic answer to test the connection, not model quality.
+
+In the first native development pilot, Jev requested a stored-history comparison
+and withheld a diagnosis before that evidence was supplied. After the fixed probe,
+it identified the deliberately truncated checkpoint producer. In the first live
+play pilot, Jev chose `insufficient_evidence`; both search arms retained canonical
+order and replayed exactly. An offline noncanonical preference also replays correctly.
+These narrow observations establish functioning integrations, not stronger play or
+measured development acceleration. Preserve model decisions locally; fresh hosted
+inference is not assumed deterministic.
 
 Compare policy, search, model ranking, and ranked search using equal node budgets
 and separate equal wall-time budgets. Keep both seat orientations and fixed seeds.

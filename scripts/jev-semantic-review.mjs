@@ -13,6 +13,9 @@ const MAX_RESPONSE_BYTES = 128_000;
 const SYNTHETIC_REQUEST_SHA256 = new Set([
   '2f445336fe5b25f09eab3e89e800a09994cdb26bc5e8dd6bd7a61350a9d0c5ca',
   '7750b712a808ebe034b06c3b962a8d355189e369d01c924b9c42bfe2c3df6226',
+  '3b1c19e7e91c71a8b2555ef69056353d74c2f57bbf120670e4e7e13739a8abe5',
+  'fb4e4ccad71a6df95e4bb504795425a416d6fbc222711cbff41e337d52c72263',
+  'c6db251964e20d5d11f58bc53fcf07b38f4211f2207f6bc98b1e4e8fc1b31d34',
 ]);
 const FIXTURE_URL = new URL('../tests/fixtures/jev-semantic-review.json', import.meta.url);
 const CRITERIA = {
