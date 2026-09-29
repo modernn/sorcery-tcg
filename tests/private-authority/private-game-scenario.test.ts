@@ -3075,5 +3075,18 @@ test('private actual-card decks complete deterministic combat, Earth, Air, Fire,
   assert.equal(result.waterHealing.deck.spellbook.reduce((total, card) => total + card.copies, 0), 60);
   assert.deepEqual(result.waterEndTurnStealth.deck, result.waterHealing.deck);
   assert.equal(result.waterHealing.replayVerified, true);
+  assert.equal(result.torshammar.card, 'Torshammar Trinket');
+  assert.equal(result.torshammar.attackWithArtifact, 3);
+  assert.equal(result.torshammar.attackAfterReturn, 2);
+  assert.equal(result.torshammar.bearerPowerBonus, 1);
+  assert.equal(result.torshammar.castAndCarried, true);
+  assert.equal(result.torshammar.eventOrderVerified, true);
+  assert.equal(result.torshammar.fightDamage, 3);
+  assert.equal(result.torshammar.lifecycleComposed, true);
+  assert.equal(result.torshammar.replayVerified, true);
+  assert.equal(result.torshammar.returnedToOwnerHand, true);
+  assert.equal(result.torshammar.targetDied, true);
+  assert.equal(result.torshammar.deck.spellbook
+    .find(({ name }) => name === 'Torshammar Trinket')?.copies, 3);
   assert.equal(result.replayVerified, true);
 });

@@ -239,6 +239,7 @@ pub enum ArtifactEffect {
     AtEndOfEachTurnSiteControllerLosesLife(u8),
     AtStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn(u8),
     BearerControllerChoosesExtraRandomOutcome,
+    ReturnToOwnerHandAfterEachTurn,
     /// The artifact has only composable bearer modifiers and no standalone effect.
     PassiveModifiers,
     GrantsBearerLethal,
@@ -262,6 +263,8 @@ pub struct BearerUnitStrike {
 /// Artifact facts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ArtifactFacts {
+    /// Total power this Artifact adds to each unit that carries it.
+    pub bearer_power_bonus: Option<u8>,
     pub bearer_unit_strike: Option<BearerUnitStrike>,
     pub cannot_be_carried: bool,
     pub elements: Option<ElementSet>,
@@ -1018,6 +1021,7 @@ const ARTIFACT_FIELDS: &[&str] = &[
     "atEndOfEachTurnSiteControllerLosesLife",
     "atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn",
     "bearerControllerChoosesExtraRandomOutcome",
+    "bearerPowerBonus",
     "bearerUnitStrike",
     "cannotBeCarried",
     "cardType",
@@ -1027,6 +1031,7 @@ const ARTIFACT_FIELDS: &[&str] = &[
     "manaCost",
     "nearbyMinionsMustAttackIfAble",
     "nearbyStrikesAgainstUnitsDealDoubleDamage",
+    "returnToOwnerHandAfterEachTurn",
     "rarity",
     "sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves",
     "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps",
@@ -1546,6 +1551,16 @@ fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFac
     let token = true_only(object, "token", path)?;
     let nearby_must_attack = true_only(object, "nearbyMinionsMustAttackIfAble", path)?;
     let nearby_double = true_only(object, "nearbyStrikesAgainstUnitsDealDoubleDamage", path)?;
+    let legacy_bearer_power = fixed_integer(object, "grantsBearerPower", 2, path)?;
+    let bearer_power_bonus =
+        optional_bounded_integer(object, "bearerPowerBonus", 1, MAX_COMBAT_STAT, path)?
+            .map(compact_u8);
+    if legacy_bearer_power && bearer_power_bonus.is_some() {
+        return Err(FactError::new(
+            path,
+            "grantsBearerPower and bearerPowerBonus cannot both be defined",
+        ));
+    }
     let bearer_unit_strike = object
         .get("bearerUnitStrike")
         .map(|value| parse_bearer_unit_strike(value, path))
@@ -1583,6 +1598,9 @@ fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFac
             path,
         )?
         .then_some(ArtifactEffect::BearerControllerChoosesExtraRandomOutcome),
+        true_only(object, "returnToOwnerHandAfterEachTurn", path)?
+            .then_some(ArtifactEffect::ReturnToOwnerHandAfterEachTurn),
+        legacy_bearer_power.then_some(ArtifactEffect::GrantsBearerPowerTwo),
         true_only(object, "grantsBearerLethal", path)?
             .then_some(ArtifactEffect::GrantsBearerLethal),
         true_only(
@@ -1593,8 +1611,6 @@ fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFac
         .then_some(
             ArtifactEffect::SacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves,
         ),
-        fixed_integer(object, "grantsBearerPower", 2, path)?
-            .then_some(ArtifactEffect::GrantsBearerPowerTwo),
         true_only(
             object,
             "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps",
@@ -1635,7 +1651,11 @@ fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFac
             "competing artifact effects are unsupported",
         ));
     }
-    if exclusive_count == 0 && !nearby_must_attack && !nearby_double && bearer_unit_strike.is_none()
+    if exclusive_count == 0
+        && !nearby_must_attack
+        && !nearby_double
+        && bearer_unit_strike.is_none()
+        && bearer_power_bonus.is_none()
     {
         return Err(FactError::new(
             path,
@@ -1652,6 +1672,7 @@ fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFac
         ArtifactEffect::PassiveModifiers
     };
     Ok(ArtifactFacts {
+        bearer_power_bonus: bearer_power_bonus.or(legacy_bearer_power.then_some(2)),
         bearer_unit_strike,
         cannot_be_carried: true_only(object, "cannotBeCarried", path)?,
         elements,

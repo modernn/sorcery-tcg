@@ -111,3 +111,58 @@ fn bearer_unit_strike_rejects_empty_unknown_false_null_and_malformed_values() {
         );
     }
 }
+
+#[test]
+fn bounded_bearer_power_bonus_composes_with_a_lifecycle_effect() {
+    let mut card = artifact(json!({"damageBonus": 1}));
+    card["bearerPowerBonus"] = json!(1);
+    card["returnToOwnerHandAfterEachTurn"] = json!(true);
+    let facts = artifact_facts(&card);
+    assert_eq!(facts.bearer_power_bonus, Some(1));
+    assert_eq!(facts.effect, ArtifactEffect::ReturnToOwnerHandAfterEachTurn);
+    assert!(facts.bearer_unit_strike.is_some());
+}
+
+#[test]
+fn bounded_bearer_power_bonus_rejects_invalid_values_and_duplicate_aliases() {
+    for value in [json!(0), json!(101), json!(1.5), json!("1")] {
+        let mut card = artifact(json!({"damageBonus": 1}));
+        card["bearerPowerBonus"] = value;
+        assert!(
+            parse_card_definition("invalid-bearer-power", &card)
+                .expect_err("invalid bearer power bonus admitted")
+                .to_string()
+                .contains("bearerPowerBonus")
+        );
+    }
+    let mut duplicate = artifact(json!({"damageBonus": 1}));
+    duplicate["grantsBearerPower"] = json!(2);
+    duplicate["bearerPowerBonus"] = json!(1);
+    assert!(
+        parse_card_definition("duplicate-bearer-power", &duplicate)
+            .expect_err("duplicate bearer power aliases admitted")
+            .to_string()
+            .contains("cannot both be defined")
+    );
+
+    let mut legacy_lifecycle = artifact(json!({"damageBonus": 1}));
+    legacy_lifecycle["grantsBearerPower"] = json!(2);
+    legacy_lifecycle["returnToOwnerHandAfterEachTurn"] = json!(true);
+    assert!(
+        parse_card_definition("legacy-power-lifecycle", &legacy_lifecycle)
+            .expect_err("legacy fixed power composed with a lifecycle effect")
+            .to_string()
+            .contains("must define exactly one supported effect")
+    );
+
+    let mut incompatible = artifact(json!({"damageBonus": 1}));
+    incompatible["bearerPowerBonus"] = json!(1);
+    incompatible["returnToOwnerHandAfterEachTurn"] = json!(true);
+    incompatible["grantsBearerLethal"] = json!(true);
+    assert!(
+        parse_card_definition("incompatible-artifact-effects", &incompatible)
+            .expect_err("multiple standalone artifact effects admitted")
+            .to_string()
+            .contains("must define exactly one supported effect")
+    );
+}

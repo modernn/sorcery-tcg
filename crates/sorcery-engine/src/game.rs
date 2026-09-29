@@ -854,6 +854,12 @@ struct EndTurnContinuation {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+struct EndTurnStartContinuation {
+    expired_disable_effects: Vec<(IdentityHash, Seat, IdentityHash)>,
+    seat: Seat,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct SiteGenesisContinuation {
     card_id: CardId,
     card_instance_id: IdentityHash,
@@ -881,6 +887,7 @@ enum ResolutionContinuation {
     Blink(BlinkContinuation),
     DragProjectile(DragProjectileContinuation),
     EndTurn(EndTurnContinuation),
+    EndTurnStart(EndTurnStartContinuation),
     Effect(Box<EffectFrame>),
     FirstStrike(FirstStrikeContinuation),
     LeapAttack(LeapAttackContinuation),
@@ -1565,6 +1572,7 @@ const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static 
         | ArtifactEffect::AtStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn(_)
         | ArtifactEffect::GrantsBearerLethal
         | ArtifactEffect::GrantsBearerPowerTwo
+        | ArtifactEffect::ReturnToOwnerHandAfterEachTurn
         | ArtifactEffect::NearbyMinionsMustAttackIfAble
         | ArtifactEffect::NearbyStrikesAgainstUnitsDealDoubleDamage
         | ArtifactEffect::SacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves
@@ -1585,6 +1593,7 @@ const fn artifact_effect_supported(effect: ArtifactEffect) -> bool {
             | ArtifactEffect::AtStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn(_)
             | ArtifactEffect::GrantsBearerLethal
             | ArtifactEffect::GrantsBearerPowerTwo
+            | ArtifactEffect::ReturnToOwnerHandAfterEachTurn
             | ArtifactEffect::NearbyMinionsMustAttackIfAble
             | ArtifactEffect::NearbyStrikesAgainstUnitsDealDoubleDamage
             | ArtifactEffect::SacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves
@@ -5857,9 +5866,15 @@ impl Game {
             if !artifact.carried_by(kind, seat, instance_id) {
                 continue;
             }
-            if self.artifact_facts(artifact)?.effect == ArtifactEffect::GrantsBearerPowerTwo {
-                bonus = bonus.checked_add(2).ok_or(GameError::IllegalAction)?;
-            }
+            let facts = self.artifact_facts(artifact)?;
+            // The enum fallback keeps hand-built legacy facts compatible while parsed manifests
+            // normalize the old fixed value into bearer_power_bonus above.
+            let artifact_bonus = facts
+                .bearer_power_bonus
+                .or_else(|| (facts.effect == ArtifactEffect::GrantsBearerPowerTwo).then_some(2));
+            bonus = bonus
+                .checked_add(artifact_bonus.map_or(0, u16::from))
+                .ok_or(GameError::IllegalAction)?;
         }
         Ok(bonus)
     }
@@ -14438,6 +14453,10 @@ impl Game {
                         None => &mut local,
                     }),
                 )
+            }
+            ResolutionContinuation::EndTurnStart(continuation) => {
+                restore();
+                self.finish_end_turn_start(continuation, outcomes)
             }
             ResolutionContinuation::FirstStrike(continuation) => {
                 self.continue_after_first_strike(continuation, outcomes)
@@ -24509,10 +24528,6 @@ impl Game {
             .immobile_areas
             .retain(|area| !expired_aura_ids.contains(&area.source_instance_id));
         let ended_turn = self.position.turn_number;
-        self.position.turn_number += 1;
-        self.position.active_seat = next_seat;
-        self.position.decision_seat = next_seat;
-        self.activate_pending_player_control(next_seat, outcomes);
         Self::emit_expired_modifiers(expired_modifiers, outcomes);
         for (instance_id, controller, _, count) in &counted_auras {
             outcomes.push("aura-turn-counted", || {
@@ -24541,6 +24556,32 @@ impl Game {
             "turn-ended",
             || json!({ "seat": seat, "turnNumber": ended_turn }),
         );
+        self.position.turn_controller = None;
+        self.return_artifacts_after_turn(
+            seat,
+            EndTurnStartContinuation {
+                expired_disable_effects,
+                seat: next_seat,
+            },
+            outcomes,
+        )
+    }
+
+    fn finish_end_turn_start(
+        &mut self,
+        continuation: EndTurnStartContinuation,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let EndTurnStartContinuation {
+            expired_disable_effects,
+            seat: next_seat,
+        } = continuation;
+        // After-turn Storyline choices still belong to the ending turn's players.
+        // Activate the incoming turn and its player control only once those events finish.
+        self.position.turn_number += 1;
+        self.position.active_seat = next_seat;
+        self.position.decision_seat = next_seat;
+        self.activate_pending_player_control(next_seat, outcomes);
         // Next-turn effects end before untapping or discovering Start Phase triggers.
         for unit in &mut self.position.units {
             unit.disable_effects
@@ -24611,6 +24652,71 @@ impl Game {
             self.position.phase = Phase::StartTurn;
         }
         Ok(())
+    }
+
+    /// Queues each in-play Artifact's deferred end-of-turn transition to its owner.
+    ///
+    /// The transition removes the whole realm placement (including a carried placement) before
+    /// moving the physical card to the owner's Spellbook hand. The existing return helper also
+    /// handles generated token Artifacts, which are banished instead of entering a hand.
+    fn return_artifacts_after_turn(
+        &mut self,
+        active_seat: Seat,
+        continuation: EndTurnStartContinuation,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let triggers = self
+            .position
+            .artifacts
+            .iter()
+            .filter_map(|artifact| match self.artifact_facts(artifact) {
+                Ok(facts) if facts.effect == ArtifactEffect::ReturnToOwnerHandAfterEachTurn => {
+                    Some(self.artifact_return_trigger(artifact))
+                }
+                Ok(_) => None,
+                Err(error) => Some(Err(error)),
+            })
+            .collect::<Result<Vec<_>, GameError>>()?;
+        let Some(batch) = TriggerBatch::new(triggers, active_seat) else {
+            return self.finish_end_turn_start(continuation, outcomes);
+        };
+        self.continue_resolution(
+            ResolutionContinuation::TriggerBatch(Box::new(PendingTriggerOrder {
+                batch,
+                continuation: Some(ResolutionContinuation::EndTurnStart(continuation)),
+                return_phase: self.position.phase,
+                return_decision_seat: self.position.decision_seat,
+            })),
+            outcomes,
+        )
+    }
+
+    fn artifact_return_trigger(
+        &self,
+        artifact: &ArtifactPosition,
+    ) -> Result<GenesisTrigger, GameError> {
+        let location = self.artifact_location(artifact)?;
+        let reference = RealmReference::from_card(&artifact.card);
+        let controller = artifact
+            .bearer()
+            .map_or(artifact.card.owner, UnitTarget::seat);
+        Ok(GenesisTrigger::ReturnArtifact {
+            card_id: artifact.card.card_id,
+            source: effect::EffectSource {
+                instance_id: artifact.card.instance_id.clone(),
+                owner: artifact.card.owner,
+                controller,
+                realm: Some(reference),
+                actor: None,
+                region: location.region,
+                cells: vec![location.cell],
+                damage: UnitDamageSource {
+                    origin: DamageOrigin::Other,
+                    current_power: 0,
+                    lethal: false,
+                },
+            },
+        })
     }
 
     /// Materializes the authoritative JSON state used for receipts and replay.
@@ -25024,6 +25130,15 @@ impl Game {
                 }
                 value
             }
+            ResolutionContinuation::EndTurnStart(continuation) => json!({
+                "kind": "end-turn-start",
+                "seat": continuation.seat,
+                "expiredDisableEffects": continuation.expired_disable_effects.iter().map(|(instance_id, seat, source_instance_id)| json!({
+                    "instanceId": instance_id,
+                    "seat": seat,
+                    "sourceInstanceId": source_instance_id,
+                })).collect::<Vec<_>>(),
+            }),
             ResolutionContinuation::FirstStrike(continuation) => json!({
                 "attackerStrikesFirst": continuation.attacker_struck,
                 "firstCombatantInstanceIds": continuation.first_combatant_instance_ids,

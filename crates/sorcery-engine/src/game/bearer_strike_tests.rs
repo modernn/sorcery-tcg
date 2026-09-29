@@ -71,6 +71,23 @@ fn fixture() -> Game {
     game
 }
 
+fn returning_power_fixture() -> Game {
+    let manifest = selfplay_manifest_with(9143, |manifest| {
+        manifest["cards"]["north-spell-50"] = json!({
+            "bearerPowerBonus": 1,
+            "cardType": "artifact",
+            "manaCost": 0,
+            "returnToOwnerHandAfterEachTurn": true,
+            "thresholds": {"air": 0, "earth": 0, "fire": 0, "water": 0},
+        });
+    });
+    let mut game = Game::from_manifest_json(&manifest).expect("returning power fixture");
+    game.position.phase = Phase::Main;
+    game.position.active_seat = Seat::North;
+    game.position.decision_seat = Seat::North;
+    game
+}
+
 fn card_id(game: &Game, name: &str) -> CardId {
     CardId(
         u16::try_from(
@@ -266,6 +283,57 @@ fn carried_bonus_and_first_strike_apply_to_avatar_bearers() {
 }
 
 #[test]
+fn returning_power_artifact_uses_owner_hand_and_removes_power_from_enemy_controller() {
+    let mut game = returning_power_fixture();
+    let mut bearer = minion(&game, "returning-bearer", Seat::South);
+    bearer.card.owner = Seat::North;
+    bearer.damage = 1;
+    let bearer_id = bearer.card.instance_id.clone();
+    game.position.units = vec![bearer.clone()];
+    let artifact = carried_artifact(
+        &game,
+        "north-spell-50",
+        "returning-power",
+        CardSource::Spellbook,
+        &bearer,
+    );
+    let artifact_id = artifact.card.instance_id.clone();
+    game.position.artifacts = vec![artifact];
+
+    let powered = game
+        .minion_current_stats(&game.position.units[0])
+        .expect("powered enemy-controlled bearer");
+    assert_eq!(powered.0, 2);
+    assert_eq!(powered.1, 2);
+
+    let mut events = Vec::new();
+    let trigger = game.artifact_return_trigger(&game.position.artifacts[0]);
+    game.resolve_genesis_trigger(
+        trigger.expect("return trigger"),
+        &mut OutcomeLog::Record(&mut events),
+    )
+    .expect("return lifecycle");
+    assert!(game.position.artifacts.is_empty());
+    assert!(
+        game.position.players[super::seat_index(Seat::North)]
+            .hand_spellbook
+            .iter()
+            .any(|card| card.instance_id == artifact_id)
+    );
+    assert!(game.position.units.is_empty());
+    assert!(
+        game.position.players[super::seat_index(Seat::North)]
+            .cemetery
+            .iter()
+            .any(|card| card.instance_id == bearer_id)
+    );
+    assert_eq!(
+        events.first().map(|(kind, _)| kind.as_str()),
+        Some("artifact-returned-to-hand"),
+    );
+}
+
+#[test]
 fn prevented_strike_still_consumes_carried_artifact() {
     let mut game = fixture();
     let attacker = minion(&game, "attacker", Seat::North);
@@ -305,6 +373,174 @@ fn prevented_strike_still_consumes_carried_artifact() {
             .iter()
             .any(|unit| unit.card.instance_id == attacker_id)
     );
+}
+
+#[test]
+fn after_turn_artifact_returns_use_bearer_controller_and_apnap_resolution() {
+    let mut game = returning_power_fixture();
+    let north_loose = loose_artifact(&game, "north-spell-50", "north-loose-return");
+    let south_bearer = south_minion(&game, "south-bearer");
+    let south_carried = carried_artifact(
+        &game,
+        "north-spell-50",
+        "south-controlled-return",
+        CardSource::Spellbook,
+        &south_bearer,
+    );
+    let north_id = north_loose.card.instance_id.clone();
+    let south_id = south_carried.card.instance_id.clone();
+    game.position.units.push(south_bearer);
+    game.position.artifacts = vec![north_loose, south_carried];
+
+    let mut events = Vec::new();
+    game.finish_end_turn_cleanup(Seat::North, &mut OutcomeLog::Record(&mut events))
+        .expect("finish turn after trigger resolution");
+
+    let returned: Vec<_> = events
+        .iter()
+        .filter(|(kind, _)| kind == "artifact-returned-to-hand")
+        .map(|(_, payload)| payload["instanceId"].as_str().expect("artifact id"))
+        .collect();
+    assert_eq!(returned, [south_id.as_str(), north_id.as_str()]);
+    assert_eq!(game.position.phase, Phase::Draw);
+}
+
+#[test]
+fn after_turn_ordering_precedes_incoming_turn_and_player_control() {
+    for ordering_seat in [Seat::North, Seat::South] {
+        let mut game = returning_power_fixture();
+        game.position.turn_controller = Some(Seat::South);
+        let bearer = south_minion(&game, "pending-turn-bearer");
+        game.position.artifacts = ["pending-first", "pending-second"]
+            .map(|label| {
+                if ordering_seat == Seat::North {
+                    loose_artifact(&game, "north-spell-50", label)
+                } else {
+                    carried_artifact(
+                        &game,
+                        "north-spell-50",
+                        label,
+                        CardSource::Spellbook,
+                        &bearer,
+                    )
+                }
+            })
+            .into();
+        let site = game.position.players[super::seat_index(Seat::South)]
+            .hand_atlas
+            .remove(0);
+        game.position.sites[bearer.location.index()] = Some(super::SitePosition {
+            card: site,
+            controller: Seat::South,
+            last_flight_turn: None,
+            warded: false,
+        });
+        game.position.units.push(bearer);
+        game.apply_genesis_previous_player_control(&id("pending-turn-control"));
+        let ending_turn = game.position.turn_number;
+        let mut events = Vec::new();
+        game.finish_end_turn_cleanup(Seat::North, &mut OutcomeLog::Record(&mut events))
+            .expect("queue after-turn events");
+        assert_eq!(game.position.phase, Phase::TriggerOrder);
+        assert_eq!(game.position.active_seat, Seat::North);
+        assert_eq!(game.position.turn_number, ending_turn);
+        assert_eq!(game.position.decision_seat, ordering_seat);
+        assert_eq!(game.acting_controller(), ordering_seat);
+        assert!(game.position.turn_controller.is_none());
+        assert!(game.position.pending_player_controllers[super::seat_index(Seat::South)].is_some());
+        assert!(
+            !events
+                .iter()
+                .any(|(kind, _)| kind == "player-controlled" || kind == "turn-started")
+        );
+
+        let actions = game.legal_actions().expect("issued trigger ordering");
+        assert_eq!(actions.len(), 2);
+        assert!(actions.iter().all(|action| action.seat() == ordering_seat));
+        let (resolved, _) = game
+            .apply_action_recorded(&actions[0])
+            .expect("order after-turn returns");
+        assert_eq!(game.position.active_seat, Seat::South);
+        assert_eq!(game.position.turn_number, ending_turn + 1);
+        assert_eq!(game.position.turn_controller, Some(Seat::North));
+        assert_eq!(game.acting_controller(), Seat::North);
+        assert_eq!(game.position.phase, Phase::Draw);
+        let control = resolved
+            .iter()
+            .position(|(kind, _)| kind == "player-controlled")
+            .expect("incoming control");
+        let start = resolved
+            .iter()
+            .position(|(kind, _)| kind == "turn-started")
+            .expect("incoming Start Phase");
+        assert!(
+            resolved
+                .iter()
+                .enumerate()
+                .filter(|(_, (kind, _))| kind == "artifact-returned-to-hand")
+                .all(|(index, _)| index < control)
+        );
+        assert!(control < start);
+        assert_eq!(
+            resolved
+                .iter()
+                .filter(|(kind, _)| kind == "turn-started")
+                .count(),
+            1
+        );
+    }
+}
+#[test]
+fn artifact_return_trigger_rejects_a_departed_and_reentered_incarnation() {
+    let mut game = returning_power_fixture();
+    let first = loose_artifact(&game, "north-spell-50", "first-return");
+    let second = loose_artifact(&game, "north-spell-50", "second-return");
+    let second_id = second.card.instance_id.clone();
+    game.position.artifacts = vec![first, second];
+    let mut events = Vec::new();
+    game.return_artifacts_after_turn(
+        Seat::North,
+        super::EndTurnStartContinuation {
+            expired_disable_effects: Vec::new(),
+            seat: Seat::South,
+        },
+        &mut OutcomeLog::Record(&mut events),
+    )
+    .expect("queue simultaneous artifact returns");
+    assert_eq!(game.position.phase, Phase::TriggerOrder);
+
+    let mut reentered = game.position.artifacts.remove(1);
+    reentered
+        .card
+        .enter_realm()
+        .expect("new Artifact incarnation");
+    let new_realm_entry = reentered.card.realm_entry;
+    game.position.artifacts.push(reentered);
+    let mut pending = game
+        .position
+        .pending_trigger_order
+        .take()
+        .expect("pending Storyline");
+    pending
+        .batch
+        .commit(&second_id)
+        .expect("order second return first");
+    game.drive_trigger_batch(pending, &mut OutcomeLog::Record(&mut events))
+        .expect("resolve ordered Artifact returns");
+
+    assert!(game.position.artifacts.iter().any(|artifact| {
+        artifact.card.instance_id == second_id && artifact.card.realm_entry == new_realm_entry
+    }));
+    assert_eq!(
+        events
+            .iter()
+            .filter(|(kind, payload)| {
+                kind == "artifact-returned-to-hand" && payload["instanceId"] == second_id.as_str()
+            })
+            .count(),
+        0
+    );
+    assert_eq!(game.position.phase, Phase::Draw);
 }
 
 #[test]

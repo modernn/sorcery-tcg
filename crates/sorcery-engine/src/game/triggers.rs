@@ -10,6 +10,10 @@ use super::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum GenesisTrigger {
     Compiled(EffectFrame),
+    ReturnArtifact {
+        card_id: CardId,
+        source: EffectSource,
+    },
     Legacy {
         card_id: CardId,
         source: EffectSource,
@@ -20,13 +24,13 @@ impl GenesisTrigger {
     fn card_id(&self) -> CardId {
         match self {
             Self::Compiled(frame) => frame.card_id,
-            Self::Legacy { card_id, .. } => *card_id,
+            Self::Legacy { card_id, .. } | Self::ReturnArtifact { card_id, .. } => *card_id,
         }
     }
     fn source(&self) -> &EffectSource {
         match self {
             Self::Compiled(frame) => &frame.source,
-            Self::Legacy { source, .. } => source,
+            Self::Legacy { source, .. } | Self::ReturnArtifact { source, .. } => source,
         }
     }
 }
@@ -179,6 +183,17 @@ impl Game {
     ) -> Result<(), GameError> {
         match trigger {
             GenesisTrigger::Compiled(frame) => self.run_effect_frame(frame, outcomes),
+            GenesisTrigger::ReturnArtifact { source, .. } => {
+                let reference = source.realm.as_ref().ok_or(GameError::IllegalAction)?;
+                if !self.realm_reference_exists(reference) {
+                    return Ok(());
+                }
+                self.apply_return_target_artifact_to_owner_hand(
+                    &source.instance_id,
+                    &source.instance_id,
+                    outcomes,
+                )
+            }
             GenesisTrigger::Legacy { card_id, source } => {
                 let reference = source.realm.as_ref().ok_or(GameError::IllegalAction)?;
                 if !self.realm_reference_exists(reference) {
@@ -435,6 +450,11 @@ impl Game {
             GenesisTrigger::Compiled(frame) => {
                 json!({"kind":"genesis", "frame":self.effect_frame_value(frame)})
             }
+            GenesisTrigger::ReturnArtifact { card_id, source } => json!({
+                "kind":"after-turn-artifact-return",
+                "cardId":self.rules.cards[usize::from(card_id.0)].id,
+                "source":source.value(),
+            }),
             GenesisTrigger::Legacy { card_id, source } => json!({"kind":"genesis",
                 "cardId":self.rules.cards[usize::from(card_id.0)].id, "source":source.value()}),
         }

@@ -37,7 +37,7 @@ import {
 } from '../engine/rust-session-helpers.ts';
 import { RustSessionClient } from '../engine/rust-engine.ts';
 import { runCounterfactualRollouts } from '../simulator/counterfactual.ts';
-import type { StateHash } from '../engine/contract.ts';
+import type { EngineReceipt, StateHash } from '../engine/contract.ts';
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
 const DEFAULT_SCENARIO = resolve(
@@ -101,6 +101,11 @@ type DeckList = Readonly<{
   atlas: readonly Readonly<{ copies: number; name: string }>[];
   avatar: string;
   spellbook: readonly Readonly<{ copies: number; name: string }>[];
+}>;
+
+type PrivateArtifactFacts = Readonly<{
+  bearerPowerBonus?: 1;
+  returnToOwnerHandAfterEachTurn?: true;
 }>;
 
 type StarterCheck = Readonly<{
@@ -600,6 +605,21 @@ export type PrivateGameCheck = Readonly<{
     northMinionDied: boolean;
     southMinion: string;
     southMinionDied: boolean;
+  }>;
+  torshammar: Readonly<{
+    attackAfterReturn: number;
+    attackWithArtifact: number;
+    bearerPowerBonus: 1;
+    castAndCarried: true;
+    card: string;
+    deck: DeckList;
+    eventOrderVerified: true;
+    fightDamage: number;
+    lifecycleComposed: true;
+    replayVerified: true;
+    returnedToOwnerHand: true;
+    targetDied: true;
+    seed: number;
   }>;
   decks: Readonly<Record<GameSeat, DeckList>>;
   finalStateHash: Hash;
@@ -1839,6 +1859,8 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
   staticServant: NormalizedCard;
   swordAndShield: NormalizedCard;
   thunderstorm: NormalizedCard;
+  torshammarTrinket: NormalizedCard;
+  torshammarTrinketFacts: PrivateArtifactFacts;
   zap: NormalizedCard;
 }>> {
   const config = scenarioConfig(parseJsonWithDuplicateKeyCheck(await readFile(path, 'utf8')));
@@ -2016,6 +2038,31 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     || swordAndShield.rarity !== 'exceptional') {
     throw new Error('private bearer power Artifact no longer matches its supported facts');
   }
+  const torshammarTrinket = snapshot.cards.find(({ stableId }) =>
+    stableId === 'card:229ca2b7db28b0c65dc524f40990e12734568ae8cd205bda7f1e92d83438fde6');
+  if (!torshammarTrinket
+    || torshammarTrinket.name !== 'Torshammar Trinket'
+    || torshammarTrinket.officialSourceId !== '001-torshammar_trinket-b-f'
+    || torshammarTrinket.cardType !== 'artifact'
+    || ruleTextDigest(torshammarTrinket.rulesText)
+      !== 'sha256:0849aabf62a0158aee021016e58f1f31c8ac10f86059413a3c88f48669c3199c'
+    || torshammarTrinket.manaCost !== 1
+    || torshammarTrinket.attack !== null
+    || torshammarTrinket.defense !== null
+    || torshammarTrinket.life !== null
+    || torshammarTrinket.elements.length !== 0
+    || torshammarTrinket.thresholds.air !== 0
+    || torshammarTrinket.thresholds.earth !== 0
+    || torshammarTrinket.thresholds.fire !== 0
+    || torshammarTrinket.thresholds.water !== 0
+    || canonicalJson(torshammarTrinket.subtypes as unknown as JsonValue) !== '["Relic"]'
+    || torshammarTrinket.rarity !== 'exceptional') {
+    throw new Error('private Torshammar Trinket no longer matches its supported facts');
+  }
+  const torshammarTrinketFacts = Object.freeze({
+    bearerPowerBonus: 1 as const,
+    returnToOwnerHandAfterEachTurn: true as const,
+  });
   const poisonousDagger = snapshot.cards.find(({ name }) => name === 'Poisonous Dagger');
   if (!poisonousDagger
     || poisonousDagger.cardType !== 'artifact'
@@ -4419,6 +4466,8 @@ async function readPrivateInputs(path: string): Promise<Readonly<{
     staticServant,
     swordAndShield,
     thunderstorm,
+    torshammarTrinket,
+    torshammarTrinketFacts,
     providerMinion,
     quagmire,
     raalDromedary,
@@ -4608,6 +4657,7 @@ function gameDefinition(
   flyToNearbyVoidOncePerTurnAtAirThreshold = false,
   siteGenesisReorderNextSpells = false,
   minionsHereGainVoidwalkUntilLeavingVoid = false,
+  artifactFacts: PrivateArtifactFacts = {},
   atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf = false,
   uniqueOrLegendary = false,
   atStartOfControllerTurnControllerLosesLife: 0 | 2 = 0,
@@ -4669,6 +4719,7 @@ function gameDefinition(
   if (card.cardType === 'artifact'
     && card.manaCost !== null
     && Number(grantsBearerPower === 2)
+      + Number(artifactFacts.returnToOwnerHandAfterEachTurn === true)
       + Number(grantsBearerLethal)
       + Number(tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps)
       + Number(
@@ -4682,6 +4733,9 @@ function gameDefinition(
       + Number(sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves) === 1) {
     return {
       cardType: 'artifact',
+      ...(artifactFacts.bearerPowerBonus !== undefined
+        ? { bearerPowerBonus: artifactFacts.bearerPowerBonus }
+        : {}),
       ...(cannotBeCarried ? { cannotBeCarried: true as const } : {}),
       ...(grantsBearerPower === 2
         ? { grantsBearerPower }
@@ -4709,7 +4763,9 @@ function gameDefinition(
                           sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves:
                             true as const,
                         }
-                  : { atEndOfEachTurnSiteControllerLosesLife }),
+                  : artifactFacts.returnToOwnerHandAfterEachTurn === true
+                    ? { returnToOwnerHandAfterEachTurn: true as const }
+                    : { atEndOfEachTurnSiteControllerLosesLife }),
       manaCost: card.manaCost,
       thresholds: card.thresholds,
     };
@@ -5061,6 +5117,7 @@ const PRIVATE_BINDING_SCENARIOS = [
   'air-sling-pixies', 'air-spellcaster-freeze', 'air-spire-lich', 'air-static-servant',
   'air-teleport', 'air-thunderstorm', 'air-void-artifact', 'air-voidwalk',
   'air-zap', 'airborne', 'combat', 'earth',
+  'artifact-torshammar',
   'earth-bedrock', 'earth-border-militia', 'earth-burrowing', 'earth-bury',
   'earth-cave-in', 'earth-craterize', 'earth-divine-healing', 'earth-duel',
   'earth-entangle-terrain', 'earth-entombed', 'earth-first-strike', 'earth-forward',
@@ -5765,8 +5822,29 @@ function buildManifest(
     input.lugbogCat,
   ]);
   const waterLugbogDeck: GameDeckSpec = waterLugbogBase;
+  const torshammarDeck = elementalDeck(
+    'earth',
+    [input.earthProviderMinion, input.firstStrikeTargetMinion],
+    [input.ghostTownSite, input.valley],
+    [],
+    [input.torshammarTrinket],
+  );
+  const torshammarNorthDeck: GameDeckSpec = {
+    ...torshammarDeck,
+    spellbook: [
+      ...torshammarDeck.spellbook.filter((cardId) => cardId === input.torshammarTrinket.stableId),
+      ...torshammarDeck.spellbook.filter((cardId) => cardId !== input.torshammarTrinket.stableId),
+    ],
+  };
+  const torshammarSouthDeck = elementalDeck(
+    'fire',
+    [input.granaryRats],
+    [input.ghostTownSite, input.wasteland],
+  );
   const decks = {
-    north: scenario === 'air-vs-earth-lesson'
+    north: scenario === 'artifact-torshammar'
+      ? torshammarNorthDeck
+      : scenario === 'air-vs-earth-lesson'
       ? airBetaLessonDeck
       : scenario === 'earth-vs-air-lesson'
       ? earthBetaLessonDeck
@@ -5951,7 +6029,9 @@ function buildManifest(
         : scenario === 'water' || scenario === 'water-sideways' || scenario === 'water-stealth'
           ? waterDeck
           : deck(false, true),
-    south: scenario === 'air-vs-earth-lesson'
+    south: scenario === 'artifact-torshammar'
+      ? torshammarSouthDeck
+      : scenario === 'air-vs-earth-lesson'
       ? earthBetaLessonDeck
       : scenario === 'earth-vs-air-lesson'
       ? airBetaLessonDeck
@@ -6127,6 +6207,9 @@ function buildManifest(
       : []),
   ]);
   const selectedCards = input.cards.filter(({ stableId }) => referenced.has(stableId));
+  const artifactFactsByStableId = new Map<string, PrivateArtifactFacts>([
+    [input.torshammarTrinket.stableId, input.torshammarTrinketFacts],
+  ]);
   const definitions = Object.fromEntries(selectedCards.map((card) => [
     card.stableId,
     gameDefinition(
@@ -6301,6 +6384,7 @@ function buildManifest(
       card.stableId === input.cloudCity.stableId,
       card.stableId === input.observatory.stableId,
       card.stableId === input.planarGate.stableId,
+      artifactFactsByStableId.get(card.stableId),
     ),
   ]));
   return {
@@ -8613,7 +8697,7 @@ function findAirOpening(
   southSiteInstanceId: string;
 }> {
   // Select a reproducible diagnostic opening; deck growth can invalidate the original seed.
-  for (let offset = 0; offset <= 256; offset += 1) {
+  for (let offset = 0; offset <= 4096; offset += 1) {
     const seed = input.config.airSeed + offset;
     const built = buildManifest(input, seed, 'air');
     const session = createGameSession(built.manifest);
@@ -9875,7 +9959,7 @@ function findAirborneOpening(
   const movementTwo = mode === 'movement-two';
   const baseSeed = movementTwo ? input.config.movementTwoSeed : input.config.airborneSeed;
   // ponytail: bounded seed scan keeps this private diagnostic reproducible while deck lists evolve.
-  for (let offset = 0; offset <= 256; offset += 1) {
+  for (let offset = 0; offset <= 4096; offset += 1) {
     const seed = baseSeed + offset;
     const built = buildManifest(input, seed, mode);
     const session = createGameSession(built.manifest);
@@ -24675,8 +24759,253 @@ function runWaterHealing(
   });
 }
 
+function runTorshammar(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Promise<PrivateGameCheck['torshammar']> {
+  const opening = findTorshammarOpening(input);
+  const { manifest, names, seed } = opening;
+  const definition = manifest.cards[input.torshammarTrinket.stableId];
+  const artifact = definition?.cardType === 'artifact' ? definition : undefined;
+  const returnsToOwnerHand = artifact !== undefined
+    && Object.prototype.hasOwnProperty.call(artifact, 'returnToOwnerHandAfterEachTurn')
+    ? (artifact as typeof artifact & { returnToOwnerHandAfterEachTurn?: true })
+      .returnToOwnerHandAfterEachTurn
+    : undefined;
+  if (artifact?.bearerPowerBonus !== 1 || returnsToOwnerHand !== true) {
+    throw new Error('private Torshammar binding did not compose its generic Artifact facts');
+  }
+  return withPrivateRustSession(manifest, async (handle) => {
+    let session = await rustKeep(handle);
+    session = await rustKeep(handle);
+    const take = async (
+      predicate: (candidate: GameLegalAction) => boolean,
+    ): Promise<{ receipt: EngineReceipt; session: GameSession }> => {
+      const candidate = await rustAction(handle, predicate);
+      const result = await handle.stepAction(candidate);
+      if (!result.accepted) throw new Error('private Torshammar action was rejected');
+      session = result.session;
+      return { receipt: result.receipt, session };
+    };
+
+    await take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardInstanceId === opening.northFirstSiteInstanceId
+        && descriptor.cell === 'C4');
+    if (session.state.phase === 'genesis') {
+      await take(({ descriptor }) =>
+        descriptor.kind === 'resolve-genesis-spell' && descriptor.choice === 'keep-next');
+    }
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardInstanceId === opening.southFirstSiteInstanceId
+        && descriptor.cell === 'C1');
+    if (session.state.phase === 'genesis') {
+      await take(({ descriptor }) =>
+        descriptor.kind === 'resolve-genesis-spell' && descriptor.choice === 'keep-next');
+    }
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardInstanceId === opening.northSecondSiteInstanceId
+        && descriptor.cell === 'C3');
+    if (session.state.phase === 'genesis') {
+      await take(({ descriptor }) =>
+        descriptor.kind === 'resolve-genesis-spell' && descriptor.choice === 'keep-next');
+    }
+    await take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === opening.bearerInstanceId
+        && descriptor.cell === 'C4');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardInstanceId === opening.southSecondSiteInstanceId
+        && descriptor.cell === 'C2');
+    if (session.state.phase === 'genesis') {
+      await take(({ descriptor }) =>
+        descriptor.kind === 'resolve-genesis-spell' && descriptor.choice === 'keep-next');
+    }
+    await take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === opening.targetInstanceId
+        && descriptor.cell === 'C1');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) =>
+      descriptor.kind === 'cast-artifact'
+        && descriptor.cardInstanceId === opening.artifactInstanceId
+        && (descriptor.bearer === undefined || descriptor.bearer === null)
+        && descriptor.cell === 'C4');
+    await take(({ descriptor }) =>
+      descriptor.kind === 'pick-up-artifacts'
+        && descriptor.unit.kind === 'minion'
+        && descriptor.unit.instanceId === opening.bearerInstanceId
+        && descriptor.artifactInstanceIds.includes(opening.artifactInstanceId));
+    const poweredBearer = observeGame(session.state, 'north').realm.units
+      .find(({ instanceId }) => instanceId === opening.bearerInstanceId);
+    const baseBearerAttack = input.earthProviderMinion.attack;
+    if (baseBearerAttack === null || poweredBearer?.attack !== baseBearerAttack + 1) {
+      throw new Error('private Torshammar carried power was not observed in unit state');
+    }
+
+    const firstEnd = await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    const firstEndEvents = firstEnd.receipt.events.map(({ type }) => type);
+    const firstReturnIndex = firstEndEvents.indexOf('artifact-returned-to-hand');
+    const firstEndIndex = firstEndEvents.indexOf('turn-ended');
+    if (firstReturnIndex < 0 || firstEndIndex < 0 || firstEndIndex >= firstReturnIndex) {
+      throw new Error('private Torshammar first return ordering was not observed');
+    }
+
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === opening.targetInstanceId
+        && descriptor.from.cell === 'C1'
+        && descriptor.to.cell === 'C2');
+    await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === opening.bearerInstanceId
+        && descriptor.from.cell === 'C4'
+        && descriptor.to.cell === 'C3');
+    await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) =>
+      descriptor.kind === 'cast-artifact'
+        && descriptor.cardInstanceId === opening.artifactInstanceId
+        && (descriptor.bearer === undefined || descriptor.bearer === null)
+        && descriptor.cell === 'C3');
+    await take(({ descriptor }) =>
+      descriptor.kind === 'pick-up-artifacts'
+        && descriptor.unit.kind === 'minion'
+        && descriptor.unit.instanceId === opening.bearerInstanceId
+        && descriptor.artifactInstanceIds.includes(opening.artifactInstanceId));
+    await take(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === opening.bearerInstanceId
+        && descriptor.from.cell === 'C3'
+        && descriptor.to.cell === 'C2');
+    await take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === opening.targetInstanceId);
+    const fight = await take(({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
+    const strikeAllocation = fight.receipt.events.find(({ payload, type }) =>
+      type === 'strike-damage-allocated'
+        && isJsonRecord(payload)
+        && payload.strikerInstanceId === opening.bearerInstanceId
+        && payload.targetInstanceId === opening.targetInstanceId
+        && payload.amount === baseBearerAttack + 1);
+    const targetDamageEvent = fight.receipt.events.find(({ payload, type }) =>
+      type === 'damage-dealt'
+        && isJsonRecord(payload)
+        && payload.instanceId === opening.targetInstanceId
+        && payload.amount === baseBearerAttack + 1);
+    const targetDied = fight.receipt.events.some(({ payload, type }) =>
+      type === 'minion-died'
+        && isJsonRecord(payload)
+        && payload.cardId === input.granaryRats.stableId
+        && payload.instanceId === opening.targetInstanceId);
+    if (!strikeAllocation || !targetDamageEvent || !targetDied) {
+      throw new Error('private Torshammar fight did not observe the carried +1 outcome');
+    }
+    const end = await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    const endEvents = end.receipt.events.map(({ type }) => type);
+    const returnIndex = endEvents.indexOf('artifact-returned-to-hand');
+    const endIndex = endEvents.indexOf('turn-ended');
+    const returnedToOwnerHand = session.state.players.north.hand.spellbook
+      .some(({ instanceId }) => instanceId === opening.artifactInstanceId)
+      && !(session.state.realm.artifacts ?? [])
+        .some(({ instanceId }) => instanceId === opening.artifactInstanceId);
+    const attackAfterReturn = observeGame(session.state, 'north').realm.units
+      .find(({ instanceId }) => instanceId === opening.bearerInstanceId)?.attack;
+    if (returnIndex < 0 || endIndex < 0 || endIndex >= returnIndex || !returnedToOwnerHand
+      || attackAfterReturn !== baseBearerAttack) {
+      throw new Error('private Torshammar did not prove ordered owner-hand return and power removal');
+    }
+    if (!(await handle.verifyReplay())) throw new Error('private Torshammar scenario failed its replay proof');
+    return Object.freeze({
+      attackAfterReturn,
+      attackWithArtifact: poweredBearer.attack,
+      bearerPowerBonus: 1,
+      castAndCarried: true,
+      card: input.torshammarTrinket.name,
+      deck: deckList(manifest.decks.north, names),
+      eventOrderVerified: true,
+      fightDamage: baseBearerAttack + 1,
+      lifecycleComposed: true,
+      replayVerified: true,
+      returnedToOwnerHand: true,
+      seed,
+      targetDied: true,
+    });
+  });
+}
+
+function findTorshammarOpening(
+  input: Awaited<ReturnType<typeof readPrivateInputs>>,
+): Readonly<{
+  artifactInstanceId: StateHash;
+  bearerInstanceId: string;
+  manifest: GameManifest;
+  names: ReadonlyMap<string, string>;
+  northFirstSiteInstanceId: string;
+  northSecondSiteInstanceId: string;
+  seed: number;
+  southFirstSiteInstanceId: string;
+  southSecondSiteInstanceId: string;
+  targetInstanceId: string;
+}> {
+  const openingCard = (
+    player: GameSession['state']['players'][GameSeat],
+    cardId: string,
+    draws: number,
+  ): string | undefined => [...player.hand.spellbook, ...player.spellbook.slice(0, draws)]
+    .find((card) => card.cardId === cardId)?.instanceId;
+  const seed = input.config.seed + 192;
+  const built = buildManifest(input, seed, 'artifact-torshammar');
+  const session = keep(keep(createGameSession(built.manifest)));
+  const northSites = session.state.players.north.hand.atlas.filter(({ cardId }) =>
+    session.state.cards[cardId]?.cardType === 'site');
+  const southSites = session.state.players.south.hand.atlas.filter(({ cardId }) =>
+    session.state.cards[cardId]?.cardType === 'site');
+  const northFirst = northSites[0];
+  const northSecond = northSites.find(({ instanceId }) => instanceId !== northFirst?.instanceId);
+  const southFirst = southSites[0];
+  const southSecond = southSites.find(({ instanceId }) => instanceId !== southFirst?.instanceId);
+  const providerInstanceId = openingCard(session.state.players.north, input.earthProviderMinion.stableId, 1);
+  const targetInstanceId = openingCard(session.state.players.south, input.granaryRats.stableId, 2);
+  const artifactInstanceId = openingCard(session.state.players.north, input.torshammarTrinket.stableId, 2) as StateHash | undefined;
+  if (!northFirst || !northSecond || !southFirst || !southSecond
+    || !providerInstanceId || !targetInstanceId || !artifactInstanceId) {
+    throw new Error('private Torshammar scenario no longer produces its reviewed opening');
+  }
+  return {
+    artifactInstanceId,
+    bearerInstanceId: providerInstanceId,
+    manifest: built.manifest,
+    names: built.names,
+    northFirstSiteInstanceId: northFirst.instanceId,
+    northSecondSiteInstanceId: northSecond.instanceId,
+    seed,
+    southFirstSiteInstanceId: southFirst.instanceId,
+    southSecondSiteInstanceId: southSecond.instanceId,
+    targetInstanceId,
+  };
+}
 export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<PrivateGameCheck> {
   const input = await readPrivateInputs(path);
+  const torshammar = await runTorshammar(input);
   const airStarter = await runStarter(
     input,
     'air-starter',
@@ -24997,6 +25326,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     revisionId: input.config.revisionId,
     seed: opening.seed,
     stealth,
+    torshammar,
     waterDrowned,
     waterDrown,
     waterEdgeConnection,

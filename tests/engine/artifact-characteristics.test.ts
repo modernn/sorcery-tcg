@@ -50,6 +50,89 @@ test('artifact characteristics compose with legacy effects and preserve canonica
   });
 });
 
+test('artifact bearer power bonus composes with the owner-return lifecycle', () => {
+  type ReturnArtifact = Extract<GameCardDefinition, {
+    cardType: 'artifact';
+    returnToOwnerHandAfterEachTurn: true;
+  }>;
+  const typedComposable: ReturnArtifact = {
+    bearerPowerBonus: 1,
+    cardType: 'artifact',
+    manaCost: 1,
+    returnToOwnerHandAfterEachTurn: true,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  };
+  assert.equal(typedComposable.bearerPowerBonus, 1);
+
+  const typedInvalid = {
+    cardType: 'artifact',
+    grantsBearerLethal: true,
+    manaCost: 1,
+    returnToOwnerHandAfterEachTurn: true,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  } as const;
+  // @ts-expect-error return lifecycle effects cannot compose with another exclusive effect.
+  const invalidDefinition: ReturnArtifact = typedInvalid;
+  void invalidDefinition;
+
+  const manifest = createGameManifest(input({
+    bearerPowerBonus: 1,
+    cardType: 'artifact',
+    manaCost: null,
+    returnToOwnerHandAfterEachTurn: true,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    token: true,
+  }));
+  assert.deepEqual(manifest.cards.token, {
+    bearerPowerBonus: 1,
+    cardType: 'artifact',
+    manaCost: null,
+    returnToOwnerHandAfterEachTurn: true,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    token: true,
+  });
+});
+
+test('artifact bearer power bonus rejects out-of-range and duplicate legacy values', () => {
+  const base = {
+    cardType: 'artifact' as const,
+    manaCost: null,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    token: true as const,
+  };
+  assert.throws(() => createGameManifest(input({ ...base, bearerPowerBonus: 0 })), /bearerPowerBonus must be/);
+  assert.throws(() => createGameManifest(input({ ...base, bearerPowerBonus: 101 })), /bearerPowerBonus must be/);
+  assert.throws(() => createGameManifest(input({
+    ...base,
+    bearerPowerBonus: 1,
+    grantsBearerPower: 2,
+  } as never)), /both bearerPowerBonus and grantsBearerPower/);
+  assert.throws(() => createGameManifest(input({
+    ...base,
+    grantsBearerPower: 2,
+    returnToOwnerHandAfterEachTurn: true,
+  } as never)), /must define exactly one supported Artifact effect/);
+  assert.throws(() => createGameManifest(input({
+    ...base,
+    bearerPowerBonus: 1,
+    grantsBearerLethal: true,
+    returnToOwnerHandAfterEachTurn: true,
+  } as never)), /must define exactly one supported Artifact effect/);
+});
+
+test('artifact lifecycle facts ignore inherited fields', () => {
+  const inherited = Object.assign(Object.create({ returnToOwnerHandAfterEachTurn: true }), {
+    cardType: 'artifact',
+    manaCost: null,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    token: true,
+  });
+  assert.throws(
+    () => createGameManifest(input(inherited as never)),
+    /must define exactly one supported Artifact effect/,
+  );
+});
+
 test('artifact characteristics reject noncanonical arrays and unsupported rarity', () => {
   const base = { bearerControllerChoosesExtraRandomOutcome: true as const, cardType: 'artifact' as const, manaCost: null,
     thresholds: { air: 0, earth: 0, fire: 0, water: 0 }, token: true as const };
