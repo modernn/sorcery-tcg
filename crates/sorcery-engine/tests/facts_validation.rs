@@ -442,6 +442,11 @@ fn rule_06_should_reject_unknown_or_noncanonical_facts() {
             "cardType",
         ),
         (
+            "aboveground damage must use its supported amount",
+            spell("magic", ("damageEachAbovegroundMinion", json!(0))),
+            "must be 1",
+        ),
+        (
             "true-only false",
             with(minion(), "token", json!(false)),
             "must be true",

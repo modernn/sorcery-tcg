@@ -243,16 +243,29 @@ fn seed_with(ward: bool, start: u32) -> String {
 fn rule_catalog_0605_rain_of_arrows_damages_every_aboveground_minion() {
     let encoded = seed_with(false, 605);
     let (mut session, victim_id, target_id) = setup_rain(&encoded);
+    let version_before = session.state_version();
 
-    let (_, receipt) = accept_where(&mut session, |descriptor| {
+    let (cast, receipt) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
     });
+    assert!(cast["target"].is_null());
+    assert!(cast["targetLocation"].is_null());
+    assert!(receipt.random_draws.is_empty());
     assert!(event_types(&receipt).contains(&"damage-dealt"));
     assert!(event_types(&receipt).contains(&"minion-died"));
     assert!(event_types(&receipt).contains(&"magic-resolved"));
     let after = state(&session);
     assert!(realm_unit(&after, &victim_id).is_none());
     assert!(realm_unit(&after, &target_id).is_none());
+    let rain_id = cast["cardInstanceId"].as_str().expect("Rain identity");
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("North cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == rain_id)
+    );
+    assert_eq!(session.state_version(), version_before + 1);
     assert_exact_replay(&session);
 }
 
@@ -1001,6 +1014,177 @@ fn seed_for_burrowed_enemy(start: u32) -> String {
             }
         })
         .expect("bounded seed reaching Rain burrowed-enemy setup")
+}
+
+fn rain_region_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "rain-region-exclusions" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-rain-region-exclusions-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-rain": {
+                "cardType": "magic",
+                "damageEachAbovegroundMinion": 1,
+                "manaCost": 1,
+                "thresholds": { "air": 1, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "north-site": { "cardType": "site", "elements": ["water", "air"] },
+            "north-victim": minion(json!({ "defense": 5 })),
+            "south-avatar": avatar(),
+            "south-region": minion(json!({
+                "burrowing": true,
+                "defense": 5,
+                "stealth": true,
+                "submerge": true,
+                "summonToAnySite": true,
+                "voidwalk": true,
+            })),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-rain", "north-victim", "north-rain",
+                    "north-victim", "north-rain", "north-victim",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-region"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn assert_only_surface_minions_damaged(
+    after: &Value,
+    victim_id: &str,
+    stealthed_id: &str,
+    excluded_ids: [&str; 3],
+) {
+    assert_eq!(unit(after, victim_id)["damage"], 1);
+    assert_eq!(unit(after, stealthed_id)["damage"], 1);
+    assert_eq!(unit(after, stealthed_id)["stealthed"], true);
+    for excluded in excluded_ids {
+        let target = unit(after, excluded);
+        assert_eq!(target["damage"], 0);
+        assert_ne!(target["region"], "surface");
+    }
+}
+
+#[test]
+fn rain_only_allocates_damage_to_surface_minions() {
+    let encoded = (0..4096)
+        .map(rain_region_manifest)
+        .find(|candidate| {
+            ["north-rain", "north-victim"].iter().all(|card_id| {
+                opening_hand_spell_ids(candidate, "north").contains(&card_id.to_string())
+            })
+        })
+        .expect("bounded seed with Rain and a surface victim in North's opening hand");
+    let mut session = Session::new(&encoded).expect("valid region-exclusion session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let (victim, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-victim"
+            && descriptor["cell"] == "C4"
+    });
+    let victim_id = victim["cardInstanceId"].as_str().expect("North victim ID");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (burrower, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-region"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"] == "underground"
+    });
+    let (submerged, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-region"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"] == "underwater"
+    });
+    let (stealthed, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-region"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    });
+    let (voidwalker, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-region"
+            && descriptor["cell"] == "B4"
+            && descriptor["region"] == "void"
+    });
+    let instance_id = |descriptor: &Value| {
+        descriptor["cardInstanceId"]
+            .as_str()
+            .expect("summoned unit identity")
+            .to_owned()
+    };
+    let (burrower_id, submerged_id, stealthed_id, voidwalker_id) = (
+        instance_id(&burrower),
+        instance_id(&submerged),
+        instance_id(&stealthed),
+        instance_id(&voidwalker),
+    );
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let before_mana = state(&session)["players"]["north"]["mana"]
+        .as_u64()
+        .expect("North mana");
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    });
+    let allocated: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "magic-damage-allocated")
+        .map(|event| {
+            event.payload["targetInstanceId"]
+                .as_str()
+                .expect("target ID")
+                .to_owned()
+        })
+        .collect();
+    let mut expected_allocated = vec![victim_id.to_owned(), stealthed_id.clone()];
+    expected_allocated.sort_unstable();
+    assert_eq!(allocated, expected_allocated);
+    assert!(!event_types(&receipt).contains(&"stealth-lost"));
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["north"]["mana"].as_u64(),
+        Some(before_mana - 1)
+    );
+    assert_only_surface_minions_damaged(
+        &after,
+        victim_id,
+        &stealthed_id,
+        [&burrower_id, &submerged_id, &voidwalker_id],
+    );
+    assert_exact_replay(&session);
 }
 
 #[test]
