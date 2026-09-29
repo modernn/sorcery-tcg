@@ -11,7 +11,7 @@
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
-use sorcery_engine::contract::{ActionRequest, Receipt};
+use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::session::{Session, StepResult};
 
 fn avatar() -> Value {
@@ -160,6 +160,56 @@ fn freeze_manifest(seed: u32) -> String {
     }))
 }
 
+fn stacked_freeze_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "freeze-stack" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-freeze-stack-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-freeze": freeze(),
+            "north-ally": {
+                "attack": 1, "cardType": "minion", "defense": 5, "manaCost": 0,
+                "provides": "water", "stealth": true, "summonToAnySite": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 }, "ward": true,
+            },
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-target": {
+                "attack": 1, "cardType": "minion", "defense": 5, "manaCost": 0,
+                "movementBonus": 1, "provides": "air", "ranged": true,
+                "summonToAnySite": true, "tapForMana": 1,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "south-stealth": {
+                "attack": 1, "cardType": "minion", "defense": 5, "manaCost": 0,
+                "stealth": true, "summonToAnySite": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "south-ward": {
+                "attack": 1, "cardType": "minion", "defense": 5, "manaCost": 0,
+                "summonToAnySite": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 }, "ward": true,
+            },
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6], "avatar": "north-avatar",
+                "spellbook": ["north-ally", "north-freeze", "north-freeze", "north-freeze", "north-freeze", "north-freeze"],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6], "avatar": "south-avatar",
+                "spellbook": ["south-target", "south-stealth", "south-ward", "south-target", "south-stealth", "south-ward"],
+            },
+        },
+        "engineVersion": "sorcery-core-v1", "firstSeat": "north", "schemaVersion": 1, "seed": seed,
+    }))
+}
+
 fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
     let action = session
         .legal_actions()
@@ -233,6 +283,17 @@ fn unit<'a>(snapshot: &'a Value, instance_id: &str) -> &'a Value {
         .iter()
         .find(|unit| unit["instanceId"] == instance_id)
         .expect("expected realm unit")
+}
+
+fn observed_disabled(session: &Session, seat: Seat, instance_id: &str) -> bool {
+    session.public_view(seat).expect("seat view")["realm"]["units"]
+        .as_array()
+        .expect("observed realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+        .expect("observed unit")["disabled"]
+        .as_bool()
+        .expect("disabled status")
 }
 
 fn has_activate_mana(session: &Session, instance_id: &str) -> bool {
@@ -435,6 +496,140 @@ fn assert_exact_replay(session: &Session) {
     assert!(session.verify_replay().expect("verified replay"));
 }
 
+fn stacked_freeze_seed() -> (u32, String) {
+    (2001..4096)
+        .find_map(|seed| {
+            let encoded = stacked_freeze_manifest(seed);
+            let session = Session::new(&encoded).ok()?;
+            let snapshot = state(&session);
+            let north = snapshot["players"]["north"]["hand"]["spellbook"].as_array()?;
+            let south = snapshot["players"]["south"]["hand"]["spellbook"].as_array()?;
+            (north.iter().any(|card| card["cardId"] == "north-ally")
+                && north
+                    .iter()
+                    .filter(|card| card["cardId"] == "north-freeze")
+                    .count()
+                    == 2
+                && ["south-target", "south-stealth", "south-ward"]
+                    .iter()
+                    .all(|id| south.iter().any(|card| card["cardId"] == *id)))
+            .then_some((seed, encoded))
+        })
+        .expect("bounded opening with ally, two Freeze spells, and all South minions")
+}
+
+fn replay_at_current_state(session: &Session) -> Session {
+    let action_ids: Vec<_> = session
+        .transcript()
+        .iter()
+        .map(|receipt| receipt.action_id.clone())
+        .collect();
+    Session::replay(session.manifest_json(), &action_ids).expect("replay branch root")
+}
+
+fn unit_action_kinds(session: &Session, instance_id: &str) -> Vec<String> {
+    session
+        .legal_actions()
+        .expect("legal actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["unitInstanceId"] == instance_id
+                || action.descriptor["shooterInstanceId"] == instance_id
+        })
+        .map(|action| {
+            action.descriptor["kind"]
+                .as_str()
+                .expect("action kind")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn stacked_freeze_position(
+    encoded: &str,
+) -> (Session, String, String, String, String, String, Vec<String>) {
+    let mut session = Session::new(encoded).expect("stacked Freeze session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |action| {
+        action["kind"] == "play-site" && action["cell"] == "C4"
+    });
+    let (ally, _) = accept_where(&mut session, |action| {
+        action["kind"] == "summon-minion" && action["cardId"] == "north-ally"
+    });
+    let ally_id = ally["cardInstanceId"].as_str().expect("ally ID").to_owned();
+    accept_where(&mut session, |action| action["kind"] == "end-turn");
+    accept_where(&mut session, |action| {
+        action["kind"] == "draw" && action["zone"] == "atlas"
+    });
+    accept_where(&mut session, |action| {
+        action["kind"] == "play-site" && action["cell"] == "C1"
+    });
+    accept_where(&mut session, |action| action["kind"] == "end-turn");
+    accept_where(&mut session, |action| {
+        action["kind"] == "draw" && action["zone"] == "atlas"
+    });
+    accept_where(&mut session, |action| {
+        action["kind"] == "play-site" && action["cell"] == "C3"
+    });
+    accept_where(&mut session, |action| action["kind"] == "end-turn");
+    accept_where(&mut session, |action| {
+        action["kind"] == "draw" && action["zone"] == "atlas"
+    });
+    accept_where(&mut session, |action| {
+        action["kind"] == "play-site" && action["cell"] == "C2"
+    });
+    let (target, _) = accept_where(&mut session, |action| {
+        action["kind"] == "summon-minion"
+            && action["cardId"] == "south-target"
+            && action["cell"] == "C2"
+    });
+    let (stealth, _) = accept_where(&mut session, |action| {
+        action["kind"] == "summon-minion"
+            && action["cardId"] == "south-stealth"
+            && action["cell"] == "C2"
+    });
+    let (ward, _) = accept_where(&mut session, |action| {
+        action["kind"] == "summon-minion"
+            && action["cardId"] == "south-ward"
+            && action["cell"] == "C2"
+    });
+    let target_id = target["cardInstanceId"]
+        .as_str()
+        .expect("target ID")
+        .to_owned();
+    let stealth_id = stealth["cardInstanceId"]
+        .as_str()
+        .expect("Stealth ID")
+        .to_owned();
+    let ward_id = ward["cardInstanceId"].as_str().expect("Ward ID").to_owned();
+    accept_where(&mut session, |action| action["kind"] == "end-turn");
+    accept_where(&mut session, |action| {
+        action["kind"] == "draw" && action["zone"] == "atlas"
+    });
+    let avatar_id = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar ID")
+        .to_owned();
+    accept_where(&mut session, |action| {
+        action["kind"] == "move-and-attack"
+            && action["unitInstanceId"] == avatar_id
+            && action["to"]["cell"] == "C3"
+    });
+    accept_where(&mut session, |action| action["kind"] == "decline-attack");
+    let freezes: Vec<_> = state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North hand")
+        .iter()
+        .filter(|card| card["cardId"] == "north-freeze")
+        .map(|card| card["instanceId"].as_str().expect("Freeze ID").to_owned())
+        .collect();
+    assert_eq!(freezes.len(), 2);
+    (
+        session, ally_id, target_id, stealth_id, ward_id, avatar_id, freezes,
+    )
+}
+
 fn seed_with(required: &[&str]) -> String {
     (581..581 + 512)
         .map(freeze_manifest)
@@ -449,6 +644,151 @@ fn seed_with(required: &[&str]) -> String {
                     .all(|id| south.iter().any(|card| card == id))
         })
         .expect("bounded seed with Freeze and both South minions")
+}
+
+#[test]
+fn freeze_targeting_removes_stealth_and_ward_ability_sources() {
+    let (_, encoded) = stacked_freeze_seed();
+    let (session, ally_id, target_id, stealth_id, ward_id, avatar_id, freeze_ids) =
+        stacked_freeze_position(&encoded);
+    let targets = freeze_targets(&session);
+    for id in [&ally_id, &target_id, &ward_id] {
+        assert!(
+            targets.contains(id),
+            "Freeze target not offered: {id}; targets = {targets:?}"
+        );
+    }
+    assert!(!targets.contains(&stealth_id));
+    assert!(!targets.contains(&avatar_id));
+    assert_eq!(
+        session.public_view(Seat::South).expect("South view")["players"]["south"]["affinity"]["air"],
+        1
+    );
+
+    let mut unfrozen = replay_at_current_state(&session);
+    accept_where(&mut unfrozen, |action| action["kind"] == "end-turn");
+    accept_where(&mut unfrozen, |action| {
+        action["kind"] == "draw" && action["zone"] == "atlas"
+    });
+    let active_kinds = unit_action_kinds(&unfrozen, &target_id);
+    for expected in ["move-and-attack", "shoot-projectile", "activate-mana"] {
+        assert!(
+            active_kinds.iter().any(|kind| kind == expected),
+            "missing {expected}"
+        );
+    }
+
+    let mut ally_branch = replay_at_current_state(&session);
+    let (ally_cast, ally_receipt) = accept_where(&mut ally_branch, |action| {
+        action["kind"] == "cast-magic"
+            && action["cardInstanceId"] == freeze_ids[0]
+            && action["target"]["instanceId"] == ally_id
+    });
+    assert_eq!(
+        event_types(&ally_receipt),
+        ["magic-cast", "minion-disabled", "magic-resolved"]
+    );
+    assert_eq!(
+        ally_receipt.events[1].payload["sourceInstanceId"],
+        ally_cast["cardInstanceId"]
+    );
+    assert_eq!(ally_receipt.events[1].payload["stealthRemoved"], true);
+    assert_eq!(ally_receipt.events[1].payload["wardRemoved"], true);
+    assert_eq!(ally_receipt.events[1].payload["expiresAtSeat"], "north");
+    let ally_after = state(&ally_branch);
+    let disabled_ally = unit(&ally_after, &ally_id);
+    assert_eq!(disabled_ally["stealthed"], false);
+    assert_eq!(disabled_ally["warded"], false);
+    assert!(observed_disabled(&ally_branch, Seat::North, &ally_id));
+    assert_exact_replay(&ally_branch);
+
+    let mut ward_branch = replay_at_current_state(&session);
+    let (_, ward_receipt) = accept_where(&mut ward_branch, |action| {
+        action["kind"] == "cast-magic"
+            && action["cardInstanceId"] == freeze_ids[0]
+            && action["target"]["instanceId"] == ward_id
+    });
+    assert_eq!(
+        event_types(&ward_receipt),
+        ["magic-cast", "ward-broken", "magic-resolved"]
+    );
+    assert!(unit(&state(&ward_branch), &ward_id)["disableEffects"].is_null());
+}
+
+#[test]
+fn stacked_freeze_expires_together_and_suppresses_affinity() {
+    let (_, encoded) = stacked_freeze_seed();
+    let (mut session, _, target_id, _, _, _, freeze_ids) = stacked_freeze_position(&encoded);
+    let (first, first_receipt) = accept_where(&mut session, |action| {
+        action["kind"] == "cast-magic"
+            && action["cardInstanceId"] == freeze_ids[0]
+            && action["target"]["instanceId"] == target_id
+    });
+    let (second, second_receipt) = accept_where(&mut session, |action| {
+        action["kind"] == "cast-magic"
+            && action["cardInstanceId"] == freeze_ids[1]
+            && action["target"]["instanceId"] == target_id
+    });
+    for receipt in [&first_receipt, &second_receipt] {
+        assert_eq!(
+            event_types(receipt),
+            ["magic-cast", "minion-disabled", "magic-resolved"]
+        );
+    }
+    let first_id = first["cardInstanceId"].as_str().expect("first Freeze ID");
+    let second_id = second["cardInstanceId"].as_str().expect("second Freeze ID");
+    assert_eq!(
+        unit(&state(&session), &target_id)["disableEffects"],
+        json!([
+            { "expiresAtSeat": "north", "sourceInstanceId": first_id },
+            { "expiresAtSeat": "north", "sourceInstanceId": second_id },
+        ])
+    );
+    assert!(observed_disabled(&session, Seat::South, &target_id));
+    assert_eq!(
+        session
+            .public_view(Seat::South)
+            .expect("disabled South view")["players"]["south"]["affinity"]["air"],
+        0
+    );
+
+    accept_where(&mut session, |action| action["kind"] == "end-turn");
+    assert_eq!(
+        unit(&state(&session), &target_id)["disableEffects"]
+            .as_array()
+            .expect("stack persists")
+            .len(),
+        2
+    );
+    accept_where(&mut session, |action| {
+        action["kind"] == "draw" && action["zone"] == "atlas"
+    });
+    assert!(unit_action_kinds(&session, &target_id).is_empty());
+    assert_eq!(
+        session
+            .public_view(Seat::South)
+            .expect("disabled South view")["players"]["south"]["affinity"]["air"],
+        0
+    );
+    let (_, expiry) = accept_where(&mut session, |action| action["kind"] == "end-turn");
+    assert_eq!(
+        event_types(&expiry),
+        [
+            "turn-ended",
+            "minion-disable-expired",
+            "minion-disable-expired",
+            "turn-started"
+        ]
+    );
+    assert_eq!(expiry.events[1].payload["sourceInstanceId"], first_id);
+    assert_eq!(expiry.events[2].payload["sourceInstanceId"], second_id);
+    assert!(unit(&state(&session), &target_id)["disableEffects"].is_null());
+    assert!(!observed_disabled(&session, Seat::North, &target_id));
+    assert_eq!(
+        session.public_view(Seat::North).expect("expired view")["players"]["south"]["affinity"]["air"],
+        1
+    );
+    assert_exact_replay(&session);
 }
 
 fn south_plays_c1_and_summons(session: &mut Session, card_id: &str) -> String {
