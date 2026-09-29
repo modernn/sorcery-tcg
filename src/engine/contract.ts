@@ -1,4 +1,4 @@
-import { canonicalJson, type JsonValue } from '../authority/canonical-json.ts';
+import type { JsonValue } from '../authority/canonical-json.ts';
 import { identityHash } from '../authority/hash.ts';
 
 export type EngineSeat = 'north' | 'south';
@@ -79,13 +79,6 @@ export type EngineReceipt = Readonly<{
   stateVersion: number;
 }>;
 
-const REJECTION_MESSAGES: Readonly<Record<EngineRejectionCode, string>> = Object.freeze({
-  stale_version: 'That action belongs to an earlier game state.',
-  terminal_state: 'The game is already over.',
-  unknown_action: 'That action is not available.',
-  wrong_seat: 'That action belongs to the other seat.',
-});
-
 export function deepFreeze<T>(value: T): T {
   if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value;
   for (const child of Object.values(value)) deepFreeze(child);
@@ -99,60 +92,4 @@ export function opaqueActionId(
   descriptor: EngineActionDescriptor,
 ): StateHash {
   return identityHash({ contract, descriptor, seat, stateVersion });
-}
-
-export function orderLegalActions<Action extends EngineLegalAction>(actions: readonly Action[]): readonly Action[] {
-  return deepFreeze([...actions].sort((left, right) => {
-    const descriptorOrder = canonicalJson(left.descriptor).localeCompare(canonicalJson(right.descriptor));
-    return descriptorOrder || left.actionId.localeCompare(right.actionId);
-  }));
-}
-
-export function createRejection(
-  code: EngineRejectionCode,
-  currentStateVersion: number,
-  currentStateHash: StateHash,
-): EngineRejection {
-  return deepFreeze({ code, currentStateHash, currentStateVersion, message: REJECTION_MESSAGES[code] });
-}
-
-export function createEvents(
-  actionId: string,
-  receiptSequence: number,
-  firstEventSequence: number,
-  outcomes: readonly Readonly<{ payload: JsonValue; type: string }>[] ,
-): readonly EngineEvent[] {
-  return deepFreeze(outcomes.map(({ payload, type }, index) => {
-    const eventSequence = firstEventSequence + index;
-    const cause = { actionId, receiptSequence } as const;
-    return {
-      cause,
-      eventId: identityHash({ cause, eventSequence, payload, type }),
-      eventSequence,
-      payload,
-      type,
-    };
-  }));
-}
-
-export function createReceipt(input: Readonly<Omit<EngineReceipt, 'receiptId'>>): EngineReceipt {
-  const body = deepFreeze({ ...input });
-  return deepFreeze({ ...body, receiptId: identityHash(body as unknown as JsonValue) });
-}
-
-export function createAttempt(
-  attemptSequence: number,
-  request: EngineActionRequest,
-  authoritativeStateVersion: number,
-  authoritativeStateHash: StateHash,
-  outcome: Readonly<{ receiptId: StateHash } | { reasonCode: EngineRejectionCode }>,
-): EngineAttempt {
-  return deepFreeze({
-    attemptSequence,
-    authoritativeStateHash,
-    authoritativeStateVersion,
-    outcome: 'receiptId' in outcome ? 'accepted' : 'rejected',
-    ...outcome,
-    request,
-  });
 }

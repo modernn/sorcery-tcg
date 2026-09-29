@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
-use sorcery_engine::action::ActionDescriptor;
+use sorcery_engine::action::{ActionDescriptor, DeckZone};
+use sorcery_engine::board::Region;
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::contract::Seat;
 use sorcery_engine::game::Game;
@@ -87,6 +88,52 @@ fn baseline_policy_should_reproduce_the_complete_seed_31_action_sequence() {
             .as_str()
             .expect("fixture final state hash")
     );
+}
+
+#[test]
+fn deterministic_policy_should_attack_the_enemy_avatar_without_leaving_its_cell() {
+    let manifest = synthetic_demo_manifest_json(31).expect("synthetic manifest");
+    let mut game = Game::from_manifest_json(&manifest).expect("valid game");
+    let policy = baseline_policy();
+
+    for _ in 0..500 {
+        let actions = game.legal_actions().expect("legal actions");
+        let seat = actions.first().expect("active actions").seat();
+        let observation = game.observe(seat);
+        let enemy_avatar = observation.enemy_avatar();
+        let immediate_attack = actions.iter().any(|action| {
+            matches!(
+                action.descriptor(),
+                ActionDescriptor::MoveAndAttack { path, to, .. }
+                    if path.len() == 1 && to.cell == enemy_avatar.cell && to.region == Region::Surface
+            )
+        });
+        let can_build_first = actions.iter().any(|action| {
+            matches!(
+                action.descriptor(),
+                ActionDescriptor::PlaySite { .. }
+                    | ActionDescriptor::SummonMinion { .. }
+                    | ActionDescriptor::Draw {
+                        zone: DeckZone::Atlas
+                    }
+            )
+        });
+
+        let selected = policy
+            .select_action(&observation, &actions)
+            .expect("selected action");
+        if immediate_attack && !can_build_first {
+            assert!(matches!(
+                selected.descriptor(),
+                ActionDescriptor::MoveAndAttack { path, to, .. }
+                    if path.len() == 1 && to.cell == enemy_avatar.cell && to.region == Region::Surface
+            ));
+            return;
+        }
+        game.apply_action(selected).expect("accepted policy action");
+    }
+
+    panic!("seed-31 match never reached an in-place Avatar attack");
 }
 
 #[test]

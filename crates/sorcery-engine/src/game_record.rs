@@ -819,6 +819,15 @@ mod tests {
         );
         assert_eq!(record.accepted_action_count, 230);
         assert_eq!(record.fight_count, 6);
+        assert_eq!(
+            serde_json::to_value(record.terminal).expect("terminal JSON"),
+            serde_json::json!({
+                "loser": "north",
+                "reason": "avatar_defeated",
+                "status": "finished",
+                "winner": "south",
+            })
+        );
         assert_eq!(record.turn_count, 27);
         assert_eq!(
             record.final_state_hash.as_str(),

@@ -18,7 +18,7 @@
     "game:novelty-private": "node src/commands/run-private-novelty-gauntlet.ts",
     "game:report-private-mechanics": "node src/commands/report-private-mechanic-workload.ts",
     "play": "node src/prototype/game-server.ts",
-    "prototype": "node src/prototype/server.ts",
+    "prototype": "node src/prototype/game-server.ts",
     "typecheck": "node --stack-size=4096 node_modules/typescript/bin/tsc --noEmit",
     "authority:import": "node src/commands/import-authority.ts",
     "cards:catalog-build": "node src/commands/build-card-catalog.ts",

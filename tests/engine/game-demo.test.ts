@@ -3,69 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
-import {
-  createSyntheticDemoManifest,
-  runGameDemo,
-} from '../../src/commands/run-game-demo.ts';
-import { SetupCtx } from './rust-setup-session.ts';
-
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
-
-test('deterministic agents attack the opposing Avatar without walking away', async () => {
-  const ctx = await SetupCtx.open(createSyntheticDemoManifest(31));
-  try {
-    for (let count = 0; count < 500; count += 1) {
-      const session = ctx.session;
-      const actions = await ctx.legalActions();
-      const enemyCell = session.state.players[
-        session.state.decisionSeat === 'north' ? 'south' : 'north'
-      ].avatar.location;
-      const attack = actions.find(({ descriptor }) =>
-        descriptor.kind === 'move-and-attack'
-          && descriptor.path.length === 1
-          && descriptor.to.cell === enemyCell
-          && descriptor.to.region === 'surface');
-      const buildsFirst = actions.some(({ descriptor }) =>
-        descriptor.kind === 'play-site'
-          || descriptor.kind === 'summon-minion'
-          || (descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
-      if (attack && !buildsFirst) {
-        const selected = (await ctx.selectPolicyAction()).descriptor;
-        assert.equal(selected.kind, 'move-and-attack');
-        if (selected.kind !== 'move-and-attack') return;
-        assert.equal(selected.path.length, 1);
-        assert.equal(selected.to.cell, enemyCell);
-        assert.equal(selected.to.region, 'surface');
-        return;
-      }
-      const result = await ctx.step(await ctx.selectPolicyAction());
-      assert.equal(result.accepted, true);
-      if (!result.accepted) return;
-    }
-    assert.fail('deterministic match never reached an in-place Avatar attack');
-  } finally {
-    await ctx.close();
-  }
-});
-
-test('RULE-01 deterministic agents move, fight, and complete a match', () => {
-  const result = runGameDemo(31);
-  assert.deepEqual(result, {
-    acceptedActionCount: 230,
-    classification: 'unranked_partial_rules',
-    finalStateHash: 'sha256:d2470816213290a1769dd1801af647149d51d02cd3df3dde24b170c27e41471b',
-    fightCount: 6,
-    replayVerified: true,
-    terminal: {
-      loser: 'north',
-      reason: 'avatar_defeated',
-      status: 'finished',
-      winner: 'south',
-    },
-    transcriptHash: 'sha256:b9c80fa98c32df9c3764ff01dc9d974039aec1633d71f1397e13f324df701c17',
-    turnCount: 27,
-  });
-});
 
 test('TEST-02 fresh processes emit byte-identical combat match results', () => {
   const command = resolve(REPOSITORY_ROOT, 'src', 'commands', 'run-game-demo.ts');
