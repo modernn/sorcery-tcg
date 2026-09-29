@@ -15,6 +15,20 @@ For engine expansion, analyze complete corpus clauses before choosing abstractio
 A keyword occurrence is not a semantic review: negation, conditional grants, targeting,
 timing, source identity, and cost/effect roles can reverse what the same words mean.
 Do not preserve a card-specific runtime design merely because it already exists.
+Use the official Codex as primary shared-rule authority, retaining exact entry/subentry
+IDs, URLs, and snapshot identity alongside full card text, rulings, and characteristics.
+
+For expansion, follow the [shared-rule batch loop](../../docs/shared-rule-behaviors.md#binding-and-validation-batch-loop).
+Its private dependency catalog distinguishes source review, contextual readiness,
+per-card proof, and admission. Pair companion rules and validate every newly eligible
+complete mapping; keyword matches and group counts never establish support.
+
+TypeSafe Jev is an available optional resource for diagnosis, synthetic counterexamples,
+and play/probe proposals. Follow `docs/agent-evaluation.md` and reuse its existing
+adapters with configured private credentials. Send only approved synthetic redacted
+packets; official bytes, normalized facts, source context, and private decks stay local.
+No repeated permission request is needed for this authorized resource use. Rust still
+owns legality and proof; Jev is not required for deterministic rollouts.
 
 ## Establish what can run
 
@@ -73,7 +87,9 @@ summoning a card does not exercise every ability on it.
 
 ## Learn through controlled batches
 
-Change one to three cards at a time. Preserve deck size, copy limits, mana curve, and
+For a deck-comparison hypothesis, change a small controlled set of admitted cards.
+This does not limit the size of a shared-rule or card-validation batch. Preserve deck
+size, copy limits, mana curve, and
 element requirements unless one of those is the hypothesis. Hold opponent policies,
 seeds, and orientation schedule fixed. Swap both seats; when comparing policies across
 different decks, also assign each policy to each deck so deck quality is not a confound.

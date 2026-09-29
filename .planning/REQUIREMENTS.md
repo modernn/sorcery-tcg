@@ -1,5 +1,11 @@
 # Requirements: Sorcery Simulator
 
+> Historical requirement baseline; wording and checkboxes below are preserved as
+> recorded, including the superseded TypeScript state model and phased card workflow.
+> Current constraints are in [AGENTS.md](../AGENTS.md); the
+> [shared-rule batch loop](../docs/shared-rule-behaviors.md#binding-and-validation-batch-loop)
+> defines implementation and proof work. Do not infer present coverage from this list.
+
 **Defined:** 2026-08-20
 **Updated:** 2026-08-28
 **Core value:** Simulation results must be reproducible and rules-correct enough that deck and model comparisons are trustworthy.

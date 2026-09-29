@@ -1,12 +1,13 @@
 # Local release assessment
 
-The release checks below are historical, bounded workflow results. The expanded goal
-now requires all officially released cards through shared rules. See the
-[corpus-first engine redesign](engine-redesign.md): the 190 admitted bindings are
-provisional, and the full-card review found missing global behavior, including normal
-transferable Lance token handling. Existing deterministic traces do not certify rule
-completeness. The earlier advice against architectural work no longer limits the
-user-authorized redesign.
+This document preserves historical, bounded release results and decisions. Its counts,
+implementation descriptions, and task order are not current status. Active work follows
+the [shared-rule batch loop](shared-rule-behaviors.md#binding-and-validation-batch-loop)
+and [Rust architecture](engine-redesign.md): complete Codex/source review, composable
+rule slices, private dependency tracking, and per-card native proof before admission.
+The earlier restrictions on architecture, module extraction, databases, and optional
+model tooling do not limit the subsequently authorized work. Historical deterministic
+traces do not certify complete rules support.
 
 Assessed 2026-09-25 on `master`, starting at `a0391e0bb`. Scope agreed with the user:
 reliable local self-play, search, replay, and an LLM-usable deck variation interface.
@@ -173,7 +174,7 @@ recorded above. Private coverage, guided records, and experiment receipts are un
 `.local/authority/binding-cycles/cycle-01/`; verification and performance logs are under
 `.local/recovery/`. The earlier intake counts above describe the pre-expansion snapshot.
 
-## Remaining work, in order
+## Remaining work recorded at that release (historical)
 
 1. Expand the 190-card binding pool through shared behavior slices and complete-card
    review. Use the whole released corpus to identify reusable behavior families, then

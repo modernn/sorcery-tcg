@@ -2,7 +2,9 @@
 
 Self-play remains unranked. Manifest-declared authority hashes and hash files do not establish
 verified facts. A policy win is not evidence of a correct game when a manifest fact was accepted
-but ignored. See [the current local release](local-release.md) and [run commands](../README.md).
+but ignored. See the [active rule/card batch loop](shared-rule-behaviors.md#binding-and-validation-batch-loop)
+and [run commands](../README.md). These statistical campaign gates do not replace
+source review, complete contextual dependencies, or per-card native validation.
 
 ## Required invariants
 
@@ -47,7 +49,11 @@ ordinary debug suite because running the same workload there takes several minut
 6. Change one axis for the next experiment: policy or deck composition, never both in one attribution
    step. Price belongs in deck-search scoring, not in legality or transition state.
 
-## Current blockers to strong unattended self-play
+## Recorded implementation snapshot (historical)
+
+The notes below preserve earlier scenario and policy coverage. Consult the current
+private dependency catalog and native proofs for present support; these descriptions
+are neither current card admission nor authoritative rule wording.
 
 - The catalog indexes supported scenarios, not a complete official rules inventory. Redundant
   batch-size proofs have been removed. Ranked self-play requires an independently verified

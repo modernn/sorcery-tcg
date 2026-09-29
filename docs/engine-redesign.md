@@ -1,5 +1,11 @@
 # Engine redesign from the released card corpus
 
+The architecture below guides ongoing migration. Its initial audit counts and later
+implementation notes are evidence snapshots, not current admission totals. Follow the
+[shared-rule batch loop](shared-rule-behaviors.md#binding-and-validation-batch-loop)
+and refreshed private catalog for work selection, companion dependencies, validation,
+and admission. No section declares complete released-card support.
+
 ## Decision and evidence
 
 Build one Rust rules kernel that executes composed ability data. Replace the existing
@@ -26,14 +32,15 @@ the source does not encode every gameplay characteristic. The audit found 26 spl
 minions, ten artifact/minion definitions, three unresolved X costs, and missing token
 traits. Empty fields cannot universally mean zero or an empty property set.
 
-The current engine has 83 Magic effect variants, 12 Artifact variants, seven Aura
+The initial engine audit recorded 83 Magic effect variants, 12 Artifact variants, seven Aura
 variants, 88 minion fact fields, and 25 site fact fields. Several variants bake together
 an effect, selector, magnitude, duration, and follow-up draw. Separately maintained
 Genesis, Deathrite, turn, movement, and spell continuations duplicate event handling.
 Those counts describe the existing code, not the number of global rules required.
 
-The existing 190 admitted bindings are provisional. For example, the current Lance
-counter models strike bonuses and breaking, but not normal token pickup and transfer.
+The 190 bindings admitted at that audit checkpoint were provisional. At that time,
+the Lance counter modeled strike bonuses and breaking without normal token pickup
+and transfer; later token work is documented below and in shared rule behaviors.
 An accepted manifest and a deterministic replay do not prove complete rules support.
 Current result eligibility therefore reports both `partial-rules` and
 `unverified-authority`; completing a match cannot erase those limitations.
@@ -569,7 +576,9 @@ deck must never acquire a simulated win rate.
 2. Each migrated shared rule has a direct synthetic scenario with meaningful choices,
    timing, and negative cases. Add interaction proofs where the official interaction
    has distinct semantics, rather than duplicating tests by card name.
-3. Rebind complete abilities through the common representation; reject partial programs.
+3. Recompute every card's exact contextual dependencies after each shared rule proof.
+   Queue complete source-guarded mappings for per-card native validation, then promote
+   passing receipts. Reject partial programs and retain unresolved companion rules.
    Keep admitted-binding counts separate from fully exercised global-rule coverage.
 4. Validate checkpoint branching/resume and replay, both seats, fixed seeds, and worker
    equivalence. Run all locked Rust gates and `pnpm verify` before each source checkpoint.

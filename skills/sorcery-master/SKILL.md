@@ -9,12 +9,24 @@ Win only through engine-issued legal actions. Treat the Rust engine as authority
 
 ## Authority order
 
-1. Use the ignored local authority revision when available.
-2. Use official rules and card rulings bound into that revision.
+1. Pin the ignored local authority revision; missing required authority blocks the run.
+2. Use the official Codex as primary shared-rule authority with exact entry/subentry
+   IDs and URLs; review complete official card instructions, characteristics, updates,
+   and rulings under `docs/authority-precedence.md`.
 3. Use `data/rules/catalog.json` as the human-reviewable map from plain-language rule slices to direct scenario proofs.
 4. Treat websites, deck lists, prices, and external simulators as non-authoritative evidence.
 
 Stop and mark a ranked result invalid when an exercised mechanic is unsupported. Never substitute a no-op or a guessed ruling.
+
+For unsupported cards, follow the [shared-rule batch loop](../../docs/shared-rule-behaviors.md#binding-and-validation-batch-loop)
+and repository playtesting skill. Complete semantic review, contextual readiness,
+per-card native proof, and admission are separate states; a group count or completed
+match does not substitute for proof.
+
+TypeSafe Jev may help diagnose a synthetic failure or propose a counterexample/probe.
+Use the existing adapters and configured private credentials under
+`docs/agent-evaluation.md`; send no official or private-source derivatives. Advice
+remains a hypothesis, and Rust owns every legal action and replay. Jev is optional.
 
 ## Assigned-deck workflow
 
@@ -56,4 +68,6 @@ Keep assigned decks, private card facts, learned policies, and detailed rollouts
 
 ## Learning discipline
 
-Turn a discovered tactic into a generic policy feature only after a direct scenario proves it and held-out self-play promotes it. Prefer deleting a losing heuristic over adding overlapping exceptions. Default to compact in-memory indexed data; do not add a database, embeddings, a neural model, or card-name branches unless measurement demonstrates that representation is the bottleneck or materially limits policy quality.
+Turn a discovered tactic into a generic policy feature only after a direct scenario proves it and held-out self-play promotes it. Prefer deleting a losing heuristic over adding overlapping exceptions. Keep legality and rollout state in compact Rust memory. The private catalog/workbook
+tracks evidence and validation outside that hot path. Do not add policy machinery
+without measured need, and never add card-name legality branches.

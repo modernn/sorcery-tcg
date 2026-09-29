@@ -5,6 +5,23 @@ checkpoint search, and replay. TypeScript handles local data ingestion and the b
 Results are **experimental and unranked**. Supported scenarios do not establish complete
 Sorcery rules coverage or competitive deck strength.
 
+## Current work
+
+Complete the released-card rules through shared Rust operations, guided by exact
+[official Codex references](docs/authority-precedence.md). Review every card's full
+instructions, rulings, and printed characteristics; rank composable rule batches with
+their companion dependencies. Start with complete mappings to existing operations.
+
+The [binding and validation loop](docs/shared-rule-behaviors.md#binding-and-validation-batch-loop)
+guides native rule proofs, the private SQLite dependency catalog, bounded per-card
+validation, reviewed bindings, and the refreshed local workbook. Source review,
+validation readiness, admission, format legality, and competitive strength are separate.
+Current counts come from the private catalog; historical phase notes are not a queue.
+
+[TypeSafe Jev](docs/agent-evaluation.md) is an optional diagnostic and proposal resource.
+Use the existing synthetic adapters and locally configured credentials when helpful.
+The Rust engine still owns legality, checkpoint execution, and replay.
+
 ## Run it
 
 Use Rust 1.97+, Node 24.19.0 and pnpm 11.22.0. The authority collector tests also require
@@ -216,6 +233,8 @@ The acceptance and soak commands are bounded synthetic campaign contracts; they 
 prove real-deck strategic strength. Private release verification is separate and requires
 the historical ignored inputs described in the authority policy.
 
-See [the release assessment](docs/local-release.md) for remaining work and
-[the private authority policy](docs/external-reuse-policy.md) for data handling.
-The old roadmap and overnight catalog handoff are historical, not the current release plan.
+See [shared rule behaviors](docs/shared-rule-behaviors.md) for active implementation
+and validation work, and [the private authority policy](docs/external-reuse-policy.md)
+for data handling. The [release assessment](docs/local-release.md), phase roadmap,
+and overnight handoff preserve historical evidence; their counts and task order are
+not the current queue.

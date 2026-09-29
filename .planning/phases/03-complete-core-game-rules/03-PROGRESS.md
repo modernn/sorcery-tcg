@@ -1,5 +1,10 @@
 # Phase 3: Complete Core Game Rules - Progress
 
+> Historical phase progress. Preserve these observations, but use
+> [shared rule behaviors](../../../docs/shared-rule-behaviors.md) and the current
+> private dependency catalog for active work and coverage. Old allowlist, completion,
+> and next-step statements do not authorize admission or ranked results.
+
 ## Implemented slice: setup through repeatable turns
 
 - Manifest-bound deterministic Atlas and Spellbook shuffles with privileged draw evidence.

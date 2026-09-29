@@ -6,14 +6,17 @@ Build a Rust application for rules-correct, deterministic Sorcery: Contested Rea
 
 **Core value:** Simulation results must be reproducible and rules-correct enough that deck and model comparisons are trustworthy.
 
-## Current milestone
+## Active direction and historical plans
 
-The phase notes below are historical. The current local release scope and run commands
-are in [README.md](../README.md) and [the release assessment](../docs/local-release.md).
+Current instructions live in [AGENTS.md](../AGENTS.md), commands in
+[README.md](../README.md), and implementation/validation order in the
+[shared-rule batch loop](../docs/shared-rule-behaviors.md#binding-and-validation-batch-loop).
+The goal is complete released-card behavior through Codex-derived shared Rust rules,
+with source-guarded contextual dependencies and native per-card proof before admission.
 
-- Phase 1 authority/data infrastructure is implemented and its review findings are resolved or explicitly deferred; see [the Phase 1 review](./phases/01-rules-and-data-authority/01-REVIEW.md) and [retrospective](./phases/01-rules-and-data-authority/01-SUMMARY.md).
-- Phase 2, the deterministic engine contract, is in progress with a frozen JSON state and versioned seeded PRNG kernel. Locked decisions are in [Phase 2 context](./phases/02-deterministic-engine-contract/02-CONTEXT.md).
-- [Requirements](./REQUIREMENTS.md) are the canonical product contract; [ROADMAP.md](./ROADMAP.md) owns phase order and status.
+The phase requirements, roadmap, and summaries preserve earlier planning and evidence;
+their checkboxes and phase order do not describe current completion or own the work
+queue. Current coverage and blockers come from the refreshed private catalog/workbook.
 
 ## Non-negotiable constraints
 

@@ -7,6 +7,19 @@ Official card definitions and card-specific rulings supply the instructions comp
 through those rules. Rulebook material is supporting authority; a newer rulebook date
 alone does not displace an applicable Codex entry.
 
+## Exact references in implementation work
+
+Pin the retained Codex snapshot and cite the exact entry ID, title, and URL; a
+subsection keeps its own ID/URL and parent identity. Titles can repeat and are not
+join keys. Record whether a link is a keyword definition, a card-specific entry,
+an explicit card mention, or general implementation context. A broad article link
+does not establish every clause's applicability or prove a runtime operation.
+
+Review complete printed instructions, card-specific rulings, updates, and printed
+characteristics against those entries. Preserve unresolved conflicts as blocked
+requirements. Source review establishes the intended behavior; a native scenario
+and each card's guarded validation establish implementation evidence separately.
+
 ## Normative authority
 
 Only records whose `authorityClass` is `official` can determine an outcome. The five normative source classes are:

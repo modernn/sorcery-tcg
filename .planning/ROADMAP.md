@@ -1,6 +1,10 @@
 # Roadmap: Sorcery Simulator
 
-Requirements live in [REQUIREMENTS.md](./REQUIREMENTS.md). This file owns only phase order, dependencies, outcomes, and current status.
+Historical phase plan. The statuses and next steps below are retained as recorded,
+not current completion claims. [AGENTS.md](../AGENTS.md), [README.md](../README.md),
+and the [shared-rule batch loop](../docs/shared-rule-behaviors.md#binding-and-validation-batch-loop)
+own current direction. The private dependency catalog supplies the live queue;
+[REQUIREMENTS.md](./REQUIREMENTS.md) preserves the earlier requirement baseline.
 
 | Phase | Depends on | Requirements | Outcome | Status |
 |---|---|---|---|---|

@@ -1,9 +1,9 @@
 # Shared rule behaviors
 
-The corpus-first [engine redesign](engine-redesign.md) now defines the architectural
-direction. It follows a full-text review of all 1,100 released card identities and
-supersedes expanding the current runtime merely by adding more compound fact flags.
-The small site-count slice below is historical groundwork, not the final model.
+This is the active rule and card batching workflow. The [engine design](engine-redesign.md)
+defines the shared Rust architecture; the private source review and dependency catalog
+supply the current work queue. Implementation snapshots below explain particular
+slices, not complete card coverage. Read current code and evidence before reusing one.
 
 The expansion unit is a reusable rule behavior, not a card implementation. Card IDs
 belong in private binding data. The Rust engine parses those bindings into typed
@@ -20,12 +20,17 @@ the current work scope.
 The [official Codex](https://sorcerytcg.com/codex) defines the global rule model.
 Card review discovers declarative inputs to that model; repeated wording is not a
 substitute for the Codex's timing and ordering rules. The ignored authority snapshot
-records the exact Codex revision used for an implementation cycle.
+records the exact Codex revision used for an implementation cycle. Join exact entry
+and subsection IDs/URLs, preserving parents and the scope of each reference. Generic
+family context is distinct from a clause-specific authority match; follow
+[authority precedence](authority-precedence.md) when sources disagree.
 
-Private behavior inventories and the exact identity-comparison receipt are under
-`.local/authority/binding-cycles/`. The existing `mechanic-workload` classifier is
-only a review queue. Lexical overlap must never admit a card or imply that all of
-its behavior is implemented.
+Private behavior inventories and identity-comparison receipts remain under
+`.local/authority/`. Reuse the accepted complete semantic and characteristic reviews.
+The older `mechanic-workload` classifier is only a lexical inventory, not the semantic
+dependency queue. Negation, owner type, regions, target versus ordinary choice,
+source lifetime, rarity, thresholds, and ability suppression can make similar wording
+require different behavior. No clause or characteristic may be stripped to fit a fact.
 
 ## What to share
 
@@ -84,7 +89,7 @@ unlocks. Prove the selector, cost, timing, and complete effect of each binding.
 ## Incremental implementation
 
 Start from an existing effect and replace duplicated decision logic with a small
-typed helper. The first slice shares site-count selection across conditional mana,
+typed helper. The initial migration shared site-count selection across conditional mana,
 mana per occupied site, and drawing for adjacent copies. Keep existing fact inputs
 compatible while routing them through the shared evaluator. Add a direct scenario
 that distinguishes adjacent/nearby/realm scope, controller, same-card identity,
@@ -95,26 +100,59 @@ primitive only when reviewed card text requires a behavior the existing helpers
 cannot express. A truly unusual card can use a specialized primitive, but it still
 uses the shared legality, targeting, settlement, and replay mechanisms.
 
-## Binding and experiment cycle
+## Binding and validation batch loop
 
-1. Rank missing behavior families by demand in the fixed benchmark decks.
-2. Review complete official card text and rulings; record unresolved clauses.
-3. Implement shared Rust behavior and a direct scenario proof. Keep unsupported
-   compositions blocked, even if some of their keywords already work.
-4. Store reviewed facts, exact source hashes, and proof references in the ignored
-   `bindings/reviewed.json`. The loader checks source identity, fact shape, base
-   stats, and conflicts; review references do not confer ranked eligibility.
-5. Introduce one to three newly bound cards in a playable deck variation. Run both
-   seats over fixed seeds, verify replay, and use checkpoint scenarios to exercise
-   mechanics the baseline policy did not choose.
-6. Keep simulation outcomes separate from coverage evidence. A completed game is
-   not proof of an unexercised ability, nor evidence of competitive deck strength.
+1. **Review source and Codex.** Preserve exact authority/card hashes and review every
+   clause, printed characteristic, card-specific ruling, and transitive token or other
+   referenced definition. Record unresolved requirements explicitly. Prioritize complete
+   mappings to existing operations, including truly simple cards; blank text alone does
+   not remove characteristic or inherent-type requirements.
+2. **Prove shared rules.** Group cards by concrete operations and contextual requirements,
+   then pair companion rules needed together: selection with targeting, entry with
+   regional settlement, a grant with suppression and expiry, or replacement with damage
+   ordering. Rank by conditional card reach and selected-deck demand, with explicit
+   blockers. Implement the smallest coherent Rust slice and a discriminating native
+   scenario, including negative cases and relevant interactions. Reuse shared proof
+   families without creating a card-name dispatcher or duplicated legality in a driver.
+3. **Recompute eligibility.** Refresh exact per-card dependencies in the ignored SQLite
+   catalog after rule verification. Preserve shared rule identity separately from each
+   card's contextual mapping, source guard, Codex links, and proofs. A repeated semantic
+   requirement ID does not make those card contexts interchangeable. Group counts are
+   conditional planning estimates, never blanket unlocks.
+4. **Validate eligible cards.** Queue all newly eligible cards with complete guarded
+   candidate facts and no unresolved contextual requirement. Readiness means a card
+   needs validation; it must not require prior admission or an already-passing card
+   proof. Dispatch bounded independent validation agents. Pin source, candidate facts,
+   complete dependency set, and engine identity; stale evidence cannot authorize a job.
+   Use engine-issued actions and checkpoint/replay to exercise complete characteristics,
+   abilities, and discriminating interactions. No arbitrary state edits or arbitrary
+   one-to-three-card admission limit. Resource limits bound concurrency, not review scope.
+5. **Promote passing receipts.** Each card needs its own source/admission evidence and
+   direct native scenario receipt before adding its complete facts to the private
+   `bindings/reviewed.json`. Refer to shared rule proofs for common mechanics, retaining
+   per-card evidence rather than duplicating an engine or test suite. Keep partial,
+   failed, stale, and source-ambiguous cases unbound. Loader acceptance and a completed
+   game alone are insufficient.
+6. **Refresh and verify.** Refresh the catalog, queue, workbook, and deck coverage from
+   accepted receipts. Run the required Rust gates for Rust changes and `pnpm verify`;
+   make a coherent verified commit and push. Keep all official data, private proof
+   drivers/receipts, registry inputs, and workbook bytes ignored under `.local/authority/`.
 
-Full Rust gates and `pnpm verify` must pass before accepting a cycle. Parallelize
-independent games with native workers; preserve input-order output and manifest/seed
-identity. Measure release throughput across worker counts before choosing a run's
-worker budget. Swap capacity does not establish an efficient rollout budget.
+Source review, existing-operation mapping, a verified shared rule, per-card validation,
+and binding admission are separate states. None grants ranked eligibility or proves
+Constructed legality, strategic strength, price, or all possible interactions. An
+unsupported exercised mechanic invalidates the result and remains an explicit blocker.
+The catalog and workbook index evidence; neither executes rules or replaces Rust facts.
 
+Once cards are admitted, deck experiments may vary a small controlled set to isolate a
+hypothesis. Run both seats over fixed seeds and use checkpoint scenarios for mechanics
+the baseline policy did not choose. This experimental design does not cap rule batches.
+Measure native worker throughput and memory before increasing concurrency; preserve
+input order and manifest/seed identity. Swap capacity is not a rollout budget.
+
+When diagnosis benefits from a second view, use [Jev's existing synthetic adapters](agent-evaluation.md).
+Its suggested counterexample, probe, or action ordering must pass the same local native
+proof. Keep official source context and private derivatives off the external service.
 
 ## Composed token entry
 

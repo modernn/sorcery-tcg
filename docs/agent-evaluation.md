@@ -1,5 +1,26 @@
 # Optional semantic review for development agents
 
+TypeSafe Jev is an authorized optional resource for development diagnosis, synthetic
+failure localization, counterexample proposals, and bounded play/probe suggestions.
+Use it when a second view will help; no repeated approval is needed for the already
+authorized synthetic workflow. It is not rules authority or a prerequisite for rollouts.
+
+Reuse `scripts/jev-semantic-review.mjs`, `scripts/jev-native-pilot.mjs`, and the
+`agents:*` commands below. Obtain credentials from the configured private environment;
+never put keys or machine-specific credential locations in tracked instructions or
+request packets. Existing live adapters accept only reviewed hash-pinned synthetic
+packets. A new diagnostic needs a project-owned redacted synthetic reproduction and
+egress review, not a bypass of that allowlist. Never send official source bytes,
+normalized derivatives, locks, private decks, or source-specific private context to Jev.
+The [reuse policy](external-reuse-policy.md) applies even to player-visible observations.
+
+Use feedback to select the next local check. Verify suggested actions through Rust's
+issued-action boundary and reproduce a proposed correction with a native scenario,
+checkpoint/replay, and required gates before accepting it. Record abstentions and
+counterexamples; confidence and agreement are not proof or admission evidence.
+
+## Existing development examples
+
 The first Jev experiment evaluates 16 project-owned synthetic proposals against
 explicit software contracts. It asks whether the proposal contradicts its supplied
 evidence, is consistent with the limited claim, or needs more evidence. These are

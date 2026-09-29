@@ -4,7 +4,7 @@
 
 - Build the authoritative engine, simulator, deterministic agents, checkpoints, search, and replay in Rust. Keep TypeScript only as a thin boundary for authority ingestion, the server, and browser UI where useful.
 - Do not maintain two permanent legality engines. Delete the superseded TypeScript implementation after parity and cutover.
-- Official rules and card rulings are authoritative. Never tune game balance by changing a real rule.
+- The official Sorcery Codex is primary for shared rules; retain exact entry/subentry IDs, URLs, and snapshot identity. Complete official card text, characteristics, updates, and card-specific rulings supply each binding. Follow [authority precedence](docs/authority-precedence.md); never tune balance by changing a real rule.
 - The engine owns state and enumerates legal actions; clients and models may not submit arbitrary mutations.
 - A run manifest plus seed must reproduce byte-identical deterministic-agent events.
 - Unsupported exercised mechanics invalidate ranked results instead of becoming silent no-ops.
@@ -17,6 +17,14 @@
 - Do not acquire official artwork. Later UI work may use only original/project-owned presentation art or user-supplied private local images.
 - Treat external simulator code and data as behavioral reference unless its license and attribution obligations are explicitly accepted.
 - Follow [the external reuse policy](docs/external-reuse-policy.md) for the complete boundary and permission trigger.
+
+## Rule and card batches
+
+- Follow the [shared-rule batch loop](docs/shared-rule-behaviors.md#binding-and-validation-batch-loop). Review complete source semantics before grouping cards; reuse existing operations first and pair missing rules with their companion dependencies.
+- Keep per-card source review, contextual requirements, shared-rule proofs, validation jobs, and admission distinct in the private catalog. A keyword match, source review, family count, or successful game does not establish complete support.
+- After a native rule proof passes, recompute exact contextual dependencies and queue all newly eligible cards for bounded independent validation. Each card needs a passing source-guarded receipt before registry promotion; no arbitrary small-card cap or blanket group unlock.
+- Keep catalog/workbook data under `.local/authority/`; SQLite tracks evidence and work, never legality. Refresh it after proof or binding changes. Get current counts from current inputs, not historical plans.
+- TypeSafe Jev is available when useful for diagnosis, synthetic counterexamples, and play/probe proposals. Reuse the [existing adapters](docs/agent-evaluation.md) with configured private credentials; no repeated permission request is needed for this authorized use. Send only approved synthetic redacted packets, never private authority or its derivatives. Jev does not define legality and is not required for rollouts.
 
 ## Working rules
 
