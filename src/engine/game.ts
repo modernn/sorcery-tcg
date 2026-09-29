@@ -11,7 +11,6 @@ import {
   type EngineSeat,
   type StateHash,
 } from './contract.ts';
-import { createEngineState, type EngineState } from './determinism.ts';
 import {
   createRustGameSession,
   rustLegalGameActions,
@@ -69,7 +68,9 @@ type EffectProgramUnitCohort = Readonly<{
   excludeSource?: boolean;
   relation?: EffectProgramRelation | null;
 }>;
-type EffectProgramRecipients = 'target' | 'chosen' | Readonly<{ query: EffectProgramUnitCohort }>;
+type EffectProgramRecipients = 'target' | 'chosen'
+  | Readonly<{ query: EffectProgramUnitCohort }>
+  | Readonly<{ bound: number }>;
 type EffectDuration = 'this-turn' | 'until-your-next-turn';
 type SummonTokenEffect = Readonly<{
   count: number;
@@ -88,6 +89,7 @@ type EffectProgramModifier =
   | 'airborne' | 'charge' | 'first-strike' | 'lethal' | 'next-strike-double'
   | 'movement' | 'power' | 'ranged' | 'silence';
 type EffectProgramEffect =
+  | Readonly<{ id: number; op: 'bind-unit-set'; query: EffectProgramUnitCohort }>
   | Readonly<{ amount: number; op: 'damage'; recipients: EffectProgramRecipients }>
   | Readonly<{ op: 'untap'; recipients: EffectProgramRecipients }>
   | Readonly<{ count: number; op: 'draw'; zone: DeckZone }>
@@ -108,6 +110,11 @@ type EffectProgramEffect =
     modifier: EffectProgramModifier;
     recipients: EffectProgramRecipients;
     duration: EffectDuration;
+  }>
+  | Readonly<{
+    op: 'disable';
+    recipients: EffectProgramRecipients;
+    duration: 'until-your-next-turn';
   }>
   | Readonly<{ op: 'give-stealth'; recipients: EffectProgramRecipients }>
   | Readonly<{ op: 'draw-card' }>;
@@ -1216,6 +1223,17 @@ export type GameTerminal =
     status: 'finished';
   }>;
 
+/** Rust-owned PRNG state exposed in parsed session snapshots. */
+export type EngineState = Readonly<{
+  schemaVersion: 1;
+  stateVersion: number;
+  prng: Readonly<{
+    algorithm: 'mulberry32-v1';
+    draws: number;
+    word: number;
+  }>;
+}>;
+
 export type GameState = Readonly<{
   activeSeat: GameSeat;
   cards: Readonly<Record<string, GameCardDefinition>>;
@@ -1780,6 +1798,11 @@ function validateEffectProgram(program: unknown, path: string): asserts program 
     }
   }
   let hasLocationChoice = false;
+  const validateBindingId = (id: unknown, idPath: string): void => {
+    if (typeof id !== 'number' || !Number.isInteger(id) || id < 0 || id > 255) {
+      throw new RangeError(`${idPath} must be an integer from 0 to 255`);
+    }
+  };
   candidate.effects.forEach((effect, index) => {
     const effectPath = `${path}.effects[${index}]`;
     if (effect === null || typeof effect !== 'object' || Array.isArray(effect)) {
@@ -1787,6 +1810,22 @@ function validateEffectProgram(program: unknown, path: string): asserts program 
     }
     const value = effect as Record<string, unknown>;
     if (typeof value.op !== 'string') throw new RangeError(`${effectPath}.op must be a string`);
+    if (value.op === 'bind-unit-set') {
+      validateBindingId(value.id, `${effectPath}.id`);
+      if (value.query === null || typeof value.query !== 'object' || Array.isArray(value.query)) {
+        throw new RangeError(`${effectPath}.query must be an object`);
+      }
+      const unknown = Object.keys(value).find((key) => key !== 'op' && key !== 'id' && key !== 'query');
+      if (unknown) throw new RangeError(`${effectPath}.${unknown} is unsupported`);
+    }
+    if (value.recipients !== null && typeof value.recipients === 'object'
+      && !Array.isArray(value.recipients) && 'bound' in value.recipients) {
+      const recipients = value.recipients as Record<string, unknown>;
+      if (Object.keys(recipients).length !== 1) {
+        throw new RangeError(`${effectPath}.recipients bound set has unsupported fields`);
+      }
+      validateBindingId(recipients.bound, `${effectPath}.recipients.bound`);
+    }
     if (value.op === 'choose-location') {
       const relation = value.relation;
       const measured = relation !== null && typeof relation === 'object' && !Array.isArray(relation)
@@ -1824,6 +1863,9 @@ function validateEffectProgram(program: unknown, path: string): asserts program 
       && value.duration !== 'this-turn'
       && value.duration !== 'until-your-next-turn') {
       throw new RangeError(`${effectPath}.duration must be this-turn or until-your-next-turn`);
+    }
+    if (value.op === 'disable' && value.duration !== 'until-your-next-turn') {
+      throw new RangeError(`${effectPath}.duration must be until-your-next-turn`);
     }
   });
 }
@@ -3444,7 +3486,9 @@ function validateDeck(
 }
 
 export function createGameManifest(input: GameManifestInput): GameManifest {
-  createEngineState(input.seed);
+  if (!Number.isInteger(input.seed) || input.seed < 0 || input.seed > 0xffff_ffff) {
+    throw new RangeError('seed must be an unsigned 32-bit integer');
+  }
   if (input.firstSeat !== 'north' && input.firstSeat !== 'south') {
     throw new RangeError('firstSeat is unsupported');
   }

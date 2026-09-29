@@ -15,8 +15,11 @@ fn minion() -> Value {
 fn manifest(seed: u32) -> String {
     let mut programmed = minion();
     programmed["genesisProgram"] = json!({"effects":[
+        {"op":"bind-unit-set", "id":1, "query":{
+            "area":"source", "relation":"nearby", "kind":"minion", "excludeSource":true}},
         {"op":"damage","amount":1,"recipients":{"query":{
             "area":"source","relation":"nearby","excludeSource":true}}},
+        {"op":"disable", "duration":"until-your-next-turn", "recipients":{"bound":1}},
         {"op":"choose-unit","relation":"adjacent","alliedOnly":true},
         {"op":"untap","recipients":"chosen"},
         {"op":"draw","zone":"spellbook","count":1}
@@ -168,6 +171,17 @@ fn authored_genesis_expands_nearby_cohorts_and_resumes_after_ordered_deaths() {
     });
     assert!(!types(&receipt).contains(&"spell-drawn"));
     let after_damage = state(&session);
+    assert_eq!(
+        after_damage["pendingDeathrites"]["continuation"]["boundUnitSets"][0]["id"], 1,
+        "checkpoint state retains the captured recipient binding"
+    );
+    assert_eq!(
+        after_damage["pendingDeathrites"]["continuation"]["boundUnitSets"][0]["objects"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
     let source_id = &summon["cardInstanceId"];
     assert_eq!(unit(&after_damage, source_id)["damage"], 0);
     assert_eq!(
@@ -199,6 +213,26 @@ fn authored_genesis_expands_nearby_cohorts_and_resumes_after_ordered_deaths() {
             .count(),
         2
     );
+    for target in [&enemy_ids[1], &enemy_ids[2]] {
+        assert_eq!(
+            unit(&state(&session), target)["disableEffects"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            death
+                .events
+                .iter()
+                .filter(|event| {
+                    event.event_type == "minion-disabled" && event.payload["instanceId"] == *target
+                })
+                .count(),
+            1,
+            "the bound recipient resolves once after death triggers"
+        );
+    }
     checkpoint(&mut session);
     let choices = session.legal_actions().unwrap();
     assert!(

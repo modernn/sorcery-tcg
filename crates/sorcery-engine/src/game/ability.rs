@@ -252,6 +252,18 @@ fn compile_magic(facts: &crate::facts::MagicFacts) -> Option<Arc<AbilityProgram>
                 }],
             ));
         }
+        MagicEffect::DisableTargetNearbyMinionUntilNextTurn => {
+            return Some(ability_with_selection(
+                Some(SelectionSpec::Unit {
+                    kind: Some(super::UnitKind::Minion),
+                    relation: SpatialRelation::Nearby,
+                }),
+                [Effect::Disable {
+                    recipients: UnitSet::Target,
+                    duration: EffectDuration::UntilYourNextTurn,
+                }],
+            ));
+        }
         MagicEffect::DrawSites(count) => Effect::Draw {
             zone: DeckZone::Atlas,
             count: *count,

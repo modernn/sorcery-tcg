@@ -1862,6 +1862,7 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
                 crate::ability::Effect::Damage { recipients, .. }
                 | crate::ability::Effect::Untap { recipients }
                 | crate::ability::Effect::GiveStealth { recipients }
+                | crate::ability::Effect::Disable { recipients, .. }
                 | crate::ability::Effect::Grant { recipients, .. } => Some(recipients),
                 _ => None,
             };

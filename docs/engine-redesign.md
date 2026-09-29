@@ -466,6 +466,22 @@ untapping, mana generation, and start triggers. The same ordering applies to exp
 disable effects, so an ability suppressed by Freeze can resume before untapping.
 An active disable still suppresses a printed restriction on untapping.
 
+`disable` now applies that lifetime through the shared effect runner, and the old
+targeted Freeze input compiles into it. Target protection is established when the
+frame starts; untargeted queries include Warded and Stealthed minions. All recipients
+receive their disable records before control changes and region/static-power
+settlement. A Deathrite choice suspends settlement and resumes it before the next
+program operation. Disable removes Ward and Stealth marks; expiry restores abilities
+without recreating those marks.
+
+`bind-unit-set` captures a queried cohort under a program-local byte ID, and
+`{"bound": id}` refers to it in subsequent operations. References retain realm
+incarnations across movement, source departure, and checkpoint continuation. Departed
+objects and later reentries do not inherit the old cohort membership. This lets
+sequential damage and disable affect the same original survivors rather than rerun a
+spatial query after damage or triggers changed the board. Admission rejects duplicate
+IDs, forward references, and non-minion disable recipients.
+
 The earlier authored `grant-this-turn` opcode is rejected; local authored bindings must
 migrate to `grant` with an explicit duration. Existing legacy fact inputs compile to
 `this-turn` without changing their contract. Historical manifests and replays retain

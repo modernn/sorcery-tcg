@@ -1631,7 +1631,6 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::DestroyTargetSite
         | MagicEffect::DestroyTargetSiteWithDamageGrid(_)
         | MagicEffect::DisableTargetMinionWithinTwoStepsUntilDamaged
-        | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
         | MagicEffect::DrawSites(_)
         | MagicEffect::DrawSiteThenMayPlayLandSite
         | MagicEffect::DrawSiteThenMayPlayWaterSite
@@ -1689,7 +1688,8 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::TeleportAllyToTargetSite
         | MagicEffect::TeleportNearbyAllyThenDrawCard
         | MagicEffect::TeleportTargetMinionArtifactOrAuraOneDiagonal
-        | MagicEffect::UntapTargetMinion => None,
+        | MagicEffect::UntapTargetMinion
+        | MagicEffect::DisableTargetNearbyMinionUntilNextTurn => None,
     }
 }
 
@@ -7792,38 +7792,6 @@ impl Game {
             MagicEffect::DisableTargetMinionWithinTwoStepsUntilDamaged => {
                 self.disable_minion_within_two_steps_choices(seat, caster_instance_id)?
             }
-            MagicEffect::DisableTargetNearbyMinionUntilNextTurn => {
-                let (caster_location, caster_cells) =
-                    self.spellcaster_occupied_cells(seat, caster_instance_id)?;
-                let mut targets: Vec<_> = self
-                    .position
-                    .units
-                    .iter()
-                    .filter(|unit| {
-                        unit.region == caster_location.region
-                            && (unit.controller == seat || !self.minion_has_active_stealth(unit))
-                            && Self::footprints_nearby(
-                                caster_cells,
-                                Self::unit_occupied_cells(unit),
-                            )
-                    })
-                    .map(|unit| MagicChoice {
-                        target: Some(UnitTarget::Minion {
-                            instance_id: unit.card.instance_id.clone(),
-                            seat: unit.controller,
-                        }),
-                        ..MagicChoice::default()
-                    })
-                    .collect();
-                targets.sort_unstable_by(|left, right| {
-                    left.target
-                        .as_ref()
-                        .expect("Freeze target")
-                        .instance_id()
-                        .cmp(right.target.as_ref().expect("Freeze target").instance_id())
-                });
-                targets
-            }
             MagicEffect::Program(_)
             | MagicEffect::SummonTokenToAlliedMinionThenDrawSpell(_)
             | MagicEffect::GrantStealthToTargetMinion
@@ -7833,6 +7801,7 @@ impl Game {
             | MagicEffect::GrantMovementOneToAllyThisTurnThenDrawSpell
             | MagicEffect::GrantPowerTwoToAllyThisTurn
             | MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell
+            | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
             | MagicEffect::DamageTargetUnit { .. }
             | MagicEffect::UntapTargetMinion
             | MagicEffect::DrawSites(_)
@@ -21944,52 +21913,6 @@ impl Game {
                     outcomes,
                 )?;
             }
-            MagicEffect::DisableTargetNearbyMinionUntilNextTurn => {
-                let Some(UnitTarget::Minion {
-                    instance_id,
-                    seat: target_seat,
-                }) = target
-                else {
-                    return Err(GameError::IllegalAction);
-                };
-                let unit = self
-                    .position
-                    .units
-                    .iter_mut()
-                    .find(|unit| {
-                        unit.card.instance_id == *instance_id && unit.controller == *target_seat
-                    })
-                    .ok_or(GameError::IllegalAction)?;
-                if unit.warded && *target_seat != seat {
-                    unit.warded = false;
-                    outcomes.push(
-                        "ward-broken",
-                        || json!({ "instanceId": instance_id, "seat": target_seat }),
-                    );
-                } else {
-                    let stealth_removed = unit.stealthed;
-                    let ward_removed = unit.warded;
-                    unit.disable_effects.push(DisableEffect {
-                        expires_at_seat: seat,
-                        source_instance_id: card_instance_id.clone(),
-                    });
-                    unit.stealthed = false;
-                    unit.warded = false;
-                    outcomes.push("minion-disabled", || {
-                        json!({
-                            "expiresAtSeat": seat,
-                            "instanceId": instance_id,
-                            "seat": target_seat,
-                            "sourceInstanceId": card_instance_id,
-                            "stealthRemoved": stealth_removed,
-                            "wardRemoved": ward_removed,
-                        })
-                    });
-                    if stealth_removed {
-                        self.revert_stealth_bound_controls(outcomes)?;
-                    }
-                }
-            }
             MagicEffect::DestroyOwnArtifactAtLocationForAreaDamage(amount) => {
                 let target_artifact_instance_id = target_artifact_instance_id
                     .as_ref()
@@ -22228,6 +22151,7 @@ impl Game {
             | MagicEffect::GrantMovementOneToAllyThisTurnThenDrawSpell
             | MagicEffect::GrantPowerTwoToAllyThisTurn
             | MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell
+            | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
             | MagicEffect::DamageTargetUnit { .. }
             | MagicEffect::UntapTargetMinion
             | MagicEffect::DrawSites(_)
@@ -23586,6 +23510,52 @@ impl Game {
             })
         });
         self.settle_lost_ability_marks(outcomes);
+        Ok(())
+    }
+
+    fn apply_disable_minions_until_next_turn(
+        &mut self,
+        recipients: &[(IdentityHash, UnitKind, Seat)],
+        caster_seat: Seat,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let mut stealth_removed = false;
+        for (instance_id, kind, target_seat) in recipients {
+            if *kind != UnitKind::Minion {
+                return Err(GameError::IllegalAction);
+            }
+            let unit = self
+                .position
+                .units
+                .iter_mut()
+                .find(|unit| {
+                    unit.card.instance_id == *instance_id && unit.controller == *target_seat
+                })
+                .ok_or(GameError::IllegalAction)?;
+            let unit_stealth_removed = unit.stealthed;
+            let ward_removed = unit.warded;
+            unit.disable_effects.push(DisableEffect {
+                expires_at_seat: caster_seat,
+                source_instance_id: source_instance_id.clone(),
+            });
+            unit.stealthed = false;
+            unit.warded = false;
+            outcomes.push("minion-disabled", || {
+                json!({
+                    "expiresAtSeat": caster_seat,
+                    "instanceId": instance_id,
+                    "seat": target_seat,
+                    "sourceInstanceId": source_instance_id,
+                    "stealthRemoved": unit_stealth_removed,
+                    "wardRemoved": ward_removed,
+                })
+            });
+            stealth_removed |= unit_stealth_removed;
+        }
+        if stealth_removed {
+            self.revert_stealth_bound_controls(outcomes)?;
+        }
         Ok(())
     }
 

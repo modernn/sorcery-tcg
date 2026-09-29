@@ -6,7 +6,7 @@ use super::{
     Location, OutcomeLog, Region, ResolutionContinuation, Seat, UnitDamageSource, UnitKind,
     UnitQuery, UnitTarget, Value, json, seat_index,
 };
-use crate::ability::{ArtifactTokenPlacement, TokenDestination};
+use crate::ability::{ArtifactTokenPlacement, EffectDuration, TokenDestination};
 
 #[cfg(test)]
 mod tests;
@@ -102,6 +102,21 @@ struct LocationBinding {
     state: BindingState,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EffectSettlement {
+    Region,
+    StaticPower,
+}
+
+impl EffectSettlement {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Region => "region",
+            Self::StaticPower => "static-power",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct ResolvedTokenLocation {
     pub(super) location: Option<Location>,
@@ -117,10 +132,12 @@ pub(super) struct EffectFrame {
     pub(super) declaration_pending: bool,
     target: Option<UnitBinding>,
     chosen: Option<RealmReference>,
+    bound_sets: Vec<(u8, Vec<RealmReference>)>,
     pub(super) chosen_location: Option<Location>,
     pub(super) token_location: Option<ResolvedTokenLocation>,
     location: Option<LocationBinding>,
     pub(super) magic: Option<CardInstance>,
+    pending_settlement: Option<EffectSettlement>,
 }
 
 impl CardInstance {
@@ -335,6 +352,7 @@ impl Game {
                     })
                 })
                 .transpose()?,
+            bound_sets: Vec::new(),
             location: location.map(|location| LocationBinding {
                 location,
                 site: self.position.sites[location.cell.index()]
@@ -343,6 +361,7 @@ impl Game {
                 state: BindingState::Active,
             }),
             magic,
+            pending_settlement: None,
         })
     }
 
@@ -446,6 +465,21 @@ impl Game {
                 } else {
                     Vec::new()
                 })
+            }
+            UnitSet::Bound(id) => {
+                let references = frame
+                    .bound_sets
+                    .iter()
+                    .find(|(binding_id, _)| *binding_id == id)
+                    .map(|(_, references)| references)
+                    .ok_or(GameError::IllegalAction)?;
+                Ok(references
+                    .iter()
+                    .filter_map(|reference| {
+                        self.referenced_unit(reference)
+                            .map(|(kind, seat)| (reference.instance_id.clone(), kind, seat))
+                    })
+                    .collect())
             }
             UnitSet::Query(cohort) => {
                 let anchor = matches!(cohort.area, super::ability::UnitArea::Source)
@@ -573,6 +607,34 @@ impl Game {
                 .ok_or(GameError::IllegalAction)?,
         );
         while self.position.terminal.is_none() {
+            if let Some(settlement) = frame.pending_settlement {
+                let units_before = self.position.units.len();
+                frame.pending_settlement = match settlement {
+                    EffectSettlement::Region => {
+                        self.settle_region_occupancy(outcomes)?;
+                        if self.position.pending_deathrites.is_some()
+                            || self.position.units.len() != units_before
+                        {
+                            Some(EffectSettlement::Region)
+                        } else {
+                            Some(EffectSettlement::StaticPower)
+                        }
+                    }
+                    EffectSettlement::StaticPower => {
+                        self.settle_static_power_deaths(outcomes)?;
+                        (self.position.pending_deathrites.is_some()
+                            || self.position.units.len() != units_before)
+                            .then_some(EffectSettlement::Region)
+                    }
+                };
+                if self.position.pending_deathrites.is_some() {
+                    return self.continue_resolution(
+                        ResolutionContinuation::Effect(Box::new(frame)),
+                        outcomes,
+                    );
+                }
+                continue;
+            }
             let effect = program.effects.get(frame.cursor);
             let Some(effect) = effect else {
                 break;
@@ -686,6 +748,22 @@ impl Game {
                 Effect::ChooseUnit(spec) => {
                     return self.begin_ability_unit_choice(frame, spec, outcomes);
                 }
+                Effect::BindUnitSet { id, query } => {
+                    if frame.bound_sets.iter().any(|(bound_id, _)| *bound_id == id) {
+                        return Err(GameError::IllegalAction);
+                    }
+                    let references = self
+                        .effect_recipients(&frame, UnitSet::Query(query))?
+                        .into_iter()
+                        .map(|(instance_id, kind, seat)| {
+                            self.unit_reference(&match kind {
+                                UnitKind::Avatar => UnitTarget::Avatar { instance_id, seat },
+                                UnitKind::Minion => UnitTarget::Minion { instance_id, seat },
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    frame.bound_sets.push((id, references));
+                }
                 Effect::Damage { recipients, amount } => {
                     if let Some(reference) = &frame.source.realm
                         && let Some((kind, seat)) = self.referenced_unit(reference)
@@ -754,6 +832,28 @@ impl Game {
                             outcomes,
                         )?;
                     }
+                }
+                Effect::Disable {
+                    recipients,
+                    duration,
+                } => {
+                    if duration != EffectDuration::UntilYourNextTurn {
+                        return Err(GameError::IllegalAction);
+                    }
+                    let recipients = self.effect_recipients(&frame, recipients)?;
+                    if recipients
+                        .iter()
+                        .any(|(_, kind, _)| *kind != UnitKind::Minion)
+                    {
+                        return Err(GameError::IllegalAction);
+                    }
+                    self.apply_disable_minions_until_next_turn(
+                        &recipients,
+                        frame.source.controller,
+                        &frame.source.instance_id,
+                        outcomes,
+                    )?;
+                    frame.pending_settlement = Some(EffectSettlement::Region);
                 }
                 Effect::DrawCard => {
                     self.begin_ability_draw_choice(frame);
@@ -1015,7 +1115,7 @@ impl Game {
     }
 
     pub(super) fn effect_frame_value(&self, frame: &EffectFrame) -> Value {
-        json!({
+        let mut value = json!({
             "kind": "effect", "cardId": self.rules.cards[usize::from(frame.card_id.0)].id,
             "entry": match frame.entry { AbilityEntry::Magic => "magic", AbilityEntry::Genesis => "genesis", AbilityEntry::Entry => "entry", AbilityEntry::Activated => "activated" },
             "cursor": frame.cursor, "started": frame.started,
@@ -1028,6 +1128,15 @@ impl Game {
             "target": frame.target.as_ref().map(|binding| json!({ "object": binding.reference.value(), "state": binding.state.as_str() })),
             "location": frame.location.as_ref().map(|binding| json!({ "location": binding.location, "site": binding.site.as_ref().map(RealmReference::value), "state": binding.state.as_str() })),
             "magic": frame.magic.as_ref().map(|card| self.card_value(card)),
-        })
+        });
+        if !frame.bound_sets.is_empty() {
+            value["boundUnitSets"] = json!(frame.bound_sets.iter().map(|(id, references)| json!({
+                "id": id, "objects": references.iter().map(RealmReference::value).collect::<Vec<_>>()
+            })).collect::<Vec<_>>());
+        }
+        if let Some(settlement) = frame.pending_settlement {
+            value["pendingSettlement"] = json!(settlement.as_str());
+        }
+        value
     }
 }

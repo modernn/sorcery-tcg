@@ -40,15 +40,16 @@ impl AbilityProgram {
 
         let mut previous_choice = None;
         let mut location_chosen = false;
+        let mut bound_sets = std::collections::BTreeMap::new();
         for (index, effect) in self.effects.iter().enumerate() {
             let path = format!("effects[{index}]");
             match effect {
                 Effect::Damage { recipients, amount } => {
                     validate_amount(*amount, &path, "damage")?;
-                    self.validate_recipients(*recipients, previous_choice, &path)?;
+                    self.validate_recipients(*recipients, previous_choice, &bound_sets, &path)?;
                 }
                 Effect::Untap { recipients } => {
-                    self.validate_recipients(*recipients, previous_choice, &path)?;
+                    self.validate_recipients(*recipients, previous_choice, &bound_sets, &path)?;
                 }
                 Effect::Draw { count, .. } => {
                     if *count == 0 || *count > 32 {
@@ -56,6 +57,17 @@ impl AbilityProgram {
                     }
                 }
                 Effect::DrawCard => {}
+                Effect::BindUnitSet { id, query } => {
+                    if bound_sets.insert(*id, *query).is_some() {
+                        return Err(format!("{path}.id duplicates an earlier binding"));
+                    }
+                    self.validate_recipients(
+                        UnitSet::Query(*query),
+                        previous_choice,
+                        &bound_sets,
+                        &path,
+                    )?;
+                }
                 Effect::SummonToken {
                     token,
                     count,
@@ -131,21 +143,38 @@ impl AbilityProgram {
                     amount,
                     duration: _,
                 } => {
-                    self.validate_recipients(*recipients, previous_choice, &path)?;
+                    self.validate_recipients(*recipients, previous_choice, &bound_sets, &path)?;
                     validate_grant(
                         *recipients,
                         *modifier,
                         *amount,
                         self.selection,
                         previous_choice,
+                        &bound_sets,
                         &path,
                     )?;
                 }
                 Effect::GiveStealth { recipients } => {
-                    self.validate_recipients(*recipients, previous_choice, &path)?;
-                    if !minion_only(*recipients, self.selection, previous_choice) {
+                    self.validate_recipients(*recipients, previous_choice, &bound_sets, &path)?;
+                    if !minion_only(*recipients, self.selection, previous_choice, &bound_sets) {
                         return Err(format!(
                             "{path}.recipients requires a minion-only recipient"
+                        ));
+                    }
+                }
+                Effect::Disable {
+                    recipients,
+                    duration,
+                } => {
+                    self.validate_recipients(*recipients, previous_choice, &bound_sets, &path)?;
+                    if !minion_only(*recipients, self.selection, previous_choice, &bound_sets) {
+                        return Err(format!(
+                            "{path}.recipients requires a minion-only recipient"
+                        ));
+                    }
+                    if *duration != EffectDuration::UntilYourNextTurn {
+                        return Err(format!(
+                            "{path}.duration only supports until-your-next-turn"
                         ));
                     }
                 }
@@ -158,6 +187,7 @@ impl AbilityProgram {
         &self,
         recipients: UnitSet,
         previous_choice: Option<UnitChoiceSpec>,
+        bound_sets: &std::collections::BTreeMap<u8, UnitCohort>,
         path: &str,
     ) -> Result<(), String> {
         match recipients {
@@ -171,7 +201,12 @@ impl AbilityProgram {
                     "{path}.recipients chosen requires a preceding choose-unit"
                 ));
             }
-            UnitSet::Chosen => {}
+            UnitSet::Bound(id) if !bound_sets.contains_key(&id) => {
+                return Err(format!(
+                    "{path}.recipients bound set {id} has no preceding binding"
+                ));
+            }
+            UnitSet::Chosen | UnitSet::Bound(_) => {}
             UnitSet::Query(cohort) => {
                 if let Some(relation) = cohort.relation {
                     if matches!(cohort.area, UnitArea::Realm { .. }) {
@@ -217,6 +252,7 @@ fn validate_grant(
     amount: u16,
     selection: Option<SelectionSpec>,
     previous_choice: Option<UnitChoiceSpec>,
+    bound_sets: &std::collections::BTreeMap<u8, UnitCohort>,
     path: &str,
 ) -> Result<(), String> {
     if modifier == TemporaryModifierKind::NextStrikeDouble {
@@ -244,7 +280,7 @@ fn validate_grant(
         TemporaryModifierKind::Airborne
             | TemporaryModifierKind::Ranged
             | TemporaryModifierKind::Lethal
-    ) && !minion_only(recipients, selection, previous_choice)
+    ) && !minion_only(recipients, selection, previous_choice, bound_sets)
     {
         return Err(format!("{path}.modifier requires a minion-only recipient"));
     }
@@ -255,6 +291,7 @@ fn minion_only(
     recipients: UnitSet,
     selection: Option<SelectionSpec>,
     previous_choice: Option<UnitChoiceSpec>,
+    bound_sets: &std::collections::BTreeMap<u8, UnitCohort>,
 ) -> bool {
     match recipients {
         UnitSet::Chosen => {
@@ -267,6 +304,9 @@ fn minion_only(
                 ..
             })
         ),
+        UnitSet::Bound(id) => bound_sets
+            .get(&id)
+            .is_some_and(|cohort| cohort.kind == Some(UnitKind::Minion)),
         UnitSet::Query(cohort) => cohort.kind == Some(UnitKind::Minion),
     }
 }
@@ -425,6 +465,8 @@ pub enum UnitSet {
     Chosen,
     /// Units matching a bounded query.
     Query(UnitCohort),
+    /// The identities captured by an earlier bind-unit-set operation.
+    Bound(u8),
 }
 
 /// Temporary keyword modifiers that an authored program may grant.
@@ -568,10 +610,24 @@ pub enum Effect {
     },
     /// Draws one card from either deck according to runtime rules.
     DrawCard,
+    /// Captures the current identities matching a query for later operations.
+    BindUnitSet {
+        /// Small program-local identifier referenced by `UnitSet::Bound`.
+        id: u8,
+        /// The cohort to capture when this operation executes.
+        query: UnitCohort,
+    },
     /// Grants stealth to a minion recipient cohort.
     GiveStealth {
         /// The cohort receiving stealth.
         recipients: UnitSet,
+    },
+    /// Disables a minion recipient cohort until the source controller's next turn.
+    Disable {
+        /// The cohort receiving disable.
+        recipients: UnitSet,
+        /// The supported duration for this operation.
+        duration: EffectDuration,
     },
 }
 
@@ -785,6 +841,75 @@ mod tests {
     }
 
     #[test]
+    fn bound_cohorts_require_a_single_prior_valid_binding() {
+        let query = UnitCohort {
+            area: UnitArea::Source,
+            relation: None,
+            kind: Some(UnitKind::Minion),
+            controller: ControllerRelation::Any,
+            exclude_source: false,
+        };
+        let damage = |id| Effect::Damage {
+            recipients: UnitSet::Bound(id),
+            amount: 1,
+        };
+        let bind = || Effect::BindUnitSet { id: 7, query };
+        let valid = AbilityProgram {
+            selection: None,
+            optional_selection: false,
+            effects: vec![bind(), damage(7)].into_boxed_slice(),
+        };
+        valid
+            .validate()
+            .expect("bound cohort is available after binding");
+        assert!(
+            serde_json::from_value::<Effect>(serde_json::json!({
+                "op": "bind-unit-set", "id": 256,
+                "query": {"area":"source", "kind":"minion"}
+            }))
+            .is_err(),
+            "binding identifier must fit its encoded slot"
+        );
+
+        let before_binding = AbilityProgram {
+            effects: vec![damage(7), bind()].into_boxed_slice(),
+            ..valid.clone()
+        };
+        assert!(
+            before_binding
+                .validate()
+                .unwrap_err()
+                .contains("no preceding binding")
+        );
+
+        let duplicate = AbilityProgram {
+            effects: vec![bind(), bind()].into_boxed_slice(),
+            ..valid
+        };
+        assert!(duplicate.validate().unwrap_err().contains("duplicates"));
+
+        let non_minion = AbilityProgram {
+            effects: vec![
+                Effect::BindUnitSet {
+                    id: 3,
+                    query: UnitCohort {
+                        kind: None,
+                        ..query
+                    },
+                },
+                Effect::Disable {
+                    recipients: UnitSet::Bound(3),
+                    duration: EffectDuration::UntilYourNextTurn,
+                },
+            ]
+            .into_boxed_slice(),
+            selection: None,
+            optional_selection: false,
+        };
+        assert!(non_minion.validate().unwrap_err().contains("minion-only"));
+    }
+
+    #[test]
     fn location_cohorts_require_location_selection() {
         let location = UnitSet::Query(UnitCohort {
             area: UnitArea::Location,
@@ -874,5 +999,43 @@ mod tests {
         minion
             .validate()
             .expect("minion cohort can receive stealth");
+    }
+
+    #[test]
+    fn disable_requires_minions_and_until_next_turn() {
+        let mut program = AbilityProgram {
+            selection: Some(SelectionSpec::Unit {
+                kind: Some(UnitKind::Minion),
+                relation: SpatialRelation::Nearby,
+            }),
+            optional_selection: false,
+            effects: vec![Effect::Disable {
+                recipients: UnitSet::Target,
+                duration: EffectDuration::UntilYourNextTurn,
+            }]
+            .into_boxed_slice(),
+        };
+        program.validate().expect("valid timed minion disable");
+
+        program.effects[0] = Effect::Disable {
+            recipients: UnitSet::Target,
+            duration: EffectDuration::ThisTurn,
+        };
+        assert!(
+            program
+                .validate()
+                .unwrap_err()
+                .contains("until-your-next-turn")
+        );
+
+        program.selection = Some(SelectionSpec::Unit {
+            kind: Some(UnitKind::Avatar),
+            relation: SpatialRelation::Nearby,
+        });
+        program.effects[0] = Effect::Disable {
+            recipients: UnitSet::Target,
+            duration: EffectDuration::UntilYourNextTurn,
+        };
+        assert!(program.validate().unwrap_err().contains("minion-only"));
     }
 }

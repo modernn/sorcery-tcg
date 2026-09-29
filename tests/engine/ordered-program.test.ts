@@ -134,6 +134,102 @@ test('authored programs from the deck manifest boundary are admitted by Rust', a
   }
 });
 
+test('bound cohort damage and Disable are admitted and survive an engine checkpoint', async () => {
+  const effects = [
+    {
+      id: 1,
+      op: 'bind-unit-set' as const,
+      query: { area: 'source' as const, excludeSource: true, kind: 'minion' as const },
+    },
+    { amount: 1, op: 'damage' as const, recipients: { bound: 1 } },
+    { duration: 'until-your-next-turn' as const, op: 'disable' as const, recipients: { bound: 1 } },
+  ];
+  const manifest = createGameManifest(input({ effects }));
+  const stored = manifest.cards['north-spell-1'];
+  if (stored?.cardType !== 'magic') throw new Error('magic fixture missing');
+  assert.deepEqual(stored.effectProgram?.effects, effects);
+
+  const client = await RustSessionClient.start();
+  try {
+    await client.newSession(canonicalJson(manifest));
+    const before = await client.exportSession();
+    await client.resume(await client.checkpoint());
+    assert.deepEqual(await client.exportSession(), before);
+    assert.equal(await client.verifyReplay(), true);
+  } finally {
+    await client.close();
+  }
+});
+
+test('bound cohort IDs must use the engine slot shape', () => {
+  for (const id of [-1, 1.5, 256, '1']) {
+    assert.throws(
+      () => createGameManifest(input({ effects: [
+        { id: 1, op: 'bind-unit-set', query: { area: 'source' } },
+        { op: 'damage', amount: 1, recipients: { bound: id } },
+      ] } as never)),
+      /recipients\.bound must be an integer from 0 to 255/,
+    );
+  }
+  assert.throws(
+    () => createGameManifest(input({ effects: [
+      { id: 256, op: 'bind-unit-set', query: { area: 'source' } },
+    ] } as never)),
+    /effects\[0\]\.id must be an integer from 0 to 255/,
+  );
+  assert.throws(
+    () => createGameManifest(input({ effects: [
+      { id: 1, op: 'bind-unit-set', query: null },
+    ] } as never)),
+    /effects\[0\]\.query must be an object/,
+  );
+});
+
+test('typed disable cohorts survive cloning and Rust admission', async () => {
+  const cohort = {
+    query: {
+      area: 'source' as const,
+      controller: 'enemy' as const,
+      excludeSource: false,
+      kind: 'minion' as const,
+      relation: 'nearby' as const,
+    },
+  };
+  const effectProgram = {
+    effects: [{
+      op: 'disable' as const,
+      recipients: cohort,
+      duration: 'until-your-next-turn' as const,
+    }],
+  };
+  const manifest = createGameManifest(input(effectProgram));
+  Object.assign(cohort.query, { kind: 'avatar', relation: 'anywhere' });
+  const stored = manifest.cards['north-spell-1'];
+  if (stored?.cardType !== 'magic' || stored.effectProgram === undefined) throw new Error('program missing');
+  assert.deepEqual(stored.effectProgram.effects[0], {
+    op: 'disable',
+    recipients: {
+      query: {
+        area: 'source',
+        controller: 'enemy',
+        excludeSource: false,
+        kind: 'minion',
+        relation: 'nearby',
+      },
+    },
+    duration: 'until-your-next-turn',
+  });
+
+  const client = await RustSessionClient.start();
+  try {
+    await client.newSession(canonicalJson(manifest));
+    assert.ok((await client.legalActions('north')).length > 0);
+    assert.equal(await client.verifyReplay(), true);
+  } finally {
+    await client.close();
+  }
+});
+
 test('effect programs cannot be mixed with legacy Magic effects', () => {
   const candidate = input({ effects: [{ op: 'draw-card' as const }] });
   const card = candidate.cards['north-spell-1'];
@@ -158,6 +254,17 @@ test('effect programs require a supported grant duration', () => {
       effects: [{ amount: 1, modifier: 'power', op: 'grant-this-turn', recipients: 'chosen' }],
     } as never)),
     /grant-this-turn is obsolete/,
+  );
+});
+
+test('disable effects require until-your-next-turn', () => {
+  assert.throws(
+    () => createGameManifest(input({ effects: [{
+      duration: 'this-turn',
+      op: 'disable',
+      recipients: 'target',
+    }] } as never)),
+    /effects\[0\].duration must be until-your-next-turn/,
   );
 });
 

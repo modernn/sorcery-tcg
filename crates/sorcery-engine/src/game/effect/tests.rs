@@ -49,6 +49,13 @@ fn fixture_game() -> Game {
             }]},
             "thresholds": {"air": 0, "earth": 0, "fire": 0, "water": 0},
         });
+        manifest["cards"]["north-spell-48"] = json!({
+            "attack": 1,
+            "cardType": "minion",
+            "defense": 3,
+            "manaCost": 0,
+            "thresholds": {"air": 0, "earth": 0, "fire": 0, "water": 0},
+        });
         for ordinal in 1..=2 {
             manifest["cards"][format!("south-spell-{ordinal}")] = json!({
                 "attack": 1,
@@ -158,7 +165,8 @@ fn install(game: &mut Game, effects: Vec<Effect>) -> CardId {
         Effect::Damage { recipients, .. }
         | Effect::Untap { recipients }
         | Effect::Grant { recipients, .. }
-        | Effect::GiveStealth { recipients } => match recipients {
+        | Effect::GiveStealth { recipients }
+        | Effect::Disable { recipients, .. } => match recipients {
             UnitSet::Target => Some(SelectionSpec::Unit {
                 kind: None,
                 relation: SpatialRelation::Anywhere,
@@ -169,10 +177,11 @@ fn install(game: &mut Game, effects: Vec<Effect>) -> CardId {
             }) => Some(SelectionSpec::Location {
                 relation: SpatialRelation::Anywhere,
             }),
-            UnitSet::Query(_) | UnitSet::Chosen => None,
+            UnitSet::Query(_) | UnitSet::Chosen | UnitSet::Bound(_) => None,
         },
         Effect::Draw { .. }
         | Effect::DrawCard
+        | Effect::BindUnitSet { .. }
         | Effect::ChooseLocation { .. }
         | Effect::ChooseUnit(_)
         | Effect::SummonToken { .. }
@@ -855,6 +864,7 @@ fn damage_cohort_orders_deathrites_then_resumes_draw_and_magic_cleanup() {
             .expect("paused effect"),
     );
     assert_eq!(serialized["continuation"]["kind"], "effect");
+    assert!(serialized["continuation"].get("boundUnitSets").is_none());
     assert_eq!(
         serialized["continuation"]["magic"]["instanceId"],
         json!(magic_id)
@@ -935,6 +945,190 @@ fn damage_cohort_orders_deathrites_then_resumes_draw_and_magic_cleanup() {
             .cemetery
             .iter()
             .any(|card| card.instance_id == magic_id)
+    );
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one paused cohort proof tracks departure, movement, reentry, and exact continuation"
+)]
+fn bound_cohort_survives_deathrite_pause_source_departure_and_incarnation_changes() {
+    let mut game = fixture_game();
+    let source_unit = minion(&game, "north-spell-48", Seat::North, "bound-source", false);
+    let source_id = source_unit.card.instance_id.clone();
+    let source_ref = RealmReference::from_card(&source_unit.card);
+    let departed = minion(&game, "south-spell-1", Seat::North, "bound-departed", false);
+    let departed_id = departed.card.instance_id.clone();
+    let mut returned = departed.clone();
+    let departed_second = minion(
+        &game,
+        "south-spell-2",
+        Seat::North,
+        "bound-departed-second",
+        false,
+    );
+    let survivor = minion(
+        &game,
+        "north-spell-48",
+        Seat::North,
+        "bound-survivor",
+        false,
+    );
+    let survivor_id = survivor.card.instance_id.clone();
+    game.position.units = vec![source_unit, departed, departed_second, survivor];
+    for (cell, label) in [("C3", "bound-origin"), ("A1", "bound-destination")] {
+        let location = Cell::parse(cell).unwrap();
+        let mut site = card(&game, "south-site-1", Seat::North, label);
+        site.enter_realm().unwrap();
+        game.position.sites[location.index()] = Some(super::super::SitePosition {
+            card: site,
+            controller: Seat::North,
+            last_flight_turn: None,
+            warded: false,
+        });
+    }
+    let mut source = source_for_unit(&game.position.units[0], Seat::North, 0, Some(source_ref));
+    source.cells = vec![Cell::parse("C3").unwrap()];
+    let magic = install(
+        &mut game,
+        vec![
+            Effect::BindUnitSet {
+                id: 7,
+                query: UnitCohort {
+                    area: UnitArea::Source,
+                    kind: Some(super::super::UnitKind::Minion),
+                    controller: ControllerRelation::Any,
+                    relation: None,
+                    exclude_source: false,
+                },
+            },
+            Effect::Damage {
+                recipients: UnitSet::Bound(7),
+                amount: 1,
+            },
+            Effect::Disable {
+                recipients: UnitSet::Bound(7),
+                duration: crate::ability::EffectDuration::UntilYourNextTurn,
+            },
+            Effect::Draw {
+                zone: DeckZone::Spellbook,
+                count: 1,
+            },
+        ],
+    );
+    let frame = game
+        .effect_frame(magic, AbilityEntry::Magic, source, None, None, None)
+        .unwrap();
+    let mut events = Vec::new();
+    game.run_effect_frame(frame, &mut OutcomeLog::Record(&mut events))
+        .unwrap();
+    assert!(
+        game.position.pending_deathrites.is_some(),
+        "expected the Deathrite to suspend the bound cohort"
+    );
+    assert!(
+        game.position
+            .units
+            .iter()
+            .any(|unit| unit.card.instance_id == source_id)
+    );
+    let pending = game.pending_deathrites_value(game.position.pending_deathrites.as_ref().unwrap());
+    assert_eq!(pending["continuation"]["boundUnitSets"][0]["id"], 7);
+    assert_eq!(
+        pending["continuation"]["boundUnitSets"][0]["objects"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
+
+    // The source may depart while triggers are ordered. A returned incarnation and a new arrival
+    // are absent from the captured set even though both now occupy its original area.
+    game.position
+        .units
+        .retain(|unit| unit.card.instance_id != source_id);
+    returned.card.enter_realm().unwrap();
+    game.position.units.push(returned.clone());
+    let newcomer = minion(
+        &game,
+        "north-spell-48",
+        Seat::North,
+        "bound-newcomer",
+        false,
+    );
+    let newcomer_id = newcomer.card.instance_id.clone();
+    game.position.units.push(newcomer);
+    let survivor = game
+        .position
+        .units
+        .iter_mut()
+        .find(|unit| unit.card.instance_id == survivor_id)
+        .unwrap();
+    survivor.location = Cell::parse("A1").unwrap();
+
+    let order = game
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .find(|action| {
+            matches!(&action.descriptor,
+            ActionDescriptor::OrderTriggers { source_instance_id, .. }
+                if source_instance_id == &departed_id)
+        })
+        .expect("bound cohort Deathrite order");
+    let mut branch = game.clone();
+    let branch_order = branch
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .find(|action| action.descriptor == order.descriptor)
+        .expect("same deterministic Deathrite action");
+    let (resolved, _) = game.apply_action_recorded(&order).unwrap();
+    let (branch_events, _) = branch.apply_action_recorded(&branch_order).unwrap();
+    assert_eq!(branch_events, resolved);
+    assert_eq!(branch.position, game.position);
+    assert_eq!(game.position.pending_deathrites, None);
+    let survivor = game
+        .position
+        .units
+        .iter()
+        .find(|unit| unit.card.instance_id == survivor_id)
+        .unwrap();
+    assert_eq!(survivor.disable_effects.len(), 1);
+    assert!(
+        game.position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == newcomer_id)
+            .unwrap()
+            .disable_effects
+            .is_empty()
+    );
+    let returned = game
+        .position
+        .units
+        .iter()
+        .find(|unit| unit.card.instance_id == departed_id)
+        .unwrap();
+    assert_eq!(returned.card.realm_entry, 2);
+    assert!(returned.disable_effects.is_empty());
+    assert_eq!(
+        resolved
+            .iter()
+            .filter(|(kind, payload)| kind == "minion-disabled"
+                && payload["instanceId"] == json!(survivor_id))
+            .count(),
+        1
+    );
+    assert_eq!(
+        resolved
+            .iter()
+            .filter(|(kind, payload)| {
+                kind == "spell-drawn" && payload["sourceInstanceId"] == json!(source_id)
+            })
+            .count(),
+        1
     );
 }
 
@@ -1956,6 +2150,441 @@ fn authored_cohorts_share_controller_region_footprint_and_source_filters() {
     assert_eq!(emitted, expected);
     emitted.dedup();
     assert_eq!(emitted.len(), 4);
+}
+
+#[test]
+fn disable_query_and_chosen_cohorts_apply_ward_and_stack_once() {
+    let mut game = fixture_game();
+    let source_unit = minion(&game, "south-spell-3", Seat::North, "disable-source", false);
+    let source_id = source_unit.card.instance_id.clone();
+    let mut enemy = minion(&game, "south-spell-3", Seat::South, "disable-enemy", false);
+    enemy.warded = true;
+    game.position.units = vec![source_unit, enemy];
+    let mut site = card(&game, "south-site-1", Seat::North, "disable-site");
+    site.enter_realm().unwrap();
+    game.position.sites[Cell::parse("C3").unwrap().index()] = Some(super::super::SitePosition {
+        card: site,
+        controller: Seat::North,
+        last_flight_turn: None,
+        warded: false,
+    });
+    let source = source_for_unit(
+        &game.position.units[0],
+        Seat::North,
+        0,
+        Some(RealmReference::from_card(&game.position.units[0].card)),
+    );
+    let enemy_id = game.position.units[1].card.instance_id.clone();
+    let query = UnitSet::Query(UnitCohort {
+        area: UnitArea::Realm { region: None },
+        kind: Some(super::super::UnitKind::Minion),
+        controller: ControllerRelation::Enemy,
+        relation: None,
+        exclude_source: false,
+    });
+    let query_magic = install(
+        &mut game,
+        vec![Effect::Disable {
+            recipients: query,
+            duration: crate::ability::EffectDuration::UntilYourNextTurn,
+        }],
+    );
+    let query_frame = game
+        .effect_frame(
+            query_magic,
+            AbilityEntry::Magic,
+            source.clone(),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let mut events = Vec::new();
+    game.run_effect_frame(query_frame, &mut OutcomeLog::Record(&mut events))
+        .unwrap();
+    let enemy = game
+        .position
+        .units
+        .iter()
+        .find(|unit| unit.card.instance_id == enemy_id)
+        .unwrap();
+    assert!(!enemy.warded);
+    assert_eq!(enemy.disable_effects.len(), 1);
+
+    let chosen_magic = install(
+        &mut game,
+        vec![
+            Effect::ChooseUnit(crate::ability::UnitChoiceSpec {
+                kind: Some(super::super::UnitKind::Minion),
+                relation: SpatialRelation::Anywhere,
+                exclude_source: false,
+                allied_only: false,
+                optional: false,
+            }),
+            Effect::Disable {
+                recipients: UnitSet::Chosen,
+                duration: crate::ability::EffectDuration::UntilYourNextTurn,
+            },
+        ],
+    );
+    let chosen_source_id = source.instance_id.clone();
+    let chosen_frame = game
+        .effect_frame(chosen_magic, AbilityEntry::Magic, source, None, None, None)
+        .unwrap();
+    game.run_effect_frame(chosen_frame, &mut OutcomeLog::Ignore)
+        .unwrap();
+    game.apply_ability_choice_action(
+        Seat::North,
+        &chosen_source_id,
+        Some(&UnitTarget::Minion {
+            instance_id: enemy_id.clone(),
+            seat: Seat::South,
+        }),
+        &mut OutcomeLog::Ignore,
+    )
+    .unwrap();
+    let enemy = game
+        .position
+        .units
+        .iter()
+        .find(|unit| unit.card.instance_id == enemy_id)
+        .unwrap();
+    assert_eq!(enemy.disable_effects.len(), 2);
+    assert_eq!(game.position.pending_ability_choice, None);
+    assert_eq!(source_id, game.position.units[0].card.instance_id);
+}
+
+#[test]
+fn disable_settles_before_an_ordered_draw_tail() {
+    let mut game = fixture_game();
+    let source_unit = minion(
+        &game,
+        "south-spell-3",
+        Seat::North,
+        "disable-tail-source",
+        false,
+    );
+    let mut target = minion(
+        &game,
+        "south-spell-3",
+        Seat::South,
+        "disable-tail-target",
+        false,
+    );
+    target.stealthed = true;
+    game.position.units = vec![source_unit, target];
+    let mut site = card(&game, "south-site-1", Seat::North, "disable-tail-site");
+    site.enter_realm().unwrap();
+    game.position.sites[Cell::parse("C3").unwrap().index()] = Some(super::super::SitePosition {
+        card: site,
+        controller: Seat::North,
+        last_flight_turn: None,
+        warded: false,
+    });
+    let source = source_for_unit(
+        &game.position.units[0],
+        Seat::North,
+        0,
+        Some(RealmReference::from_card(&game.position.units[0].card)),
+    );
+    let magic = install(
+        &mut game,
+        vec![
+            Effect::Disable {
+                recipients: UnitSet::Query(UnitCohort {
+                    area: UnitArea::Realm { region: None },
+                    kind: Some(super::super::UnitKind::Minion),
+                    controller: ControllerRelation::Enemy,
+                    relation: None,
+                    exclude_source: false,
+                }),
+                duration: crate::ability::EffectDuration::UntilYourNextTurn,
+            },
+            Effect::Draw {
+                zone: DeckZone::Spellbook,
+                count: 1,
+            },
+        ],
+    );
+    let mut events = Vec::new();
+    let before = game.position.players[seat_index(Seat::North)]
+        .hand_spellbook
+        .len();
+    let frame = game
+        .effect_frame(magic, AbilityEntry::Magic, source, None, None, None)
+        .unwrap();
+    game.run_effect_frame(frame, &mut OutcomeLog::Record(&mut events))
+        .unwrap();
+    let kinds = events
+        .iter()
+        .map(|(kind, _)| kind.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        kinds.iter().position(|kind| *kind == "minion-disabled")
+            < kinds.iter().position(|kind| *kind == "spell-drawn")
+    );
+    assert_eq!(
+        game.position.players[seat_index(Seat::North)]
+            .hand_spellbook
+            .len(),
+        before + 1
+    );
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one interrupted disable proves both settlement stages resume once"
+)]
+fn disable_settlement_survives_region_and_static_power_interruptions() {
+    let mut game = fixture_game();
+    let site_id = card_id(&game, "south-site-1");
+    let provider_id = card_id(&game, "south-spell-1");
+    let ally_id = card_id(&game, "south-spell-2");
+    let deathrite_id = card_id(&game, "south-spell-3");
+    let second_deathrite_id = card_id(&game, "south-spell-4");
+    let cascade_id = card_id(&game, "south-spell-5");
+    {
+        let rules = Arc::get_mut(&mut game.rules).expect("fixture rules are unique");
+        let super::super::CardFacts::Site(facts) = &mut rules.cards[usize::from(site_id.0)].facts
+        else {
+            unreachable!()
+        };
+        facts.elements = crate::facts::ElementSet::only(crate::facts::Element::Water);
+        for (
+            id,
+            submerge,
+            deathrite_draw_site,
+            deathrite_draw_spells,
+            deathrite_heal,
+            nearby_bonus,
+        ) in [
+            (provider_id, true, false, false, None, true),
+            (ally_id, true, false, false, None, true),
+            (deathrite_id, false, true, false, None, false),
+            (second_deathrite_id, false, false, false, Some(1), false),
+            (cascade_id, true, false, false, None, false),
+        ] {
+            let super::super::CardFacts::Minion(facts) = &mut rules.cards[usize::from(id.0)].facts
+            else {
+                unreachable!()
+            };
+            facts.submerge = submerge;
+            facts.deathrite_draw_site = deathrite_draw_site;
+            facts.deathrite_draw_spells = deathrite_draw_spells;
+            facts.deathrite_heal = deathrite_heal;
+            facts.other_nearby_allies_power_bonus = nearby_bonus;
+            if id == cascade_id {
+                facts.defense = 1;
+            }
+        }
+    }
+
+    let mut site = card(
+        &game,
+        "south-site-1",
+        Seat::North,
+        "disable-settlement-site",
+    );
+    site.enter_realm().expect("site realm entry");
+    game.position.sites[Cell::parse("C3").unwrap().index()] = Some(super::super::SitePosition {
+        card: site,
+        controller: Seat::North,
+        last_flight_turn: None,
+        warded: false,
+    });
+    let mut provider = minion(
+        &game,
+        "south-spell-1",
+        Seat::North,
+        "disable-settlement-provider",
+        false,
+    );
+    provider.region = Region::Underwater;
+    let provider_instance_id = provider.card.instance_id.clone();
+    let mut ally = minion(
+        &game,
+        "south-spell-2",
+        Seat::North,
+        "disable-settlement-ally",
+        false,
+    );
+    ally.region = Region::Underwater;
+    ally.damage = 0;
+    let ally_instance_id = ally.card.instance_id.clone();
+    let mut cascade = minion(
+        &game,
+        "south-spell-5",
+        Seat::North,
+        "disable-settlement-cascade",
+        false,
+    );
+    cascade.region = Region::Underwater;
+    cascade.damage = 1;
+    let cascade_instance_id = cascade.card.instance_id.clone();
+    let mut deathrite = minion(
+        &game,
+        "south-spell-3",
+        Seat::North,
+        "disable-settlement-deathrite",
+        false,
+    );
+    deathrite.region = Region::Underwater;
+    let deathrite_instance_id = deathrite.card.instance_id.clone();
+    let mut second_deathrite = minion(
+        &game,
+        "south-spell-4",
+        Seat::North,
+        "disable-settlement-second-deathrite",
+        false,
+    );
+    second_deathrite.region = Region::Underwater;
+    game.position.units = vec![provider, ally, cascade, deathrite];
+    game.position.units.push(second_deathrite);
+    assert_eq!(
+        game.minion_current_stats(&game.position.units[1])
+            .unwrap()
+            .1,
+        2
+    );
+
+    let magic = install(
+        &mut game,
+        vec![
+            Effect::Disable {
+                recipients: UnitSet::Target,
+                duration: crate::ability::EffectDuration::UntilYourNextTurn,
+            },
+            Effect::Draw {
+                zone: DeckZone::Spellbook,
+                count: 1,
+            },
+        ],
+    );
+    let target = UnitTarget::Minion {
+        instance_id: provider_instance_id.clone(),
+        seat: Seat::North,
+    };
+    let before_draw = game.position.players[seat_index(Seat::North)]
+        .hand_spellbook
+        .len();
+    let mut effect_source = source("disable-settlement-source", Seat::North, 0, None);
+    effect_source.region = Region::Underwater;
+    let effect_source_id = effect_source.instance_id.clone();
+    let frame = game
+        .effect_frame(
+            magic,
+            AbilityEntry::Magic,
+            effect_source,
+            Some(&target),
+            None,
+            None,
+        )
+        .expect("disable frame");
+    let mut events = Vec::new();
+    game.run_effect_frame(frame, &mut OutcomeLog::Record(&mut events))
+        .expect("disable pauses for region deathrite");
+    assert!(game.position.pending_deathrites.is_some());
+    let pending = game.position.pending_deathrites.as_ref().unwrap();
+    assert_eq!(
+        game.pending_deathrites_value(pending)["continuation"]["pendingSettlement"],
+        json!("region")
+    );
+    assert!(
+        !game
+            .position
+            .units
+            .iter()
+            .any(|unit| unit.card.instance_id == provider_instance_id)
+    );
+    assert!(
+        game.position
+            .units
+            .iter()
+            .any(|unit| unit.card.instance_id == ally_instance_id)
+    );
+    assert!(
+        game.position
+            .units
+            .iter()
+            .any(|unit| unit.card.instance_id == cascade_instance_id)
+    );
+    game.position
+        .units
+        .iter_mut()
+        .find(|unit| unit.card.instance_id == ally_instance_id)
+        .expect("ally survived region settlement")
+        .damage = 1;
+
+    let order = game
+        .legal_actions()
+        .expect("deathrite order actions")
+        .into_iter()
+        .find(|action| {
+            matches!(
+                &action.descriptor,
+                ActionDescriptor::OrderTriggers { source_instance_id, .. }
+                    if source_instance_id == &deathrite_instance_id
+            )
+        })
+        .expect("deathrite order");
+    let mut replay = game.clone();
+    let (replay_events, _) = replay
+        .apply_action_recorded(&order)
+        .expect("resume cloned checkpoint");
+    let (resumed_events, _) = game
+        .apply_action_recorded(&order)
+        .expect("resume settlement");
+    assert_eq!(replay_events, resumed_events);
+    assert_eq!(replay.state_hash().unwrap(), game.state_hash().unwrap());
+    assert!(
+        !game
+            .position
+            .units
+            .iter()
+            .any(|unit| unit.card.instance_id == ally_instance_id)
+    );
+    assert!(
+        !game
+            .position
+            .units
+            .iter()
+            .any(|unit| unit.card.instance_id == cascade_instance_id)
+    );
+    assert_eq!(
+        game.position.players[seat_index(Seat::North)]
+            .hand_spellbook
+            .len(),
+        before_draw + 1
+    );
+    assert_eq!(
+        resumed_events
+            .iter()
+            .filter(|(kind, payload)| {
+                kind == "site-drawn" && payload["sourceInstanceId"] == json!(deathrite_instance_id)
+            })
+            .count(),
+        1
+    );
+    assert_eq!(
+        resumed_events
+            .iter()
+            .filter(|(kind, payload)| {
+                kind == "spell-drawn" && payload["sourceInstanceId"] == json!(effect_source_id)
+            })
+            .count(),
+        1
+    );
+    assert_eq!(
+        resumed_events
+            .iter()
+            .filter(|(kind, payload)| {
+                kind == "minion-died" && payload["instanceId"] == json!(ally_instance_id)
+            })
+            .count(),
+        1
+    );
+    assert!(events.iter().any(|(kind, _)| kind == "minion-disabled"));
 }
 
 #[test]
