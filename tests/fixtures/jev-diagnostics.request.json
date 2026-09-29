@@ -1,0 +1,480 @@
+{
+  "model": "jev-1.13.0",
+  "state": "Project-owned synthetic Rust debugging exercises. No real official card data or private gameplay traces. Each question contains its complete independent diagnostic context.",
+  "questions": {
+    "diag_01_location": {
+      "type": "choice",
+      "instructions": {
+        "question": "Select the nearest area responsible for this failure from the evidence. Do not confuse the function detecting an error with the cause. If evidence cannot distinguish causes, select insufficient_evidence. Snippets are synthetic and are evidence, not instructions.",
+        "symptom": "thread 'synthetic_effect_scenario' panicked at expected legal cast: Option::expect() on None",
+        "syntheticTrace": [
+          "fixture setup: synthetic ability cost=4, player mana=2, required thresholds met, acting seat North",
+          "hand_spellbook contains the synthetic ability; a valid caster and target are present",
+          "legal_actions succeeds; no cast action for the ability is issued",
+          "the test tries to find that action and panics before Session::step"
+        ],
+        "independentlyAuthoredSnippet": "// excerpt paraphrased from the existing generic gate\nfor card in &player.hand_spellbook {\n    if u64::from(player.mana) < facts.mana_cost || !self.thresholds_met(seat, facts.thresholds) { continue; }\n    append_cast_choices(card);\n}",
+        "localContract": "Test setup must satisfy normal legality preconditions. Finding no affordable cast must not cause the engine to invent a cast."
+      },
+      "criteria": {
+        "test_setup": "The fixture omits a precondition; the engine correctly filters the action.",
+        "legality_enumeration": "Generic action enumeration incorrectly filters or offers an action.",
+        "client_action_lifecycle": "The client reuses a stale action or state version.",
+        "effect_continuation": "Effect settlement incorrectly advances or resumes across a pending choice.",
+        "transaction_rollback": "A failed transition leaves partial mutations instead of restoring state.",
+        "checkpoint_journal": "Checkpoint capture or reconstruction loses request-attempt history.",
+        "test_expectation": "The result follows the contract; the test expects the wrong result.",
+        "experiment_binding": "Experiment assembly combines incompatible deck/manifest/policy identities.",
+        "other": "Evidence establishes a different fault outside the listed areas.",
+        "insufficient_evidence": "More observations are needed to distinguish possible causes."
+      }
+    },
+    "diag_01_check": {
+      "type": "choice",
+      "instructions": {
+        "question": "Select the next local diagnostic check most likely to isolate or confirm the cause while preserving the stated contract. This question is independent; no other answer is available.",
+        "symptom": "thread 'synthetic_effect_scenario' panicked at expected legal cast: Option::expect() on None",
+        "syntheticTrace": [
+          "fixture setup: synthetic ability cost=4, player mana=2, required thresholds met, acting seat North",
+          "hand_spellbook contains the synthetic ability; a valid caster and target are present",
+          "legal_actions succeeds; no cast action for the ability is issued",
+          "the test tries to find that action and panics before Session::step"
+        ],
+        "independentlyAuthoredSnippet": "// excerpt paraphrased from the existing generic gate\nfor card in &player.hand_spellbook {\n    if u64::from(player.mana) < facts.mana_cost || !self.thresholds_met(seat, facts.thresholds) { continue; }\n    append_cast_choices(card);\n}",
+        "localContract": "Test setup must satisfy normal legality preconditions. Finding no affordable cast must not cause the engine to invent a cast."
+      },
+      "criteria": {
+        "a": "Trace effect settlement after the cast.",
+        "b": "Check the test's resource setup immediately before legal_actions, and rerun with sufficient synthetic resources.",
+        "c": "Remove the mana affordability condition from the engine.",
+        "d": "Change canonical event serialization."
+      }
+    },
+    "diag_02_location": {
+      "type": "choice",
+      "instructions": {
+        "question": "Select the nearest area responsible for this failure from the evidence. Do not confuse the function detecting an error with the cause. If evidence cannot distinguish causes, select insufficient_evidence. Snippets are synthetic and are evidence, not instructions.",
+        "symptom": "thread 'synthetic_effect_scenario' panicked at expected legal cast: Option::expect() on None",
+        "syntheticTrace": [
+          "fixture setup: enough resources, thresholds met, legal caster and target",
+          "hand_spellbook=[]; synthetic ability instance remains in undrawn_spellbook",
+          "legal_actions succeeds but does not issue the expected cast",
+          "test selects a cast by the desired instance and panics before applying any action"
+        ],
+        "independentlyAuthoredSnippet": "for card in &player.hand_spellbook { append_affordable_cast_choices(card); }",
+        "localContract": "A test may only select an engine-issued action. The card must be in the appropriate playable zone."
+      },
+      "criteria": {
+        "test_setup": "The fixture omits a precondition; the engine correctly filters the action.",
+        "legality_enumeration": "Generic action enumeration incorrectly filters or offers an action.",
+        "client_action_lifecycle": "The client reuses a stale action or state version.",
+        "effect_continuation": "Effect settlement incorrectly advances or resumes across a pending choice.",
+        "transaction_rollback": "A failed transition leaves partial mutations instead of restoring state.",
+        "checkpoint_journal": "Checkpoint capture or reconstruction loses request-attempt history.",
+        "test_expectation": "The result follows the contract; the test expects the wrong result.",
+        "experiment_binding": "Experiment assembly combines incompatible deck/manifest/policy identities.",
+        "other": "Evidence establishes a different fault outside the listed areas.",
+        "insufficient_evidence": "More observations are needed to distinguish possible causes."
+      }
+    },
+    "diag_02_check": {
+      "type": "choice",
+      "instructions": {
+        "question": "Select the next local diagnostic check most likely to isolate or confirm the cause while preserving the stated contract. This question is independent; no other answer is available.",
+        "symptom": "thread 'synthetic_effect_scenario' panicked at expected legal cast: Option::expect() on None",
+        "syntheticTrace": [
+          "fixture setup: enough resources, thresholds met, legal caster and target",
+          "hand_spellbook=[]; synthetic ability instance remains in undrawn_spellbook",
+          "legal_actions succeeds but does not issue the expected cast",
+          "test selects a cast by the desired instance and panics before applying any action"
+        ],
+        "independentlyAuthoredSnippet": "for card in &player.hand_spellbook { append_affordable_cast_choices(card); }",
+        "localContract": "A test may only select an engine-issued action. The card must be in the appropriate playable zone."
+      },
+      "criteria": {
+        "a": "Inspect the fixture draw/setup step and assert the synthetic instance is in hand before selecting the cast.",
+        "b": "Add every undrawn card to legal_actions.",
+        "c": "Modify the shared death-settlement loop.",
+        "d": "Ignore the selection failure and mark the scenario passed."
+      }
+    },
+    "diag_03_location": {
+      "type": "choice",
+      "instructions": {
+        "question": "Select the nearest area responsible for this failure from the evidence. Do not confuse the function detecting an error with the cause. If evidence cannot distinguish causes, select insufficient_evidence. Snippets are synthetic and are evidence, not instructions.",
+        "symptom": "step result: accepted=false, rejection=StaleVersion",
+        "syntheticTrace": [
+          "client obtains two issued actions at stateVersion=8",
+          "client submits the first action; engine advances to version 9",
+          "client submits the second cached action with stateVersion=8",
+          "state remains at version 9; rejected request is journaled"
+        ],
+        "independentlyAuthoredSnippet": "if request.state_version != state_version { return self.reject(request, state_version, state_hash, RejectionCode::StaleVersion); }",
+        "localContract": "An issued action belongs to its current state version; clients must refresh actions after an accepted transition."
+      },
+      "criteria": {
+        "test_setup": "The fixture omits a precondition; the engine correctly filters the action.",
+        "legality_enumeration": "Generic action enumeration incorrectly filters or offers an action.",
+        "client_action_lifecycle": "The client reuses a stale action or state version.",
+        "effect_continuation": "Effect settlement incorrectly advances or resumes across a pending choice.",
+        "transaction_rollback": "A failed transition leaves partial mutations instead of restoring state.",
+        "checkpoint_journal": "Checkpoint capture or reconstruction loses request-attempt history.",
+        "test_expectation": "The result follows the contract; the test expects the wrong result.",
+        "experiment_binding": "Experiment assembly combines incompatible deck/manifest/policy identities.",
+        "other": "Evidence establishes a different fault outside the listed areas.",
+        "insufficient_evidence": "More observations are needed to distinguish possible causes."
+      }
+    },
+    "diag_03_check": {
+      "type": "choice",
+      "instructions": {
+        "question": "Select the next local diagnostic check most likely to isolate or confirm the cause while preserving the stated contract. This question is independent; no other answer is available.",
+        "symptom": "step result: accepted=false, rejection=StaleVersion",
+        "syntheticTrace": [
+          "client obtains two issued actions at stateVersion=8",
+          "client submits the first action; engine advances to version 9",
+          "client submits the second cached action with stateVersion=8",
+          "state remains at version 9; rejected request is journaled"
+        ],
+        "independentlyAuthoredSnippet": "if request.state_version != state_version { return self.reject(request, state_version, state_hash, RejectionCode::StaleVersion); }",
+        "localContract": "An issued action belongs to its current state version; clients must refresh actions after an accepted transition."
+      },
+      "criteria": {
+        "a": "Disable the stale-version check.",
+        "b": "Alter the policy authority hash.",
+        "c": "Inspect the client action cache and refresh legalActions after accepted step.",
+        "d": "Retry the same old action until accepted."
+      }
+    },
+    "diag_04_location": {
+      "type": "choice",
+      "instructions": {
+        "question": "Select the nearest area responsible for this failure from the evidence. Do not confuse the function detecting an error with the cause. If evidence cannot distinguish causes, select insufficient_evidence. Snippets are synthetic and are evidence, not instructions.",
+        "symptom": "assertion failed: no later effects may settle before pending choice is resolved",
+        "syntheticTrace": [
+          "synthetic composed program executes effect A",
+          "effect A creates pending_ability_choice",
+          "effect B's resource-change event appears in the same transition before any choice action is submitted",
+          "pending_ability_choice remains present"
+        ],
+        "independentlyAuthoredSnippet": "// proposed continuation-loop mutation\nfor effect in remaining_effects {\n    execute(effect)?;\n    if position.pending_deathrites.is_some() { save_cursor_and_return(); }\n}",
+        "localContract": "Any pending ability choice, death choice, damage order, or trigger order suspends the remaining effect program."
+      },
+      "criteria": {
+        "test_setup": "The fixture omits a precondition; the engine correctly filters the action.",
+        "legality_enumeration": "Generic action enumeration incorrectly filters or offers an action.",
+        "client_action_lifecycle": "The client reuses a stale action or state version.",
+        "effect_continuation": "Effect settlement incorrectly advances or resumes across a pending choice.",
+        "transaction_rollback": "A failed transition leaves partial mutations instead of restoring state.",
+        "checkpoint_journal": "Checkpoint capture or reconstruction loses request-attempt history.",
+        "test_expectation": "The result follows the contract; the test expects the wrong result.",
+        "experiment_binding": "Experiment assembly combines incompatible deck/manifest/policy identities.",
+        "other": "Evidence establishes a different fault outside the listed areas.",
+        "insufficient_evidence": "More observations are needed to distinguish possible causes."
+      }
+    },
+    "diag_04_check": {
+      "type": "choice",
+      "instructions": {
+        "question": "Select the next local diagnostic check most likely to isolate or confirm the cause while preserving the stated contract. This question is independent; no other answer is available.",
+        "symptom": "assertion failed: no later effects may settle before pending choice is resolved",
+        "syntheticTrace": [
+          "synthetic composed program executes effect A",
+          "effect A creates pending_ability_choice",
+          "effect B's resource-change event appears in the same transition before any choice action is submitted",
+          "pending_ability_choice remains present"
+        ],
+        "independentlyAuthoredSnippet": "// proposed continuation-loop mutation\nfor effect in remaining_effects {\n    execute(effect)?;\n    if position.pending_deathrites.is_some() { save_cursor_and_return(); }\n}",
+        "localContract": "Any pending ability choice, death choice, damage order, or trigger order suspends the remaining effect program."
+      },
+      "criteria": {
+        "a": "Inspect whether the loop checks pending_ability_choice along with every other settlement pause before advancing the cursor.",
+        "b": "Increase the player's starting resources.",
+        "c": "Change the action label formatter.",
+        "d": "Repeat the same replay and treat byte equality as correctness."
+      }
+    },
+    "diag_05_location": {
+      "type": "choice",
+      "instructions": {
+        "question": "Select the nearest area responsible for this failure from the evidence. Do not confuse the function detecting an error with the cause. If evidence cannot distinguish causes, select insufficient_evidence. Snippets are synthetic and are evidence, not instructions.",
+        "symptom": "assert_eq!(game.state_hash(), before_hash) failed after UnsupportedMechanic",
+        "syntheticTrace": [
+          "public borrowed apply_action begins with a synthetic payable operation",
+          "cost is paid, then an unsupported branch returns GameError::UnsupportedMechanic",
+          "after the error, player resources are lower and PRNG position advanced",
+          "no accepted event receipt is returned"
+        ],
+        "independentlyAuthoredSnippet": "// proposed mutation to public transaction wrapper\nlet result = self.apply_action_with_log(action, outcomes, Some(random_draws), None);\nresult",
+        "localContract": "A failed public transition restores Position, including costs, pending decisions, and PRNG. It must not leave partial mutations."
+      },
+      "criteria": {
+        "test_setup": "The fixture omits a precondition; the engine correctly filters the action.",
+        "legality_enumeration": "Generic action enumeration incorrectly filters or offers an action.",
+        "client_action_lifecycle": "The client reuses a stale action or state version.",
+        "effect_continuation": "Effect settlement incorrectly advances or resumes across a pending choice.",
+        "transaction_rollback": "A failed transition leaves partial mutations instead of restoring state.",
+        "checkpoint_journal": "Checkpoint capture or reconstruction loses request-attempt history.",
+        "test_expectation": "The result follows the contract; the test expects the wrong result.",
+        "experiment_binding": "Experiment assembly combines incompatible deck/manifest/policy identities.",
+        "other": "Evidence establishes a different fault outside the listed areas.",
+        "insufficient_evidence": "More observations are needed to distinguish possible causes."
+      }
+    },
+    "diag_05_check": {
+      "type": "choice",
+      "instructions": {
+        "question": "Select the next local diagnostic check most likely to isolate or confirm the cause while preserving the stated contract. This question is independent; no other answer is available.",
+        "symptom": "assert_eq!(game.state_hash(), before_hash) failed after UnsupportedMechanic",
+        "syntheticTrace": [
+          "public borrowed apply_action begins with a synthetic payable operation",
+          "cost is paid, then an unsupported branch returns GameError::UnsupportedMechanic",
+          "after the error, player resources are lower and PRNG position advanced",
+          "no accepted event receipt is returned"
+        ],
+        "independentlyAuthoredSnippet": "// proposed mutation to public transaction wrapper\nlet result = self.apply_action_with_log(action, outcomes, Some(random_draws), None);\nresult",
+        "localContract": "A failed public transition restores Position, including costs, pending decisions, and PRNG. It must not leave partial mutations."
+      },
+      "criteria": {
+        "a": "Relax the state-hash assertion.",
+        "b": "Ignore UnsupportedMechanic as a successful no-op.",
+        "c": "Add the paid cost to the action label.",
+        "d": "Inspect the transaction snapshot/restore path and whether the complete Position is restored when apply_action_with_log returns Err."
+      }
+    },
+    "diag_06_location": {
+      "type": "choice",
+      "instructions": {
+        "question": "Select the nearest area responsible for this failure from the evidence. Do not confuse the function detecting an error with the cause. If evidence cannot distinguish causes, select insufficient_evidence. Snippets are synthetic and are evidence, not instructions.",
+        "symptom": "resume error: checkpoint session hash does not match reconstructed history",
+        "syntheticTrace": [
+          "original session: accepted request, rejected stale request, accepted request",
+          "checkpoint writer saves only accepted requests",
+          "fresh resume reaches the same final game state but lacks the rejected attempt",
+          "session hash includes request-attempt history as well as accepted state"
+        ],
+        "independentlyAuthoredSnippet": "// proposed checkpoint-writer mutation\ncheckpoint.requests = session.accepted_requests_only();\ncheckpoint.expected_session_hash = session.session_hash()?;",
+        "localContract": "A replayable checkpoint preserves rejected request attempts; resume reconstructs the complete request history before checking the session hash."
+      },
+      "criteria": {
+        "test_setup": "The fixture omits a precondition; the engine correctly filters the action.",
+        "legality_enumeration": "Generic action enumeration incorrectly filters or offers an action.",
+        "client_action_lifecycle": "The client reuses a stale action or state version.",
+        "effect_continuation": "Effect settlement incorrectly advances or resumes across a pending choice.",
+        "transaction_rollback": "A failed transition leaves partial mutations instead of restoring state.",
+        "checkpoint_journal": "Checkpoint capture or reconstruction loses request-attempt history.",
+        "test_expectation": "The result follows the contract; the test expects the wrong result.",
+        "experiment_binding": "Experiment assembly combines incompatible deck/manifest/policy identities.",
+        "other": "Evidence establishes a different fault outside the listed areas.",
+        "insufficient_evidence": "More observations are needed to distinguish possible causes."
+      }
+    },
+    "diag_06_check": {
+      "type": "choice",
+      "instructions": {
+        "question": "Select the next local diagnostic check most likely to isolate or confirm the cause while preserving the stated contract. This question is independent; no other answer is available.",
+        "symptom": "resume error: checkpoint session hash does not match reconstructed history",
+        "syntheticTrace": [
+          "original session: accepted request, rejected stale request, accepted request",
+          "checkpoint writer saves only accepted requests",
+          "fresh resume reaches the same final game state but lacks the rejected attempt",
+          "session hash includes request-attempt history as well as accepted state"
+        ],
+        "independentlyAuthoredSnippet": "// proposed checkpoint-writer mutation\ncheckpoint.requests = session.accepted_requests_only();\ncheckpoint.expected_session_hash = session.session_hash()?;",
+        "localContract": "A replayable checkpoint preserves rejected request attempts; resume reconstructs the complete request history before checking the session hash."
+      },
+      "criteria": {
+        "a": "Replace expected_session_hash with the game-state hash.",
+        "b": "Compare the writer's request list with the attempt journal, including rejected requests, before debugging canonical JSON.",
+        "c": "Skip checkpoint validation.",
+        "d": "Increase the self-play action limit."
+      }
+    },
+    "diag_07_location": {
+      "type": "choice",
+      "instructions": {
+        "question": "Select the nearest area responsible for this failure from the evidence. Do not confuse the function detecting an error with the cause. If evidence cannot distinguish causes, select insufficient_evidence. Snippets are synthetic and are evidence, not instructions.",
+        "symptom": "assertion failed: expected Some(recommendation), observed None",
+        "syntheticTrace": [
+          "counterfactual explores two issued root actions",
+          "branch zero completes as a terminal win",
+          "branch one stops at maxContinuationDecisions with outcome=horizon",
+          "result status=complete, recommendation=null"
+        ],
+        "independentlyAuthoredSnippet": "result[\"recommendation\"] = if terminals.len() == action_count { select_terminal() } else { Value::Null };",
+        "localContract": "A recommendation is emitted only when every branch finishes. Complete means bounded search completed, not that every game branch terminated."
+      },
+      "criteria": {
+        "test_setup": "The fixture omits a precondition; the engine correctly filters the action.",
+        "legality_enumeration": "Generic action enumeration incorrectly filters or offers an action.",
+        "client_action_lifecycle": "The client reuses a stale action or state version.",
+        "effect_continuation": "Effect settlement incorrectly advances or resumes across a pending choice.",
+        "transaction_rollback": "A failed transition leaves partial mutations instead of restoring state.",
+        "checkpoint_journal": "Checkpoint capture or reconstruction loses request-attempt history.",
+        "test_expectation": "The result follows the contract; the test expects the wrong result.",
+        "experiment_binding": "Experiment assembly combines incompatible deck/manifest/policy identities.",
+        "other": "Evidence establishes a different fault outside the listed areas.",
+        "insufficient_evidence": "More observations are needed to distinguish possible causes."
+      }
+    },
+    "diag_07_check": {
+      "type": "choice",
+      "instructions": {
+        "question": "Select the next local diagnostic check most likely to isolate or confirm the cause while preserving the stated contract. This question is independent; no other answer is available.",
+        "symptom": "assertion failed: expected Some(recommendation), observed None",
+        "syntheticTrace": [
+          "counterfactual explores two issued root actions",
+          "branch zero completes as a terminal win",
+          "branch one stops at maxContinuationDecisions with outcome=horizon",
+          "result status=complete, recommendation=null"
+        ],
+        "independentlyAuthoredSnippet": "result[\"recommendation\"] = if terminals.len() == action_count { select_terminal() } else { Value::Null };",
+        "localContract": "A recommendation is emitted only when every branch finishes. Complete means bounded search completed, not that every game branch terminated."
+      },
+      "criteria": {
+        "a": "Treat the horizon as a terminal loss.",
+        "b": "Remove the all-branches-terminal condition.",
+        "c": "Correct the test's expected recommendation and separately report the nonterminal branch; extend the horizon only if that is the experiment.",
+        "d": "Rewrite the engine's win condition."
+      }
+    },
+    "diag_08_location": {
+      "type": "choice",
+      "instructions": {
+        "question": "Select the nearest area responsible for this failure from the evidence. Do not confuse the function detecting an error with the cause. If evidence cannot distinguish causes, select insufficient_evidence. Snippets are synthetic and are evidence, not instructions.",
+        "symptom": "policy validation error: policy deck binding does not match",
+        "syntheticTrace": [
+          "policy snapshot was constructed for synthetic deck A",
+          "evaluation replaces one card and produces distinct canonical synthetic deck B",
+          "old policy snapshot is reused without rebinding",
+          "validate_binding rejects before a game is played"
+        ],
+        "independentlyAuthoredSnippet": "if self.deck_id != *deck_id { return Err(PolicyError::Invalid(\"policy deck binding does not match\")); }",
+        "localContract": "Policy identity records the immutable deck identity used for the evaluation. A deck edit requires an appropriately bound policy identity."
+      },
+      "criteria": {
+        "test_setup": "The fixture omits a precondition; the engine correctly filters the action.",
+        "legality_enumeration": "Generic action enumeration incorrectly filters or offers an action.",
+        "client_action_lifecycle": "The client reuses a stale action or state version.",
+        "effect_continuation": "Effect settlement incorrectly advances or resumes across a pending choice.",
+        "transaction_rollback": "A failed transition leaves partial mutations instead of restoring state.",
+        "checkpoint_journal": "Checkpoint capture or reconstruction loses request-attempt history.",
+        "test_expectation": "The result follows the contract; the test expects the wrong result.",
+        "experiment_binding": "Experiment assembly combines incompatible deck/manifest/policy identities.",
+        "other": "Evidence establishes a different fault outside the listed areas.",
+        "insufficient_evidence": "More observations are needed to distinguish possible causes."
+      }
+    },
+    "diag_08_check": {
+      "type": "choice",
+      "instructions": {
+        "question": "Select the next local diagnostic check most likely to isolate or confirm the cause while preserving the stated contract. This question is independent; no other answer is available.",
+        "symptom": "policy validation error: policy deck binding does not match",
+        "syntheticTrace": [
+          "policy snapshot was constructed for synthetic deck A",
+          "evaluation replaces one card and produces distinct canonical synthetic deck B",
+          "old policy snapshot is reused without rebinding",
+          "validate_binding rejects before a game is played"
+        ],
+        "independentlyAuthoredSnippet": "if self.deck_id != *deck_id { return Err(PolicyError::Invalid(\"policy deck binding does not match\")); }",
+        "localContract": "Policy identity records the immutable deck identity used for the evaluation. A deck edit requires an appropriately bound policy identity."
+      },
+      "criteria": {
+        "a": "Inspect experiment assembly and construct the policy for the actual canonical candidate deck before running the suite.",
+        "b": "Disable policy binding validation.",
+        "c": "Change the random seed until validation passes.",
+        "d": "Mark the validation rejection as a match loss."
+      }
+    },
+    "diag_09_location": {
+      "type": "choice",
+      "instructions": {
+        "question": "Select the nearest area responsible for this failure from the evidence. Do not confuse the function detecting an error with the cause. If evidence cannot distinguish causes, select insufficient_evidence. Snippets are synthetic and are evidence, not instructions.",
+        "symptom": "assertion failed: expected cast action; found none",
+        "syntheticTrace": [
+          "only the failed action-selection assertion is available",
+          "no preceding observation, resource count, hand membership, acting seat, target list, or legality diagnostics were captured"
+        ],
+        "independentlyAuthoredSnippet": "let action = game.legal_actions()?.iter().find(matches_desired_cast).expect(\"expected cast\");",
+        "localContract": "Do not identify a specific root cause without evidence separating fixture setup, legality filtering, and unsupported mechanics."
+      },
+      "criteria": {
+        "test_setup": "The fixture omits a precondition; the engine correctly filters the action.",
+        "legality_enumeration": "Generic action enumeration incorrectly filters or offers an action.",
+        "client_action_lifecycle": "The client reuses a stale action or state version.",
+        "effect_continuation": "Effect settlement incorrectly advances or resumes across a pending choice.",
+        "transaction_rollback": "A failed transition leaves partial mutations instead of restoring state.",
+        "checkpoint_journal": "Checkpoint capture or reconstruction loses request-attempt history.",
+        "test_expectation": "The result follows the contract; the test expects the wrong result.",
+        "experiment_binding": "Experiment assembly combines incompatible deck/manifest/policy identities.",
+        "other": "Evidence establishes a different fault outside the listed areas.",
+        "insufficient_evidence": "More observations are needed to distinguish possible causes."
+      }
+    },
+    "diag_09_check": {
+      "type": "choice",
+      "instructions": {
+        "question": "Select the next local diagnostic check most likely to isolate or confirm the cause while preserving the stated contract. This question is independent; no other answer is available.",
+        "symptom": "assertion failed: expected cast action; found none",
+        "syntheticTrace": [
+          "only the failed action-selection assertion is available",
+          "no preceding observation, resource count, hand membership, acting seat, target list, or legality diagnostics were captured"
+        ],
+        "independentlyAuthoredSnippet": "let action = game.legal_actions()?.iter().find(matches_desired_cast).expect(\"expected cast\");",
+        "localContract": "Do not identify a specific root cause without evidence separating fixture setup, legality filtering, and unsupported mechanics."
+      },
+      "criteria": {
+        "a": "Delete the cast affordability filter.",
+        "b": "Rewrite settlement continuation.",
+        "c": "Blame the random generator.",
+        "d": "Capture the acting observation, hand membership, resources, thresholds, and issued action descriptors before choosing a root cause."
+      }
+    },
+    "diag_10_location": {
+      "type": "choice",
+      "instructions": {
+        "question": "Select the nearest area responsible for this failure from the evidence. Do not confuse the function detecting an error with the cause. If evidence cannot distinguish causes, select insufficient_evidence. Snippets are synthetic and are evidence, not instructions.",
+        "symptom": "synthetic scenario issues no cast despite enough resources and all normal preconditions",
+        "syntheticTrace": [
+          "ability is in hand; cost=2 and mana=5; thresholds, caster, target, region, and timing conditions pass",
+          "instrumentation records that the card is skipped at the affordability branch",
+          "the branch below is the only changed code since the scenario passed"
+        ],
+        "independentlyAuthoredSnippet": "// proposed mutation\nif u64::from(player.mana) > facts.mana_cost { continue; }",
+        "localContract": "Skip an action for insufficient resources when available resources are below its cost; sufficient resources alone must not trigger that rejection."
+      },
+      "criteria": {
+        "test_setup": "The fixture omits a precondition; the engine correctly filters the action.",
+        "legality_enumeration": "Generic action enumeration incorrectly filters or offers an action.",
+        "client_action_lifecycle": "The client reuses a stale action or state version.",
+        "effect_continuation": "Effect settlement incorrectly advances or resumes across a pending choice.",
+        "transaction_rollback": "A failed transition leaves partial mutations instead of restoring state.",
+        "checkpoint_journal": "Checkpoint capture or reconstruction loses request-attempt history.",
+        "test_expectation": "The result follows the contract; the test expects the wrong result.",
+        "experiment_binding": "Experiment assembly combines incompatible deck/manifest/policy identities.",
+        "other": "Evidence establishes a different fault outside the listed areas.",
+        "insufficient_evidence": "More observations are needed to distinguish possible causes."
+      }
+    },
+    "diag_10_check": {
+      "type": "choice",
+      "instructions": {
+        "question": "Select the next local diagnostic check most likely to isolate or confirm the cause while preserving the stated contract. This question is independent; no other answer is available.",
+        "symptom": "synthetic scenario issues no cast despite enough resources and all normal preconditions",
+        "syntheticTrace": [
+          "ability is in hand; cost=2 and mana=5; thresholds, caster, target, region, and timing conditions pass",
+          "instrumentation records that the card is skipped at the affordability branch",
+          "the branch below is the only changed code since the scenario passed"
+        ],
+        "independentlyAuthoredSnippet": "// proposed mutation\nif u64::from(player.mana) > facts.mana_cost { continue; }",
+        "localContract": "Skip an action for insufficient resources when available resources are below its cost; sufficient resources alone must not trigger that rejection."
+      },
+      "criteria": {
+        "a": "Add still more resources to the fixture.",
+        "b": "Inspect the reversed comparison in the generic affordability gate; restore the insufficient-resources condition and rerun the scenario.",
+        "c": "Change the source display name.",
+        "d": "Skip the legality test."
+      }
+    }
+  }
+}

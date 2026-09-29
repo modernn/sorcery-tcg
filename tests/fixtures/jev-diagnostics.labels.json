@@ -1,0 +1,65 @@
+{
+  "labelStatus": "Author-explained development labels reviewed with the expectations visible; not a blind or held-out evaluation.",
+  "labels": {
+    "diag_01": {
+      "expectedSubsystem": "test_setup",
+      "expectedCheck": "b",
+      "nearestFunction": "synthetic test setup before Game::legal_actions; existing gate Game::append_main_actions",
+      "reason": "The described test does not satisfy the affordable-action precondition and fails before any effect executes."
+    },
+    "diag_02": {
+      "expectedSubsystem": "test_setup",
+      "expectedCheck": "a",
+      "nearestFunction": "synthetic test hand preparation before Game::append_main_actions",
+      "reason": "The ability is absent from the iteration domain. A missing hand instance is a setup problem, not a resolution bug."
+    },
+    "diag_03": {
+      "expectedSubsystem": "client_action_lifecycle",
+      "expectedCheck": "c",
+      "nearestFunction": "client selection loop; Session::step is enforcing the correct rejection",
+      "reason": "The client reused an action from an earlier state. The engine behavior is consistent with the contract."
+    },
+    "diag_04": {
+      "expectedSubsystem": "effect_continuation",
+      "expectedCheck": "a",
+      "nearestFunction": "shared effect-frame execution in game/effect.rs; continuation attachment in game/resolution.rs",
+      "reason": "The loop recognizes one suspension reason while omitting the pending choice created by the current effect."
+    },
+    "diag_05": {
+      "expectedSubsystem": "transaction_rollback",
+      "expectedCheck": "d",
+      "nearestFunction": "Game::apply_action_transaction",
+      "reason": "The supplied mutation removes rollback around a transition that can fail after intermediate mutations."
+    },
+    "diag_06": {
+      "expectedSubsystem": "checkpoint_journal",
+      "expectedCheck": "b",
+      "nearestFunction": "create_game_checkpoint request capture; resume_game_checkpoint reconstructs and detects the loss",
+      "reason": "Accepted-state equality does not imply session-history equality. The omitted rejected attempt explains the observed mismatch."
+    },
+    "diag_07": {
+      "expectedSubsystem": "test_expectation",
+      "expectedCheck": "c",
+      "nearestFunction": "synthetic counterfactual assertion; finish_counterfactual follows the stated contract",
+      "reason": "The observed null is the correct result under the supplied search-report contract."
+    },
+    "diag_08": {
+      "expectedSubsystem": "experiment_binding",
+      "expectedCheck": "a",
+      "nearestFunction": "experiment manifest/policy assembly; PolicySnapshot::validate_binding correctly detects mismatch",
+      "reason": "The harness combined a new deck with an old deck-bound policy."
+    },
+    "diag_09": {
+      "expectedSubsystem": "insufficient_evidence",
+      "expectedCheck": "d",
+      "nearestFunction": "unknown; gather evidence at the action-selection boundary",
+      "reason": "The symptom alone has several plausible causes. This is an abstention control for the more informative first two cases."
+    },
+    "diag_10": {
+      "expectedSubsystem": "legality_enumeration",
+      "expectedCheck": "b",
+      "nearestFunction": "Game::append_main_actions affordability filter",
+      "reason": "Unlike the setup controls, all prerequisites are supplied and instrumentation points to a reversed generic comparison."
+    }
+  }
+}

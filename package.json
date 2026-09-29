@@ -35,7 +35,9 @@
     "game:session": "cargo run --release --locked --quiet -p sorcery-engine --bin session-json",
     "verify:rust": "cargo fmt --all -- --check && cargo check --workspace --all-targets --all-features --locked -j 2 && cargo clippy --workspace --all-targets --all-features --locked -j 2 -- -D warnings && cargo test --workspace --all-features --locked -j 2 -- --test-threads=2",
     "verify:all": "pnpm verify:rust && pnpm verify",
-    "game:experiment-private": "node src/commands/create-private-experiment.ts"
+    "game:experiment-private": "node src/commands/create-private-experiment.ts",
+    "agents:review-example": "node scripts/jev-semantic-review.mjs --self-check",
+    "agents:diagnose-example": "node scripts/jev-semantic-review.mjs --self-check --diagnose"
   },
   "dependencies": {
     "zod": "4.4.3"

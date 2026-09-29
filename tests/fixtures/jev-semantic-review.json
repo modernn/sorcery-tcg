@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Project-owned, independently authored synthetic software scenarios. No official card text, rules snapshots, deck lists, or private gameplay records.",
+  "labelStatus": "Author-explained expectations independently reviewed by a second agent. Human review and a held-out benchmark remain pending.",
+  "cases": [
+    {
+      "id": "ordering-batched-wrong",
+      "family": "ordered-effects",
+      "contract": "In this invented engine, a sequence applies each effect to completion before starting the next. A marker is created by step one and removed by step two only if already present.",
+      "proposal": "Collect both effects, inspect the initial state for their targets, then execute the collected mutations together. Initially the marker does not exist; the removal is omitted.",
+      "evidence": "The final marker remains present. The contract requires it to be absent.",
+      "expected": "mismatch",
+      "reason": "Resolving conditions against the initial state changes the specified sequential outcome."
+    },
+    {
+      "id": "ordering-inline-correct",
+      "family": "ordered-effects",
+      "contract": "In this invented engine, a sequence completes each effect before starting the next. Step one creates a marker; step two removes an existing marker.",
+      "proposal": "Apply creation, settle it, then evaluate and apply removal against the updated state.",
+      "evidence": "A scenario asserts both ordered event entries and absence of the marker after the sequence.",
+      "expected": "consistent",
+      "reason": "Both implementation order and described assertion match the limited synthetic contract."
+    },
+    {
+      "id": "expiry-next-owner-turn-wrong",
+      "family": "control-and-expiry",
+      "contract": "An invented temporary modifier expires at the end of the next turn of the controller captured when the modifier was created. Ownership can differ from control.",
+      "proposal": "Store the object's owner as the expiry seat and remove the modifier at that owner's next turn end.",
+      "evidence": "The modifier was created while North controlled a South-owned object. South's next turn occurs first.",
+      "expected": "mismatch",
+      "reason": "Owner identity is substituted for the controller identity fixed by the contract."
+    },
+    {
+      "id": "expiry-captured-controller-correct",
+      "family": "control-and-expiry",
+      "contract": "An invented modifier expires at the end of the next turn of the controller captured when it was created; later control changes do not alter that seat.",
+      "proposal": "Capture the controller seat and the target future turn serial at creation. Expire only on that seat and serial's end event.",
+      "evidence": "A scenario changes control before expiry and asserts persistence through the other seat's turn, followed by expiry at the recorded turn end.",
+      "expected": "consistent",
+      "reason": "The stored trigger identity and described test cover the stated control-change edge case."
+    },
+    {
+      "id": "expiry-insufficient-assertions",
+      "family": "control-and-expiry",
+      "contract": "An invented modifier must survive the current turn and expire at the end of its source controller's next turn.",
+      "proposal": "Use the shared duration helper.",
+      "evidence": "Only a test name, temporary_modifier_expires, is supplied. Neither helper behavior nor assertions are shown.",
+      "expected": "insufficient_evidence",
+      "reason": "A helper name and test title do not establish which turn actually triggers expiry."
+    },
+    {
+      "id": "unsupported-silent-success",
+      "family": "unsupported-mechanics",
+      "contract": "Exercising an unsupported operation invalidates ranked results and records an unsupported diagnostic.",
+      "proposal": "The default dispatch arm returns successful completion without changing state or recording a diagnostic.",
+      "evidence": "The unsupported operation reaches that arm, and the run remains ranked-eligible.",
+      "expected": "mismatch",
+      "reason": "Silently accepting the exercised operation violates the explicit fail-closed contract."
+    },
+    {
+      "id": "unsupported-fails-closed",
+      "family": "unsupported-mechanics",
+      "contract": "Exercising an unsupported operation invalidates ranked results and records an unsupported diagnostic.",
+      "proposal": "Dispatch records the operation identifier as unsupported and clears ranked eligibility.",
+      "evidence": "A direct scenario executes the unsupported operation and asserts both the diagnostic and rankedEligible=false.",
+      "expected": "consistent",
+      "reason": "The described implementation and assertions implement both required effects."
+    },
+    {
+      "id": "pause-drains-later-step",
+      "family": "settlement-pause",
+      "contract": "When a sequential effect asks the acting player to choose, settlement pauses. Later effects may begin only after an issued choice is accepted.",
+      "proposal": "Queue the choice, execute the remaining effects immediately, and consume the choice on the next request.",
+      "evidence": "A later damage event is present before any choice action is submitted.",
+      "expected": "mismatch",
+      "reason": "The continuation executes across the explicitly required pause."
+    },
+    {
+      "id": "pause-resumes-cursor",
+      "family": "settlement-pause",
+      "contract": "When a sequence requires a player choice, settlement pauses until an engine-issued choice is accepted, then resumes from the next unfinished effect exactly once.",
+      "proposal": "Save a continuation cursor, expose issued choices, and resume settlement after accepting one of those choices.",
+      "evidence": "The scenario asserts no later events before the choice, exactly one later event afterward, and rejection of resubmitting the old choice.",
+      "expected": "consistent",
+      "reason": "The supplied evidence covers pause, continuation, and duplicate-choice rejection."
+    },
+    {
+      "id": "card-name-special-case",
+      "family": "shared-primitive",
+      "contract": "Runtime effects are selected by generic facts and shared helpers; display names must not determine behavior.",
+      "proposal": "If object.display_name equals the invented name Amber Widget, apply the temporary bonus; otherwise skip it even if the same generic facts are present.",
+      "evidence": "The name comparison is in the runtime effect dispatcher.",
+      "expected": "mismatch",
+      "reason": "The behavior depends directly on a display name, contradicting the specified dispatch boundary."
+    },
+    {
+      "id": "shared-primitive-renamed-objects",
+      "family": "shared-primitive",
+      "contract": "Runtime behavior is selected from generic facts, without special cases for display names.",
+      "proposal": "Bind a generic temporary_bonus fact to a shared helper. Both invented objects use that fact despite different names.",
+      "evidence": "A scenario changes only the display name and gets the same normalized state and event result.",
+      "expected": "consistent",
+      "reason": "The generic binding and renamed-object check support the narrow name-independent behavior claim."
+    },
+    {
+      "id": "replay-means-rules-correct-overclaim",
+      "family": "evidence-overclaim",
+      "contract": "Replay identity proves reproduction of the recorded transitions. Rule correctness requires a separate expected-outcome scenario.",
+      "proposal": "Declare the new effect rule-correct because replay bytes match.",
+      "evidence": "The sole check runs the same implemented transition twice and compares event bytes; no independent expected outcome is supplied.",
+      "expected": "mismatch",
+      "reason": "Reproducing an implementation does not establish the independent correctness requirement."
+    },
+    {
+      "id": "replay-claim-properly-bounded",
+      "family": "evidence-overclaim",
+      "contract": "Replay identity supports reproducibility, while a separate expected-outcome scenario is needed for a rule-correctness claim.",
+      "proposal": "Report that reproduction passed and rule correctness remains unverified.",
+      "evidence": "The recorded transition is replayed with identical event bytes; no expected-outcome scenario exists yet.",
+      "expected": "consistent",
+      "reason": "The completion statement is limited to the property actually checked."
+    },
+    {
+      "id": "search-horizon-win-overclaim",
+      "family": "search-evidence",
+      "contract": "An unfinished checkpoint branch has unknown outcome. A favorable heuristic score is not a terminal win.",
+      "proposal": "Count the positive-scored horizon branch as a victory in the summary.",
+      "evidence": "The branch stopped at its action limit and contains no terminal winner event.",
+      "expected": "mismatch",
+      "reason": "The summary promotes nonterminal heuristic evidence to a result that was never observed."
+    },
+    {
+      "id": "search-public-view-uncertain",
+      "family": "search-evidence",
+      "contract": "A fair-play choice must use only information visible to the acting seat, never the opponent's hidden hand or draw order.",
+      "proposal": "Choose an action using a serialized observation.",
+      "evidence": "The serialization function and its field list are not supplied; it may be either a seat view or a full checkpoint.",
+      "expected": "insufficient_evidence",
+      "reason": "The observation boundary cannot be verified from its name alone."
+    },
+    {
+      "id": "source-review-not-supplied",
+      "family": "evidence-overclaim",
+      "contract": "This fixture intentionally gives no authoritative game rule. Only implementation consistency can be inspected; official game-rule correctness requires separate local authority review.",
+      "proposal": "An effect settles before the next effect. Determine whether that timing matches the official game's rule.",
+      "evidence": "Only generic implementation behavior is provided. No official source or independent rule interpretation is part of the fixture.",
+      "expected": "insufficient_evidence",
+      "reason": "The requested real-game correctness conclusion is outside the evidence supplied, even if implementation behavior is clear."
+    }
+  ]
+}
