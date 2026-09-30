@@ -30,6 +30,8 @@ fn fixture_with_site_entry_usage(usage: Option<&str>) -> Game {
         }
         manifest["cards"]["north-site-1"]["elements"] = json!(["air"]);
         manifest["cards"]["north-site-1"]["flyToNearbyVoidOncePerTurnAtAirThreshold"] = json!(3);
+        manifest["cards"]["north-site-2"]["siteEntryEffect"] =
+            json!("grantStealthToEnteringMinion");
         manifest["cards"]["north-spell-49"] = json!({
             "attack": 1,
             "cardType": "minion",
@@ -64,8 +66,12 @@ fn fixture() -> Game {
 }
 
 fn site(game: &Game, label: &str) -> SitePosition {
+    site_from_card(game, "north-site-1", label)
+}
+
+fn site_from_card(game: &Game, name: &str, label: &str) -> SitePosition {
     let mut card = CardInstance {
-        card_id: card_id(game, "north-site-1"),
+        card_id: card_id(game, name),
         instance_id: id(label),
         owner: Seat::North,
         realm_entry: 0,
@@ -400,6 +406,246 @@ fn paid_and_simultaneous_token_summons_apply_after_each_successful_placement() {
             .filter(|(kind, _)| kind == "site-entry-triggered")
             .count(),
         2
+    );
+}
+
+#[test]
+fn first_entry_provider_captures_all_members_of_one_simultaneous_token_group() {
+    let mut game = fixture_with_site_entry_usage(Some("firstEntry"));
+    let cell = Cell::parse("C3").unwrap();
+    game.position.sites[cell.index()] = Some(site(&game, "first-entry-group-site"));
+    let provider =
+        RealmReference::from_card(&game.position.sites[cell.index()].as_ref().unwrap().card);
+    let tokens = ["first-group-a", "first-group-b"]
+        .into_iter()
+        .map(|label| {
+            let token = minion(&game, "north-spell-49", label, "C3", None);
+            let source_instance_id = token.card.instance_id.clone();
+            TokenEntryContinuation {
+                seat: Seat::North,
+                token,
+                source_instance_id,
+                mana_paid: 0,
+            }
+        })
+        .collect::<Vec<_>>();
+    let entrants = tokens
+        .iter()
+        .map(|entry| entry.token.card.instance_id.clone())
+        .collect::<Vec<_>>();
+
+    let mut events = Vec::new();
+    game.finish_token_entries(tokens, &mut OutcomeLog::Record(&mut events))
+        .unwrap();
+
+    assert!(entrants.iter().all(|instance_id| {
+        game.position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *instance_id)
+            .is_some_and(|unit| unit.stealthed)
+    }));
+    assert_eq!(game.position.site_entry_uses.len(), 1);
+    assert_eq!(game.position.site_entry_uses[0], provider);
+    let occurrences = events
+        .iter()
+        .filter(|(kind, _)| kind == "site-entry-triggered")
+        .map(|(_, payload)| {
+            (
+                payload["sourceInstanceId"].as_str().unwrap().to_owned(),
+                payload["targetInstanceId"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(occurrences.len(), 2);
+    assert!(occurrences.iter().all(|(source, entrant)| {
+        source == provider.instance_id().as_str()
+            && entrants
+                .iter()
+                .any(|instance_id| instance_id.as_str() == entrant)
+    }));
+}
+
+#[test]
+fn simultaneous_entry_group_has_recorded_and_ignored_state_parity() {
+    let mut ignored = fixture_with_site_entry_usage(Some("firstEntry"));
+    let cell = Cell::parse("C3").unwrap();
+    ignored.position.sites[cell.index()] = Some(site(&ignored, "parity-site"));
+    let mut recorded = ignored.clone();
+    let entries = |game: &Game| {
+        ["parity-a", "parity-b"]
+            .into_iter()
+            .map(|label| {
+                let token = minion(game, "north-spell-49", label, "C3", None);
+                let source_instance_id = token.card.instance_id.clone();
+                TokenEntryContinuation {
+                    seat: Seat::North,
+                    token,
+                    source_instance_id,
+                    mana_paid: 0,
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let mut events = Vec::new();
+    ignored
+        .finish_token_entries(entries(&ignored), &mut OutcomeLog::Ignore)
+        .unwrap();
+    recorded
+        .finish_token_entries(entries(&recorded), &mut OutcomeLog::Record(&mut events))
+        .unwrap();
+
+    assert_eq!(ignored.position, recorded.position);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|(kind, _)| kind == "site-entry-triggered")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn first_entry_group_is_seat_and_enumeration_independent_and_skips_used_providers() {
+    for seat in [Seat::North, Seat::South] {
+        for preconsumed in [false, true] {
+            for reversed in [false, true] {
+                let mut game = fixture_with_site_entry_usage(Some("firstEntry"));
+                let cell = Cell::parse("C3").unwrap();
+                game.position.sites[cell.index()] = Some(site(&game, "group-seat-site"));
+                let provider = RealmReference::from_card(
+                    &game.position.sites[cell.index()].as_ref().unwrap().card,
+                );
+                if preconsumed {
+                    game.position.site_entry_uses.push(provider.clone());
+                }
+                let labels = if reversed {
+                    ["token-a", "token-b"]
+                } else {
+                    ["token-b", "token-a"]
+                };
+                let tokens = labels
+                    .into_iter()
+                    .map(|label| {
+                        let mut token = minion(&game, "north-spell-49", label, "C3", None);
+                        token.controller = seat;
+                        token.card.owner = seat;
+                        let source_instance_id = token.card.instance_id.clone();
+                        TokenEntryContinuation {
+                            seat,
+                            token,
+                            source_instance_id,
+                            mana_paid: 0,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let entrant_ids = tokens
+                    .iter()
+                    .map(|entry| entry.token.card.instance_id.clone())
+                    .collect::<Vec<_>>();
+
+                let mut events = Vec::new();
+                game.finish_token_entries(tokens, &mut OutcomeLog::Record(&mut events))
+                    .unwrap();
+
+                let stealthed = entrant_ids
+                    .iter()
+                    .filter(|id| {
+                        game.position
+                            .units
+                            .iter()
+                            .find(|unit| unit.card.instance_id == **id)
+                            .is_some_and(|unit| unit.stealthed)
+                    })
+                    .count();
+                let expected = if preconsumed { 0 } else { 2 };
+                assert_eq!(stealthed, expected, "seat={seat:?} reversed={reversed}");
+                assert_eq!(
+                    events
+                        .iter()
+                        .filter(|(kind, _)| kind == "site-entry-triggered")
+                        .count(),
+                    expected
+                );
+                assert_eq!(game.position.site_entry_uses, [provider]);
+            }
+        }
+    }
+}
+
+#[test]
+fn overlapping_footprint_collects_fresh_used_and_repeatable_providers_once() {
+    let mut game = fixture_with_site_entry_usage(Some("firstEntry"));
+    let footprint = ["B2", "C2", "B3", "C3"].map(|cell| Cell::parse(cell).unwrap());
+    let fresh_cell = Cell::parse("B2").unwrap();
+    let used_cell = Cell::parse("C2").unwrap();
+    let repeatable_cell = Cell::parse("B3").unwrap();
+    for (cell, card, label) in [
+        (fresh_cell, "north-site-1", "fresh-provider"),
+        (used_cell, "north-site-1", "used-provider"),
+        (repeatable_cell, "north-site-2", "repeatable-provider"),
+    ] {
+        game.position.sites[cell.index()] = Some(site_from_card(&game, card, label));
+    }
+    let used_provider = RealmReference::from_card(
+        &game.position.sites[used_cell.index()]
+            .as_ref()
+            .unwrap()
+            .card,
+    );
+    game.position.site_entry_uses.push(used_provider.clone());
+    let entrant = minion(
+        &game,
+        "north-spell-49",
+        "footprint-entrant",
+        "B2",
+        Some(footprint),
+    );
+    let entrant_id = entrant.card.instance_id.clone();
+    let source_instance_id = entrant_id.clone();
+
+    let mut events = Vec::new();
+    game.finish_token_entries(
+        vec![TokenEntryContinuation {
+            seat: Seat::North,
+            token: entrant,
+            source_instance_id,
+            mana_paid: 0,
+        }],
+        &mut OutcomeLog::Record(&mut events),
+    )
+    .unwrap();
+
+    let triggers = events
+        .iter()
+        .filter(|(kind, _)| kind == "site-entry-triggered")
+        .map(|(_, payload)| payload["sourceInstanceId"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    let fresh_provider = RealmReference::from_card(
+        &game.position.sites[fresh_cell.index()]
+            .as_ref()
+            .unwrap()
+            .card,
+    );
+    let repeatable_provider = RealmReference::from_card(
+        &game.position.sites[repeatable_cell.index()]
+            .as_ref()
+            .unwrap()
+            .card,
+    );
+    assert_eq!(triggers.len(), 2);
+    assert!(triggers.contains(&fresh_provider.instance_id().to_string()));
+    assert!(triggers.contains(&repeatable_provider.instance_id().to_string()));
+    assert!(!triggers.contains(&used_provider.instance_id().to_string()));
+    assert_eq!(
+        events
+            .iter()
+            .filter(|(kind, payload)| {
+                kind == "minion-stealthed" && payload["instanceId"] == entrant_id.as_str()
+            })
+            .count(),
+        1
     );
 }
 

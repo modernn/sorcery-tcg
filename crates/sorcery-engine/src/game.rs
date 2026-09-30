@@ -6386,52 +6386,87 @@ impl Game {
         old_sites: &[RealmReference],
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        self.apply_minion_site_entry_effect_group(
+            std::iter::once((instance_id, old_sites)),
+            outcomes,
+        )
+    }
+
+    fn apply_minion_site_entry_effect_group<'a>(
+        &mut self,
+        entrants: impl IntoIterator<Item = (&'a IdentityHash, &'a [RealmReference])>,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
         if !self.rules.has_site_entry_effects {
             return Ok(());
         }
-        let unit = self
-            .position
-            .units
-            .iter()
-            .find(|unit| unit.card.instance_id == *instance_id)
-            .ok_or(GameError::IllegalAction)?;
-        let seat = unit.controller;
-        let cells = Self::unit_occupied_cells(unit).to_vec();
-        let new_sites = self.minion_occupied_site_incarnations(instance_id)?;
-        let transition = SiteTransition::between(old_sites, &new_sites);
         let mut entries = Vec::new();
-        for cell in cells {
-            let Some(site) = &self.position.sites[cell.index()] else {
-                continue;
-            };
-            let reference = RealmReference::from_card(&site.card);
-            if !transition.entered.contains(&reference)
-                || entries.iter().any(
-                    |(_, prior, _, _): &(Cell, RealmReference, SiteEntryEffect, SiteEntryUsage)| {
-                        *prior == reference
-                    },
-                )
-                || self.site_abilities_lost(cell)
-            {
-                continue;
-            }
-            let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
-            else {
-                return Err(GameError::IllegalAction);
-            };
-            if facts.site_entry_usage == SiteEntryUsage::FirstEntry
-                && self.position.site_entry_uses.contains(&reference)
-            {
-                continue;
-            }
-            if let Some(effect) = facts.site_entry_effect {
-                entries.push((cell, reference, effect, facts.site_entry_usage));
+        for (instance_id, old_sites) in entrants {
+            let unit = self
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == *instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            let seat = unit.controller;
+            let cells = Self::unit_occupied_cells(unit).to_vec();
+            let new_sites = self.minion_occupied_site_incarnations(instance_id)?;
+            let transition = SiteTransition::between(old_sites, &new_sites);
+            for cell in cells {
+                let Some(site) = &self.position.sites[cell.index()] else {
+                    continue;
+                };
+                let reference = RealmReference::from_card(&site.card);
+                if !transition.entered.contains(&reference)
+                    || entries.iter().any(
+                        |(_, prior, _, _, prior_instance, _): &(
+                            Cell,
+                            RealmReference,
+                            SiteEntryEffect,
+                            SiteEntryUsage,
+                            IdentityHash,
+                            Seat,
+                        )| {
+                            *prior == reference && prior_instance == instance_id
+                        },
+                    )
+                    || self.site_abilities_lost(cell)
+                {
+                    continue;
+                }
+                let CardFacts::Site(facts) =
+                    &self.rules.cards[usize::from(site.card.card_id.0)].facts
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                if facts.site_entry_usage == SiteEntryUsage::FirstEntry
+                    && self.position.site_entry_uses.contains(&reference)
+                {
+                    continue;
+                }
+                if let Some(effect) = facts.site_entry_effect {
+                    entries.push((
+                        cell,
+                        reference,
+                        effect,
+                        facts.site_entry_usage,
+                        (*instance_id).clone(),
+                        seat,
+                    ));
+                }
             }
         }
-        for (cell, source, effect, usage) in entries {
-            if usage == SiteEntryUsage::FirstEntry {
+
+        // Eligibility above observes the provider-use state at group start. Consume only after
+        // every successful entrant has contributed its occurrences.
+        for (_, source, _, usage, _, _) in &entries {
+            if *usage == SiteEntryUsage::FirstEntry
+                && !self.position.site_entry_uses.contains(source)
+            {
                 self.position.site_entry_uses.push(source.clone());
             }
+        }
+        for (cell, source, effect, _, instance_id, seat) in entries {
             outcomes.push("site-entry-triggered", || {
                 json!({
                     "cell": cell,
@@ -6441,7 +6476,7 @@ impl Game {
             });
             match effect {
                 SiteEntryEffect::GrantStealthToEnteringMinion => self.apply_grant_stealth_minion(
-                    instance_id,
+                    &instance_id,
                     seat,
                     source.instance_id(),
                     outcomes,
@@ -6456,7 +6491,20 @@ impl Game {
         instance_id: &IdentityHash,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
-        self.apply_minion_site_entry_effects(instance_id, &[], outcomes)
+        self.apply_summoned_minion_site_entry_effect_group(std::iter::once(instance_id), outcomes)
+    }
+
+    fn apply_summoned_minion_site_entry_effect_group<'a>(
+        &mut self,
+        instance_ids: impl IntoIterator<Item = &'a IdentityHash>,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        self.apply_minion_site_entry_effect_group(
+            instance_ids
+                .into_iter()
+                .map(|instance_id| (instance_id, &[][..])),
+            outcomes,
+        )
     }
 
     fn translate_carried_artifact_cells(

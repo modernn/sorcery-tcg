@@ -28,6 +28,26 @@ fn manifest(relation: &str) -> String {
         }
     })
 }
+
+fn first_entry_manifest() -> String {
+    selfplay_manifest_with(8312, |m| {
+        let thresholds = json!({"earth":0,"fire":0,"water":0,"air":0});
+        m["cards"] = json!({
+            "avatar": {"cardType":"avatar","attack":1,"defense":1,"life":20,"drawSpell":false},
+            "land": {"cardType":"site","elements":["earth"],"siteEntryEffect":"grantStealthToEnteringMinion","siteEntryUsage":"firstEntry"},
+            "token": {"cardType":"minion","attack":0,"defense":0,"manaCost":null,"thresholds":thresholds,"token":true},
+            "spell": {"cardType":"magic","manaCost":0,"thresholds":thresholds,"effectProgram":{"effects":[
+                {"op":"choose-location","relation":"anywhere"},
+                {"op":"summon-token","token":"token","count":2,"destination":"chosen-location"}
+            ]}}
+        });
+        for seat in ["north", "south"] {
+            m["decks"][seat] = json!({
+                "avatar":"avatar","atlas":vec!["land";12],"spellbook":vec!["spell";8]
+            });
+        }
+    })
+}
 fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
     let action = session
         .legal_actions()
@@ -71,6 +91,10 @@ fn assert_checkpoint_and_replay(session: &Session) {
         restored.replay_value().expect("restored replay"),
         session.replay_value().expect("replay")
     );
+    assert_eq!(
+        restored.legal_actions().expect("restored legal actions"),
+        session.legal_actions().expect("legal actions")
+    );
 
     let action_ids = session
         .transcript()
@@ -82,7 +106,43 @@ fn assert_checkpoint_and_replay(session: &Session) {
         replayed.replay_value().expect("replayed state"),
         session.replay_value().expect("state")
     );
+    assert_eq!(
+        replayed.legal_actions().expect("replayed legal actions"),
+        session.legal_actions().expect("legal actions")
+    );
     assert_eq!(replayed.transcript(), session.transcript());
+}
+
+fn resume_pending(session: &Session) -> Session {
+    let checkpoint = create_game_checkpoint(session).expect("pending checkpoint");
+    let encoded = serialize_game_checkpoint(&checkpoint).expect("serialized pending checkpoint");
+    resume_game_checkpoint(&parse_game_checkpoint(&encoded).expect("parsed pending checkpoint"))
+        .expect("restored pending checkpoint")
+}
+
+fn choose_c4_after_checkpoint(session: &mut Session) -> Receipt {
+    assert_checkpoint_and_replay(session);
+    let mut restored = resume_pending(session);
+    assert_eq!(
+        restored.legal_actions().expect("resumed pending choices"),
+        session.legal_actions().expect("original pending choices")
+    );
+    let choose_c4 = |branch: &mut Session| {
+        accept_where(branch, |d| {
+            d["kind"] == "choose-ability-location"
+                && d["location"] == json!({"cell":"C4","region":"surface"})
+        })
+    };
+    let (_, receipt) = choose_c4(session);
+    let (_, resumed_receipt) = choose_c4(&mut restored);
+    assert_eq!(receipt, resumed_receipt);
+    assert_eq!(session.transcript(), restored.transcript());
+    assert_eq!(
+        session.legal_actions().unwrap(),
+        restored.legal_actions().unwrap()
+    );
+    assert_checkpoint_and_replay(session);
+    receipt
 }
 
 fn ready(seat: &str, relation: &str) -> Session {
@@ -105,6 +165,27 @@ fn ready(seat: &str, relation: &str) -> Session {
             d["kind"] == "draw" && d["zone"] == "atlas"
         });
     }
+    session
+}
+
+fn ready_first_entry_north() -> Session {
+    let mut session = Session::new(&first_entry_manifest()).expect("first-entry session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |d| {
+        d["kind"] == "play-site" && d["cell"] == "C4"
+    });
+    accept_where(&mut session, |d| d["kind"] == "end-turn");
+    accept_where(&mut session, |d| {
+        d["kind"] == "draw" && d["zone"] == "atlas"
+    });
+    accept_where(&mut session, |d| {
+        d["kind"] == "play-site" && d["cell"] == "C1"
+    });
+    accept_where(&mut session, |d| d["kind"] == "end-turn");
+    accept_where(&mut session, |d| {
+        d["kind"] == "draw" && d["zone"] == "atlas"
+    });
     session
 }
 
@@ -188,4 +269,79 @@ fn nearby_location_choice_uses_source_geometry_and_region() {
     );
     accept_where(&mut session, |d| d["kind"] == "choose-ability-location");
     assert_checkpoint_and_replay(&session);
+}
+
+#[test]
+fn simultaneous_first_entry_tokens_checkpoint_resume_and_replay_as_one_group() {
+    let mut session = ready_first_entry_north();
+    let manifest = session.manifest_json().to_owned();
+
+    let (_, first_cast) = accept_where(&mut session, |d| d["kind"] == "cast-magic");
+    assert!(
+        !first_cast
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-summoned")
+    );
+    let first_group = choose_c4_after_checkpoint(&mut session);
+    let first_state = state(&session);
+    let first_units = first_state["realm"]["units"].as_array().unwrap();
+    assert_eq!(first_units.len(), 2);
+    assert!(first_units.iter().all(|unit| unit["stealthed"] == true));
+    assert_eq!(
+        first_group
+            .events
+            .iter()
+            .filter(|event| event.event_type == "site-entry-triggered")
+            .count(),
+        2
+    );
+
+    let (_, second_cast) = accept_where(&mut session, |d| d["kind"] == "cast-magic");
+    assert!(
+        !second_cast
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-summoned")
+    );
+    let second_group = choose_c4_after_checkpoint(&mut session);
+    assert_eq!(
+        second_group
+            .events
+            .iter()
+            .filter(|event| event.event_type == "site-entry-triggered")
+            .count(),
+        0
+    );
+    assert_checkpoint_and_replay(&session);
+    let second_units = state(&session)["realm"]["units"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(second_units.len(), 4);
+    assert!(
+        second_units[..2]
+            .iter()
+            .all(|unit| unit["stealthed"] == true)
+    );
+    assert!(
+        second_units[2..]
+            .iter()
+            .all(|unit| unit["stealthed"] == false)
+    );
+
+    let replayed = Session::replay(
+        &manifest,
+        &session
+            .transcript()
+            .iter()
+            .map(|receipt| receipt.action_id.clone())
+            .collect::<Vec<_>>(),
+    )
+    .expect("complete two-cast replay");
+    assert_eq!(replayed.transcript(), session.transcript());
+    assert_eq!(
+        replayed.replay_value().unwrap(),
+        session.replay_value().unwrap()
+    );
 }

@@ -78,9 +78,10 @@ impl Game {
         for entry in entries {
             self.enter_token_unit(entry, outcomes)?;
         }
-        for (_, instance_id, _) in &sources {
-            self.apply_summoned_minion_site_entry_effects(instance_id, outcomes)?;
-        }
+        self.apply_summoned_minion_site_entry_effect_group(
+            sources.iter().map(|(_, instance_id, _)| instance_id),
+            outcomes,
+        )?;
         self.begin_entry_equipment(sources, true, outcomes)
     }
 
