@@ -20714,6 +20714,10 @@ impl Game {
             return Err(GameError::IllegalAction);
         }
         let effect = facts.effect.clone();
+        let holds_magic_for_destroy_cohort = matches!(
+            effect,
+            MagicEffect::DestroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps
+        );
         let thresholds = facts.thresholds;
         let magic_origin = DamageOrigin::magic(thresholds);
         let mana_paid = u16::try_from(facts.mana_cost).map_err(|_| GameError::IllegalAction)?;
@@ -20868,6 +20872,7 @@ impl Game {
         player.mana -= mana_paid;
         player.air_thresholds_cast_this_turn = next_air_thresholds_cast_this_turn;
         let mut held_magic = if compiled_magic
+            || holds_magic_for_destroy_cohort
             || matches!(
                 effect,
                 MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_)
@@ -22198,16 +22203,6 @@ impl Game {
                     })
                     .collect();
                 artifact_ids.sort_unstable();
-                let has_fresh_unwarded_victim = victims.iter().any(|(instance_id, _, _, _)| {
-                    self.position.units.iter().any(|unit| {
-                        unit.card.instance_id == *instance_id && !unit.death_marked && !unit.warded
-                    })
-                });
-                if has_fresh_unwarded_victim && !artifact_ids.is_empty() {
-                    return Err(GameError::UnsupportedMechanic(
-                        "undead minion and artifact destruction overlap".to_owned(),
-                    ));
-                }
                 let mut dead_minions = Vec::new();
                 for (instance_id, target_seat, owner, card_id) in victims {
                     let unit = self
@@ -22240,6 +22235,16 @@ impl Game {
                         dead_minions.push(instance_id);
                     }
                 }
+                for instance_id in &artifact_ids {
+                    self.destroy_artifact_without_settlement(
+                        instance_id,
+                        card_instance_id,
+                        outcomes,
+                    )?;
+                }
+                dead_minions.extend(self.static_power_death_ids()?);
+                dead_minions.sort_unstable();
+                dead_minions.dedup();
                 if !dead_minions.is_empty() {
                     self.begin_minion_deaths(
                         &dead_minions,
@@ -22248,9 +22253,6 @@ impl Game {
                         self.position.active_seat,
                         outcomes,
                     )?;
-                }
-                for instance_id in &artifact_ids {
-                    self.apply_destroy_target_artifact(instance_id, card_instance_id, outcomes)?;
                 }
             }
             MagicEffect::KillTargetMinion | MagicEffect::KillTargetWoundedMinion => {
@@ -22579,6 +22581,21 @@ impl Game {
             }
             // Chained Magic resolves through its own pending decision instead.
             MagicEffect::DamageChainNearbyUnits => return Err(GameError::IllegalAction),
+        }
+        if holds_magic_for_destroy_cohort {
+            self.continue_resolution(
+                ResolutionContinuation::MagicResolved {
+                    resolution: DeferredMagicResolved {
+                        card_id: compact_card_id,
+                        instance_id: card_instance_id.clone(),
+                        owner,
+                    },
+                    held_card: held_magic.take(),
+                },
+                outcomes,
+            )?;
+            self.position.state_version += 1;
+            return Ok(());
         }
         if !leap_attack && !blink && !raising {
             if let Some(pending) = &mut self.position.pending_deathrites {
@@ -31660,6 +31677,211 @@ mod tests {
         (game, id)
     }
 
+    fn assert_mixed_terminal_rollback_modes(
+        game: &Game,
+        action: &IssuedAction,
+        expected_reason: &str,
+    ) {
+        let before = game.position.clone();
+        let before_hash = game.state_hash().expect("pre-action hash");
+        let before_actions = game.legal_actions().expect("pre-action actions");
+        let north_view = game.public_view(Seat::North).expect("North view");
+        let south_view = game.public_view(Seat::South).expect("South view");
+
+        let mut recorded = game.clone();
+        assert!(matches!(
+            recorded.apply_action_recorded(action),
+            Err(GameError::UnsupportedMechanic(reason)) if reason == expected_reason
+        ));
+        assert_eq!(recorded.position, before);
+        assert_eq!(recorded.state_hash().unwrap(), before_hash);
+        assert_eq!(recorded.legal_actions().unwrap(), before_actions);
+        assert_eq!(recorded.public_view(Seat::North).unwrap(), north_view);
+        assert_eq!(recorded.public_view(Seat::South).unwrap(), south_view);
+
+        let mut ignored = game.clone();
+        assert!(matches!(
+            ignored.apply_action(action),
+            Err(GameError::UnsupportedMechanic(reason)) if reason == expected_reason
+        ));
+        assert_eq!(ignored.position, before);
+        assert_eq!(ignored.state_hash().unwrap(), before_hash);
+        assert_eq!(ignored.legal_actions().unwrap(), before_actions);
+        assert_eq!(ignored.public_view(Seat::North).unwrap(), north_view);
+        assert_eq!(ignored.public_view(Seat::South).unwrap(), south_view);
+
+        let owned_root = game.clone();
+        assert!(matches!(
+            game.clone().apply_action_owned(action),
+            Err(GameError::UnsupportedMechanic(reason)) if reason == expected_reason
+        ));
+        assert_eq!(owned_root.position, before);
+        assert_eq!(owned_root.state_hash().unwrap(), before_hash);
+        assert_eq!(owned_root.legal_actions().unwrap(), before_actions);
+        assert_eq!(owned_root.public_view(Seat::North).unwrap(), north_view);
+        assert_eq!(owned_root.public_view(Seat::South).unwrap(), south_view);
+    }
+
+    #[allow(clippy::too_many_lines)] // Keep the complete scenario and its transaction comparisons together.
+    fn mixed_unravel_terminal_rollback_fixture() -> Game {
+        let mut game = Game::from_manifest_json(
+            &crate::synthetic::synthetic_demo_manifest_json(7821).expect("synthetic manifest"),
+        )
+        .expect("mixed Unravel rollback fixture");
+        let cell = Cell::parse("C4").expect("target site");
+        let north_index = seat_index(Seat::North);
+        let south_index = seat_index(Seat::South);
+        let site_card = game.position.players[north_index].hand_atlas.remove(0);
+        game.position.sites[cell.index()] = Some(SitePosition {
+            card: site_card,
+            controller: Seat::North,
+            last_flight_turn: None,
+            warded: false,
+        });
+
+        let mut magic_card = game.position.players[north_index].hand_spellbook.remove(0);
+        let magic_instance_id = magic_card.instance_id.clone();
+        let magic_id = magic_card.card_id;
+        Arc::get_mut(&mut game.rules)
+            .expect("unique fixture rules")
+            .cards[usize::from(magic_id.0)]
+        .facts = CardFacts::Magic(MagicFacts {
+            discard_card_as_additional_cost: false,
+            effect: MagicEffect::DestroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps,
+            mana_cost: 1,
+            pay_life_as_additional_cost: None,
+            thresholds: Thresholds::default(),
+        });
+        magic_card.card_id = magic_id;
+        game.position.players[north_index]
+            .hand_spellbook
+            .push(magic_card);
+
+        let artifact_card = game.position.players[north_index].hand_spellbook.remove(0);
+        let artifact_id = artifact_card.instance_id.clone();
+        Arc::get_mut(&mut game.rules)
+            .expect("unique fixture rules")
+            .cards[usize::from(artifact_card.card_id.0)]
+        .facts = CardFacts::Artifact(ArtifactFacts {
+            bearer_power_bonus: None,
+            bearer_unit_strike: None,
+            cannot_be_carried: false,
+            elements: None,
+            effect: ArtifactEffect::PassiveModifiers,
+            mana_cost: Some(0),
+            token: false,
+            nearby_strikes_against_units_deal_double_damage: false,
+            rarity: None,
+            subtypes: None,
+            thresholds: Thresholds::default(),
+        });
+        game.position.artifacts.push(ArtifactPosition {
+            card: artifact_card,
+            placement: ArtifactPlacement::Loose {
+                location: cell,
+                region: Region::Surface,
+            },
+        });
+
+        let token_card_id = "north-spell-27";
+        let token_definition_index = game
+            .rules
+            .cards
+            .binary_search_by(|definition| definition.id.as_str().cmp(token_card_id))
+            .expect("synthetic token definition");
+        Arc::get_mut(&mut game.rules)
+            .expect("unique fixture rules")
+            .cards[token_definition_index]
+            .facts = CardFacts::Artifact(ArtifactFacts {
+            bearer_power_bonus: None,
+            bearer_unit_strike: None,
+            cannot_be_carried: false,
+            elements: None,
+            effect: ArtifactEffect::PassiveModifiers,
+            mana_cost: None,
+            token: true,
+            nearby_strikes_against_units_deal_double_damage: false,
+            rarity: None,
+            subtypes: None,
+            thresholds: Thresholds::default(),
+        });
+        let mut token_artifact = game
+            .create_token_card(
+                Seat::North,
+                token_card_id,
+                &magic_instance_id,
+                cell,
+                0,
+                game.position.state_version,
+            )
+            .expect("valid token Artifact identity");
+        token_artifact
+            .enter_realm()
+            .expect("token Artifact enters the realm");
+        game.position.artifacts.push(ArtifactPosition {
+            card: token_artifact,
+            placement: ArtifactPlacement::Loose {
+                location: cell,
+                region: Region::Surface,
+            },
+        });
+
+        let deathrite_card = game.position.players[south_index].hand_spellbook.remove(0);
+        let deathrite_id = deathrite_card.card_id;
+        let CardFacts::Minion(facts) = &mut Arc::get_mut(&mut game.rules)
+            .expect("unique fixture rules")
+            .cards[usize::from(deathrite_id.0)]
+        .facts
+        else {
+            panic!("synthetic source is a minion")
+        };
+        facts.undead = true;
+        facts.deathrite_damage_each_unit_here = Some(1);
+        facts.deathrite_heal = Some(1);
+        facts.defense = 3;
+        assert!(!facts.deathrite_lose_life_per_nearby_site_controlled);
+        assert!(!facts.deathrite_draw_site);
+        assert!(!facts.deathrite_draw_spells);
+        assert!(!facts.deathrite_mill_sites);
+        assert!(!facts.deathrite_mill_spells);
+        assert_eq!(facts.deathrite_heal, Some(1));
+        game.position.units.push(
+            SummonPlacement {
+                card: deathrite_card,
+                controller: Seat::South,
+                lance_count: 0,
+                location: cell,
+                occupied_cells: None,
+                region: Region::Surface,
+                stealthed: false,
+                warded: false,
+            }
+            .into_unit(),
+        );
+
+        let turn_number = game.position.turn_number;
+        for seat in [Seat::North, Seat::South] {
+            let player = &mut game.position.players[seat_index(seat)];
+            player.avatar.location = cell;
+            player.avatar.life = 0;
+            player.avatar.death_door_turn = Some(turn_number);
+            player.mulligan_complete = true;
+        }
+        game.position.turn_number += 1;
+        game.position.players[north_index].domain_established = true;
+        game.position.players[north_index].mana = 2;
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        assert!(
+            game.position
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.card.instance_id == artifact_id)
+        );
+        game
+    }
+
     #[test]
     fn avatar_reduction_precedes_death_blow_and_protected_turn_checks() {
         let (mut game, _) = damage_transaction_fixture(None);
@@ -32035,6 +32257,340 @@ mod tests {
         assert_eq!(
             game.legal_actions().expect("recorded restored actions"),
             actions
+        );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)] // Keep the complete scenario and its transaction comparisons together.
+    fn mixed_unravel_terminal_deathrite_failure_rolls_back_every_execution_mode() {
+        let game = mixed_unravel_terminal_rollback_fixture();
+        let before = game.position.clone();
+        let before_actions = game.legal_actions().expect("pre-action actions");
+        let magic_id = game.position.players[seat_index(Seat::North)]
+            .hand_spellbook
+            .iter()
+            .find(|card| {
+                matches!(
+                    game.rules.cards[usize::from(card.card_id.0)].facts,
+                    CardFacts::Magic(MagicFacts {
+                        effect:
+                            MagicEffect::DestroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps,
+                        ..
+                    })
+                )
+            })
+            .expect("Unravel in North hand")
+            .instance_id
+            .clone();
+        let artifact_id = game.position.artifacts[0].card.instance_id.clone();
+        let token_id = game
+            .position
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.card.source == CardSource::Token)
+            .expect("token Artifact in fixture")
+            .card
+            .instance_id
+            .clone();
+        let undead_id = game.position.units[0].card.instance_id.clone();
+        let action = before_actions
+            .iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::CastMagic {
+                        target_location: Some(Location { cell, region: Region::Surface }),
+                        ..
+                    } if *cell == Cell::parse("C4").expect("C4")
+                )
+            })
+            .expect("issued mixed Unravel at C4")
+            .clone();
+        let expected_reason = "mixed Deathrite clause at terminal damage";
+
+        let mut diagnostic = game.clone();
+        let mut diagnostic_events = Vec::new();
+        let mut diagnostic_draws = Vec::new();
+        assert!(matches!(
+            diagnostic.apply_action_with_log(
+                &action,
+                &mut OutcomeLog::Record(&mut diagnostic_events),
+                Some(&mut diagnostic_draws),
+                None,
+            ),
+            Err(GameError::UnsupportedMechanic(ref reason)) if reason == expected_reason
+        ));
+        assert_ne!(diagnostic.position, before, "diagnostic bypasses rollback");
+        let artifact_departure_positions = diagnostic_events
+            .iter()
+            .enumerate()
+            .filter(|(_, (kind, _))| kind == "artifact-destroyed" || kind == "artifact-banished")
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        assert_eq!(artifact_departure_positions.len(), 2);
+        assert_eq!(
+            diagnostic_events
+                .iter()
+                .filter(|(kind, _)| kind == "artifact-destroyed")
+                .count(),
+            1
+        );
+        assert_eq!(
+            diagnostic_events
+                .iter()
+                .filter(|(kind, _)| kind == "artifact-banished")
+                .count(),
+            1
+        );
+        assert_eq!(
+            diagnostic_events
+                .iter()
+                .filter(|(kind, data)| {
+                    kind == "artifact-banished" && data["instanceId"] == json!(token_id)
+                })
+                .count(),
+            1
+        );
+        let damage_at = diagnostic_events
+            .iter()
+            .position(|(kind, _)| kind == "deathrite-damage-allocated")
+            .unwrap();
+        assert!(
+            artifact_departure_positions
+                .iter()
+                .all(|position| *position < damage_at),
+            "{diagnostic_events:?}"
+        );
+        assert!(diagnostic.position.artifacts.is_empty());
+        assert_eq!(
+            diagnostic.position.players[seat_index(Seat::North)]
+                .cemetery
+                .iter()
+                .filter(|card| card.instance_id == artifact_id)
+                .count(),
+            1
+        );
+        assert!(
+            !diagnostic.position.players[seat_index(Seat::North)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == token_id)
+        );
+        assert!(
+            !diagnostic.position.players[seat_index(Seat::North)]
+                .hand_spellbook
+                .iter()
+                .any(|card| card.instance_id == magic_id)
+        );
+        assert_eq!(diagnostic.position.players[seat_index(Seat::North)].mana, 1);
+        assert!(
+            diagnostic
+                .position
+                .units
+                .iter()
+                .any(|unit| { unit.card.instance_id == undead_id && unit.death_marked })
+        );
+        assert!(!diagnostic_events.iter().any(|(kind, _)| {
+            matches!(
+                kind.as_str(),
+                "avatar-healed" | "magic-resolved" | "minion-died" | "game-ended"
+            )
+        }));
+        assert_eq!(
+            diagnostic.position.players[seat_index(Seat::North)]
+                .avatar
+                .life,
+            0
+        );
+        assert_eq!(
+            diagnostic.position.players[seat_index(Seat::South)]
+                .avatar
+                .life,
+            0
+        );
+        assert_mixed_terminal_rollback_modes(&game, &action, expected_reason);
+
+        let mut reversed_storage = game.clone();
+        reversed_storage.position.artifacts.reverse();
+        let reversed_actions = reversed_storage.legal_actions().unwrap();
+        let reversed_action = reversed_actions
+            .iter()
+            .find(|candidate| candidate.descriptor == action.descriptor)
+            .expect("same issued target after Artifact storage reorder")
+            .clone();
+        let mut reversed_diagnostic = reversed_storage.clone();
+        let mut reversed_events = Vec::new();
+        let mut reversed_draws = Vec::new();
+        assert!(matches!(
+            reversed_diagnostic.apply_action_with_log(
+                &reversed_action,
+                &mut OutcomeLog::Record(&mut reversed_events),
+                Some(&mut reversed_draws),
+                None,
+            ),
+            Err(GameError::UnsupportedMechanic(ref reason)) if reason == expected_reason
+        ));
+        assert_eq!(reversed_events, diagnostic_events);
+        assert_eq!(reversed_draws, diagnostic_draws);
+        assert_eq!(reversed_diagnostic.position, diagnostic.position);
+        assert_mixed_terminal_rollback_modes(&reversed_storage, &reversed_action, expected_reason);
+
+        let mut nonterminal = game.clone();
+        for player in &mut nonterminal.position.players {
+            player.avatar.life = 20;
+            player.avatar.death_door_turn = None;
+        }
+        let control_before = nonterminal.position.clone();
+        let control_hash = nonterminal.state_hash().unwrap();
+        let control_actions = nonterminal.legal_actions().unwrap();
+        let control_action = control_actions
+            .iter()
+            .find(|candidate| candidate.descriptor == action.descriptor)
+            .expect("same issued action under identical nonterminal facts")
+            .clone();
+        let mut control_recorded = nonterminal.clone();
+        let (control_events, _) = control_recorded
+            .apply_action_recorded(&control_action)
+            .expect("nonterminal mixed Deathrite succeeds");
+        let mut control_ignored = nonterminal.clone();
+        control_ignored
+            .apply_action(&control_action)
+            .expect("ignored nonterminal mixed Deathrite succeeds");
+        let control_owned_root = nonterminal.clone();
+        let control_owned = nonterminal
+            .clone()
+            .apply_action_owned(&control_action)
+            .expect("owned nonterminal mixed Deathrite succeeds");
+        assert_eq!(control_recorded.position, control_ignored.position);
+        assert_eq!(control_recorded.position, control_owned.position);
+        assert_eq!(
+            control_recorded.state_hash().unwrap(),
+            control_ignored.state_hash().unwrap()
+        );
+        assert_eq!(
+            control_recorded.state_hash().unwrap(),
+            control_owned.state_hash().unwrap()
+        );
+        assert_eq!(
+            control_recorded.position.players[seat_index(Seat::North)].mana,
+            1
+        );
+        assert_eq!(
+            control_recorded.position.players[seat_index(Seat::South)]
+                .avatar
+                .life,
+            20
+        );
+        assert!(control_recorded.position.units.is_empty());
+        assert_eq!(
+            control_recorded.position.players[seat_index(Seat::North)]
+                .cemetery
+                .iter()
+                .filter(|card| card.instance_id == artifact_id)
+                .count(),
+            1
+        );
+        assert_eq!(
+            control_recorded.position.players[seat_index(Seat::South)]
+                .cemetery
+                .iter()
+                .filter(|card| card.instance_id == undead_id)
+                .count(),
+            1
+        );
+        assert!(
+            !control_recorded.position.players[seat_index(Seat::North)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == token_id)
+        );
+        assert_eq!(
+            control_events
+                .iter()
+                .filter(|(kind, _)| kind == "artifact-destroyed")
+                .count(),
+            1
+        );
+        assert_eq!(
+            control_events
+                .iter()
+                .filter(|(kind, data)| {
+                    kind == "artifact-banished" && data["instanceId"] == json!(token_id)
+                })
+                .count(),
+            1
+        );
+        assert!(
+            control_recorded.position.players[seat_index(Seat::North)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == magic_id)
+        );
+        assert_eq!(
+            control_events
+                .iter()
+                .filter(|(kind, _)| kind == "magic-resolved")
+                .count(),
+            1
+        );
+        let control_artifact_departures = control_events
+            .iter()
+            .enumerate()
+            .filter(|(_, (kind, _))| kind == "artifact-destroyed" || kind == "artifact-banished")
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        let control_damage = control_events
+            .iter()
+            .position(|(kind, _)| kind == "avatar-life-lost")
+            .expect("successful Deathrite damage event");
+        let control_south_heal = control_events
+            .iter()
+            .position(|(kind, payload)| {
+                kind == "avatar-healed" && payload["seat"] == json!(Seat::South)
+            })
+            .expect("successful South Deathrite heal");
+        let control_body_departure = control_events
+            .iter()
+            .position(|(kind, payload)| {
+                kind == "minion-died" && payload["instanceId"] == json!(undead_id)
+            })
+            .expect("destroyed Deathrite body departure");
+        let control_magic_completion = control_events
+            .iter()
+            .position(|(kind, payload)| {
+                kind == "magic-resolved" && payload["instanceId"] == json!(magic_id)
+            })
+            .expect("successful Magic completion");
+        assert_eq!(control_artifact_departures.len(), 2);
+        assert!(
+            control_artifact_departures
+                .iter()
+                .all(|index| *index < control_damage)
+        );
+        assert!(control_damage < control_south_heal);
+        assert!(control_south_heal < control_body_departure);
+        assert!(control_body_departure < control_magic_completion);
+        assert!(control_recorded.position.pending_deathrites.is_none());
+        assert!(control_recorded.position.pending_trigger_order.is_none());
+        let control_recorded_actions = control_recorded.legal_actions().unwrap();
+        assert_eq!(
+            control_recorded_actions,
+            control_ignored.legal_actions().unwrap()
+        );
+        assert_eq!(
+            control_recorded_actions,
+            control_owned.legal_actions().unwrap()
+        );
+        assert_eq!(control_owned_root.position, control_before);
+        assert_eq!(control_owned_root.state_hash().unwrap(), control_hash);
+        assert_eq!(control_owned_root.legal_actions().unwrap(), control_actions);
+        assert_eq!(
+            control_owned_root.public_view(Seat::North).unwrap(),
+            nonterminal.public_view(Seat::North).unwrap()
+        );
+        assert_eq!(
+            control_owned_root.public_view(Seat::South).unwrap(),
+            nonterminal.public_view(Seat::South).unwrap()
         );
     }
 

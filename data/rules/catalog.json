@@ -13266,8 +13266,8 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "The Magic must offer locations within two measured steps and destroy eligible Undead minions and Artifacts at the chosen location while excluding non-Undead minions and other locations. The exercised C3 composition with both an unprotected Undead and a loose Artifact is currently unsupported and rolls back; full mixed-object resolution and its target exclusions remain required.",
-      "implementationStatus": "unsupported",
+      "plainLanguage": "The Magic offers locations within two measured steps and destroys eligible Undead minions and Artifacts at the chosen location, subject to applicable protection, while excluding non-Undead minions and other locations. All selected Artifact departures finish before the complete direct and resulting power-loss death cohort begins.",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
         "undead"
@@ -13278,7 +13278,7 @@
       "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
-        "testName": "rule_catalog_0575_mixed_undead_artifact_destruction_rolls_back_before_other_units_change"
+        "testName": "rule_catalog_0575_mixed_undead_artifact_destruction_completes_before_other_units_change"
       }
     },
     {
@@ -24388,8 +24388,8 @@
       "requirementIds": [
         "RULE-04"
       ],
-      "plainLanguage": "The Magic must resolve a killed Undead minion’s DrawSite Deathrite for that minion’s controller and finish the applicable mixed-object destruction and Magic work when the game remains active. The exercised Undead-plus-Artifact composition is currently unsupported and rolls back before a Deathrite draw. Full shared mixed-object resolution remains required.",
-      "implementationStatus": "unsupported",
+      "plainLanguage": "The Magic resolves a destroyed Undead minion’s DrawSite Deathrite for that minion’s current controller and completes the applicable minion and Magic work when the game remains active. Artifact departures complete before Deathrites; the actual Magic remains held through pending ordering and terminal interruptions.",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
         "deathriteDrawSite"
@@ -24400,7 +24400,7 @@
       "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
-        "testName": "rule_catalog_1052_mixed_undead_artifact_destruction_is_unsupported_before_deathrite_draw"
+        "testName": "rule_catalog_1052_mixed_destruction_deathrite_draw_precedes_magic_completion"
       }
     },
     {
@@ -37779,8 +37779,8 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "After successful mixed Undead-and-Artifact destruction, the departed non-token Undead must remain in its owner’s cemetery across later turns unless another effect moves it. The exercised mixed composition is currently unsupported and rolls back before cemetery entry; its guard proof does not establish later-turn cemetery persistence. Full mixed-object completion remains required.",
-      "implementationStatus": "unsupported",
+      "plainLanguage": "After successful mixed Undead-and-Artifact destruction, the departed non-token Undead remains in its owner’s cemetery across later turns unless another effect moves it.",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
         "undead"
@@ -37791,7 +37791,7 @@
       "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
-        "testName": "rule_catalog_1853_mixed_undead_artifact_destruction_is_unsupported_before_cemetery_persistence"
+        "testName": "rule_catalog_1853_mixed_destruction_cemetery_persists_across_turns"
       }
     },
     {
@@ -37845,8 +37845,8 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "The Magic must destroy all eligible Undead minions and Artifacts sharing its selected location, subject to applicable protection. The exercised composition containing an unprotected Undead and an Artifact is currently unsupported and rolls back; complete mixed-object recipient and departure behavior remains required.",
-      "implementationStatus": "unsupported",
+      "plainLanguage": "The Magic destroys all eligible Undead minions and Artifacts sharing its selected location, subject to applicable protection. Selected Artifact departures complete before one combined direct and power-loss death cohort; applicable Deathrites finish before minion departure and actual Magic completion.",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
         "undead"
@@ -37859,7 +37859,7 @@
       "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
-        "testName": "rule_catalog_1856_mixed_undead_artifact_cohort_is_unsupported_and_rolls_back"
+        "testName": "rule_catalog_1856_mixed_destruction_includes_the_complete_local_cohort"
       }
     },
     {
@@ -37868,8 +37868,8 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "The Magic must limit destruction to eligible objects at its selected location and leave a far Undead outside it unaffected. The exercised local Undead-plus-Artifact composition is currently unsupported and rolls back; the far unit remains unchanged because the entire action rolls back, which does not prove successful target exclusion. Full mixed-object resolution remains required.",
-      "implementationStatus": "unsupported",
+      "plainLanguage": "The Magic limits successful destruction to eligible objects at its selected location and leaves a far Undead outside that location unaffected.",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
         "undead"
@@ -37881,7 +37881,7 @@
       "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
-        "testName": "rule_catalog_1857_mixed_undead_artifact_destruction_rolls_back_with_far_unit_unchanged"
+        "testName": "rule_catalog_1857_mixed_destruction_preserves_far_undead"
       }
     },
     {
@@ -48014,6 +48014,6 @@
       }
     }
   ],
-  "rustSupportedCount": 2068,
+  "rustSupportedCount": 2073,
   "typescriptSupportedCount": 0
 }
