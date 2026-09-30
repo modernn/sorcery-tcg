@@ -11,6 +11,9 @@
 //! Distinct from ordinary Leap Attack (0599–0600, 1963–1968), which never
 //! defers the strike, and from Chain Magic hops (0696).
 
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::checkpoint::{
@@ -512,12 +515,7 @@ fn rule_catalog_0695_leap_attack_resumes_its_strike_after_ordered_movement_death
         "C2"
     );
     assert!(realm_unit(&pending, &setup.enemy_id).is_some());
-    assert!(
-        setup
-            .fragile_ids
-            .iter()
-            .all(|instance_id| realm_unit(&pending, instance_id).is_none())
-    );
+    marked_death::assert_live_marked_before_cemetery(&pending, &setup.fragile_ids);
 
     let order = order_deathrite_actions(&setup.session)
         .into_iter()
@@ -639,12 +637,7 @@ fn rule_catalog_1009_leap_attack_kill_resolves_deathrites_without_repeating_the_
     assert_eq!(survivor["warded"], false);
     let checkpoint = create_game_checkpoint(&setup.session).expect("post-strike checkpoint");
     setup.session = resume_game_checkpoint(&checkpoint).expect("resume post-strike deaths");
-    assert!(
-        setup
-            .enemy_ids
-            .iter()
-            .all(|instance_id| realm_unit(&paused, instance_id).is_none())
-    );
+    marked_death::assert_live_marked_before_cemetery(&paused, &setup.enemy_ids);
 
     let order = order_deathrite_actions(&setup.session)
         .into_iter()

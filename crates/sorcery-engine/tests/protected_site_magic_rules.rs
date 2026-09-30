@@ -13,8 +13,13 @@
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
-use sorcery_engine::contract::{ActionRequest, Receipt};
-use sorcery_engine::session::{Session, StepResult};
+use sorcery_engine::checkpoint::{
+    create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+    serialize_game_checkpoint,
+};
+use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
+use sorcery_engine::game::GameError;
+use sorcery_engine::session::{Session, SessionError, StepResult};
 
 fn avatar() -> Value {
     json!({
@@ -234,13 +239,6 @@ fn seed_with_deathrite(start: u32) -> String {
         .expect("bounded seed with Craterize Deathrite setup")
 }
 
-fn atlas_len(snapshot: &Value, seat: &str) -> usize {
-    snapshot["players"][seat]["atlas"]
-        .as_array()
-        .expect("atlas")
-        .len()
-}
-
 fn realm_unit<'a>(snapshot: &'a Value, instance_id: &str) -> Option<&'a Value> {
     snapshot["realm"]["units"]
         .as_array()?
@@ -321,6 +319,65 @@ fn cast_crater_at_c1(session: &mut Session, south_site_id: &str) -> (Value, Rece
             && descriptor["targetSiteInstanceId"] == south_site_id
             && descriptor["discardSiteInstanceId"].is_string()
     })
+}
+
+fn assert_unsupported_action(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+    reason: &str,
+) {
+    let checkpoint = create_game_checkpoint(session).expect("pre-attempt checkpoint");
+    let checkpoint_json = serialize_game_checkpoint(&checkpoint).expect("serialized checkpoint");
+    let checkpoint = parse_game_checkpoint(&checkpoint_json).expect("parsed checkpoint");
+    let before = session.replay_value().expect("pre-attempt replay");
+    let north_view = session.public_view(Seat::North).expect("North view");
+    let south_view = session.public_view(Seat::South).expect("South view");
+    let state_hash = session.state_hash().expect("pre-attempt state hash");
+    let transcript = session.transcript().to_vec();
+    let attempts = session.attempts().to_vec();
+    let action = session
+        .legal_actions()
+        .expect("pre-attempt legal actions")
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))
+        .expect("engine-issued unsupported action");
+    let request = ActionRequest {
+        action_id: action.action_id.to_string(),
+        seat: action.seat,
+        state_version: action.state_version,
+    };
+    assert_unsupported(session.step(request.clone()), reason);
+    assert_eq!(session.unsupported_mechanic(), Some(reason));
+    assert_eq!(session.public_view(Seat::North).unwrap(), north_view);
+    assert_eq!(session.public_view(Seat::South).unwrap(), south_view);
+    assert_eq!(session.state_hash().unwrap(), state_hash);
+    assert_eq!(session.transcript(), transcript);
+    assert_eq!(session.attempts(), attempts);
+    assert_unsupported(session.legal_actions(), reason);
+    assert_unsupported(session.verify_replay(), reason);
+    assert!(create_game_checkpoint(session).is_err());
+
+    let mut branch = resume_game_checkpoint(&checkpoint).expect("restore pre-attempt branch");
+    assert_eq!(branch.replay_value().unwrap(), before);
+    assert_unsupported(branch.step(request), reason);
+    assert_eq!(branch.unsupported_mechanic(), Some(reason));
+    assert_eq!(branch.state_hash().unwrap(), state_hash);
+    assert_eq!(branch.transcript(), transcript);
+    assert_eq!(branch.attempts(), attempts);
+    assert!(branch.verify_replay().is_err());
+    assert!(create_game_checkpoint(&branch).is_err());
+    assert!(branch.replay_value().is_err());
+    assert!(branch.legal_actions().is_err());
+    let valid_branch = resume_game_checkpoint(&checkpoint).expect("repeat pre-attempt restore");
+    assert_eq!(valid_branch.replay_value().unwrap(), before);
+    assert!(valid_branch.verify_replay().unwrap());
+}
+
+fn assert_unsupported<T>(result: Result<T, SessionError>, reason: &str) {
+    assert!(matches!(
+        result,
+        Err(SessionError::Game(GameError::UnsupportedMechanic(actual))) if actual == reason
+    ));
 }
 
 fn south_avatar_id(snapshot: &Value) -> String {
@@ -492,82 +549,21 @@ fn rule_catalog_0658_craterize_is_prevented_on_a_protected_site_but_still_deals_
 }
 
 #[test]
-fn rule_catalog_1082_craterize_deathrite_draws_for_controller_on_kill() {
+fn rule_catalog_1082_craterize_site_minion_death_is_unsupported_and_rolls_back() {
     let encoded = seed_with_deathrite(1082);
     let mut session = opening_main(&encoded);
     let (south_site_id, target_id) = one_south_deathrite_at_c1(&mut session);
     let before = state(&session);
-    let north_atlas = atlas_len(&before, "north");
-    let south_atlas = atlas_len(&before, "south");
-
-    let (_, receipt) = cast_crater_at_c1(&mut session, &south_site_id);
-    assert_eq!(
-        event_types(&receipt),
-        [
-            "card-discarded",
-            "magic-cast",
-            "site-destroyed",
-            "magic-damage-allocated",
-            "magic-damage-allocated",
-            "damage-dealt",
-            "damage-dealt",
-            "avatar-life-lost",
-            "rubble-created",
-            "site-drawn",
-            "minion-died",
-            "magic-resolved",
-        ]
+    assert!(realm_unit(&before, &target_id).is_some());
+    assert_unsupported_action(
+        &mut session,
+        |descriptor| {
+            descriptor["kind"] == "cast-magic"
+                && descriptor["cardId"] == "north-crater"
+                && descriptor["targetLocation"]["cell"] == "C1"
+                && descriptor["targetSiteInstanceId"] == south_site_id
+                && descriptor["discardSiteInstanceId"].is_string()
+        },
+        "site crater overlaps minion death or marked exit",
     );
-    let allocated = receipt
-        .events
-        .iter()
-        .find(|event| {
-            event.event_type == "magic-damage-allocated"
-                && event.payload["targetInstanceId"] == target_id
-        })
-        .expect("grid allocation to Deathrite minion");
-    assert_eq!(allocated.payload["amount"], 1);
-    let drawn = receipt
-        .events
-        .iter()
-        .find(|event| event.event_type == "site-drawn")
-        .expect("Deathrite site draw");
-    assert_eq!(drawn.payload["seat"], "south");
-    assert_eq!(drawn.payload["sourceInstanceId"], target_id);
-    let types = event_types(&receipt);
-    let damage_dealt = types
-        .iter()
-        .position(|event_type| *event_type == "damage-dealt")
-        .expect("damage-dealt index");
-    let site_drawn = types
-        .iter()
-        .position(|event_type| *event_type == "site-drawn")
-        .expect("site-drawn index");
-    let minion_died = types
-        .iter()
-        .position(|event_type| *event_type == "minion-died")
-        .expect("minion-died index");
-    let magic_resolved = types
-        .iter()
-        .position(|event_type| *event_type == "magic-resolved")
-        .expect("magic-resolved index");
-    assert!(
-        damage_dealt < site_drawn && site_drawn < minion_died && minion_died < magic_resolved,
-        "expected damage-dealt, deathrite site-drawn, minion-died, then magic-resolved; got {types:?}"
-    );
-    assert_eq!(types.last(), Some(&"magic-resolved"));
-
-    let finished = state(&session);
-    assert!(realm_unit(&finished, &target_id).is_none());
-    assert_eq!(finished["realm"]["sites"]["C1"]["rubble"], true);
-    assert!(
-        finished["players"]["south"]["cemetery"]
-            .as_array()
-            .expect("South cemetery")
-            .iter()
-            .any(|card| card["instanceId"] == target_id)
-    );
-    assert_eq!(atlas_len(&finished, "north"), north_atlas);
-    assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
-    assert_exact_replay(&session);
 }

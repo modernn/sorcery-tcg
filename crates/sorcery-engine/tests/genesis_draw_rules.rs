@@ -1,3 +1,6 @@
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::checkpoint::{
@@ -5,8 +8,8 @@ use sorcery_engine::checkpoint::{
     serialize_game_checkpoint,
 };
 use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
-use sorcery_engine::game::Game;
-use sorcery_engine::session::{Session, StepResult};
+use sorcery_engine::game::{Game, GameError};
+use sorcery_engine::session::{Session, SessionError, StepResult};
 
 fn avatar(draw_spell: bool, life: u8) -> Value {
     json!({
@@ -144,6 +147,65 @@ fn keep(session: &mut Session) {
             && descriptor["atlasOrder"] == json!([])
             && descriptor["spellbookOrder"] == json!([])
     });
+}
+
+fn assert_unsupported_action(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+    reason: &str,
+) {
+    let checkpoint = create_game_checkpoint(session).expect("pre-attempt checkpoint");
+    let checkpoint_json = serialize_game_checkpoint(&checkpoint).expect("serialized checkpoint");
+    let checkpoint = parse_game_checkpoint(&checkpoint_json).expect("parsed checkpoint");
+    let before = session.replay_value().expect("pre-attempt replay");
+    let north_view = session.public_view(Seat::North).expect("North view");
+    let south_view = session.public_view(Seat::South).expect("South view");
+    let state_hash = session.state_hash().expect("pre-attempt state hash");
+    let transcript = session.transcript().to_vec();
+    let attempts = session.attempts().to_vec();
+    let action = session
+        .legal_actions()
+        .expect("pre-attempt legal actions")
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))
+        .expect("engine-issued unsupported action");
+    let request = ActionRequest {
+        action_id: action.action_id.to_string(),
+        seat: action.seat,
+        state_version: action.state_version,
+    };
+    assert_unsupported(session.step(request.clone()), reason);
+    assert_eq!(session.unsupported_mechanic(), Some(reason));
+    assert_eq!(session.public_view(Seat::North).unwrap(), north_view);
+    assert_eq!(session.public_view(Seat::South).unwrap(), south_view);
+    assert_eq!(session.state_hash().unwrap(), state_hash);
+    assert_eq!(session.transcript(), transcript);
+    assert_eq!(session.attempts(), attempts);
+    assert_unsupported(session.legal_actions(), reason);
+    assert_unsupported(session.verify_replay(), reason);
+    assert!(create_game_checkpoint(session).is_err());
+
+    let mut branch = resume_game_checkpoint(&checkpoint).expect("restore pre-attempt branch");
+    assert_eq!(branch.replay_value().unwrap(), before);
+    assert_unsupported(branch.step(request), reason);
+    assert_eq!(branch.unsupported_mechanic(), Some(reason));
+    assert_eq!(branch.state_hash().unwrap(), state_hash);
+    assert_eq!(branch.transcript(), transcript);
+    assert_eq!(branch.attempts(), attempts);
+    assert!(branch.verify_replay().is_err());
+    assert!(create_game_checkpoint(&branch).is_err());
+    assert!(branch.replay_value().is_err());
+    assert!(branch.legal_actions().is_err());
+    let valid_branch = resume_game_checkpoint(&checkpoint).expect("repeat pre-attempt restore");
+    assert_eq!(valid_branch.replay_value().unwrap(), before);
+    assert!(valid_branch.verify_replay().unwrap());
+}
+
+fn assert_unsupported<T>(result: Result<T, SessionError>, reason: &str) {
+    assert!(matches!(
+        result,
+        Err(SessionError::Game(GameError::UnsupportedMechanic(actual))) if actual == reason
+    ));
 }
 
 fn first_main(manifest: &str) -> Session {
@@ -943,7 +1005,7 @@ fn targeted_genesis_sacrifice_checkpoint() -> (Session, String, String, String) 
 }
 
 #[test]
-fn rule_catalog_0499_targeted_genesis_sacrifice_decline_sacrifices_and_summons() {
+fn rule_catalog_0499_paid_summon_genesis_is_unsupported_before_decline() {
     let (checkpoint, source_id, _, local_id) = targeted_genesis_sacrifice_checkpoint();
     let sacrifice_summons: Vec<_> = checkpoint
         .legal_actions()
@@ -958,56 +1020,32 @@ fn rule_catalog_0499_targeted_genesis_sacrifice_decline_sacrifices_and_summons()
         .collect();
     assert_eq!(sacrifice_summons.len(), 1);
     let mut session = checkpoint;
-    let (_, summon_receipt) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "summon-minion"
-            && descriptor["cardInstanceId"] == source_id
-            && descriptor["cell"] == "C4"
-            && descriptor["sacrificedMinionInstanceIds"] == json!([local_id])
-    });
-    assert_eq!(
-        event_types(&summon_receipt),
-        ["minion-sacrificed", "minion-died", "minion-summoned"]
+    assert_unsupported_action(
+        &mut session,
+        |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardInstanceId"] == source_id
+                && descriptor["cell"] == "C4"
+                && descriptor["sacrificedMinionInstanceIds"] == json!([local_id])
+        },
+        "Genesis trigger during marked minion work",
     );
-    assert_eq!(summon_receipt.events[2].payload["manaPaid"], 0);
-    let receipt = choose_ability(&mut session, &source_id, None);
-    assert_eq!(event_types(&receipt), ["ability-choice-committed"]);
-    assert_exact_replay(&session);
 }
 
 #[test]
-fn rule_catalog_0500_targeted_genesis_sacrifice_target_deals_damage() {
-    let (checkpoint, source_id, avatar_id, local_id) = targeted_genesis_sacrifice_checkpoint();
+fn rule_catalog_0500_paid_summon_genesis_checkpoint_repeats_unsupported_rollback() {
+    let (checkpoint, source_id, _avatar_id, local_id) = targeted_genesis_sacrifice_checkpoint();
     let mut session = checkpoint;
-    let (_, summon_receipt) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "summon-minion"
-            && descriptor["cardInstanceId"] == source_id
-            && descriptor["cell"] == "C4"
-            && descriptor["sacrificedMinionInstanceIds"] == json!([local_id])
-    });
-    assert_eq!(
-        event_types(&summon_receipt),
-        ["minion-sacrificed", "minion-died", "minion-summoned"]
+    assert_unsupported_action(
+        &mut session,
+        |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardInstanceId"] == source_id
+                && descriptor["cell"] == "C4"
+                && descriptor["sacrificedMinionInstanceIds"] == json!([local_id])
+        },
+        "Genesis trigger during marked minion work",
     );
-    let receipt = choose_ability(&mut session, &source_id, Some(&avatar_id));
-    assert_eq!(
-        event_types(&receipt),
-        [
-            "ability-choice-committed",
-            "genesis-damage-allocated",
-            "damage-dealt",
-            "avatar-life-lost"
-        ]
-    );
-    assert_eq!(
-        receipt.events[1].payload,
-        json!({
-            "amount": 2,
-            "sourceInstanceId": source_id,
-            "targetInstanceId": avatar_id,
-        })
-    );
-    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 18);
-    assert_exact_replay(&session);
 }
 
 #[test]
@@ -7212,13 +7250,7 @@ fn rule_catalog_1110_genesis_draw_site_withheld_during_pending_deathrite_order()
     let paused = state(session);
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(
         session
             .legal_actions()
@@ -7469,13 +7501,7 @@ fn rule_catalog_1112_genesis_draw_spell_withheld_during_pending_deathrite_order(
     let paused = state(session);
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(
         session
             .legal_actions()
@@ -7732,13 +7758,7 @@ fn rule_catalog_1164_resolve_genesis_spell_withheld_during_pending_deathrite_ord
         "site-genesis"
     );
     assert!(paused["pendingGenesisSpell"].is_null());
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(
         session
             .legal_actions()
@@ -7967,13 +7987,7 @@ fn rule_catalog_1165_resolve_genesis_spell_order_withheld_during_pending_deathri
         "site-genesis"
     );
     assert!(paused["pendingGenesisSpellOrder"].is_null());
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(
         session
             .legal_actions()
@@ -8228,13 +8242,7 @@ fn rule_catalog_1176_resolve_genesis_token_withheld_during_pending_deathrite_ord
         "site-genesis"
     );
     assert!(paused["pendingGenesisToken"].is_null());
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(
         session
             .legal_actions()

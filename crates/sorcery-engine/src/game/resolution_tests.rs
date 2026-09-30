@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
 use super::{
-    ActionDescriptor, CardId, CardInstance, CardSource, Cell, Game, IssuedAction, Phase, Region,
-    Seat, SitePosition, SummonPlacement, UnitPosition, seat_index,
+    ActionDescriptor, CardId, CardInstance, CardSource, Cell, Game, GameError, IssuedAction, Phase,
+    Region, Seat, SitePosition, SummonPlacement, UnitPosition, seat_index,
 };
 use crate::canonical::identity_hash;
 use crate::synthetic::selfplay_manifest_with;
@@ -274,7 +274,7 @@ fn token_magic_holds_draw_and_completion_behind_ordered_genesis_deathrites() {
 }
 
 #[test]
-fn terminal_token_genesis_skips_draw_and_later_resolution_but_retires_magic_once() {
+fn terminal_token_genesis_stops_at_failed_draw_and_retains_marked_owner() {
     let (mut game, magic_id) = fixture(true);
     let initial_events = cast_and_choose_host(&mut game, &magic_id);
     assert_eq!(game.position.phase, Phase::TriggerOrder);
@@ -287,19 +287,61 @@ fn terminal_token_genesis_skips_draw_and_later_resolution_but_retires_magic_once
     assert!(!initial_events.iter().any(|(kind, _)| kind == "spell-drawn"));
 
     let order = order_action(&game);
-    let (events, _) = game
+    let before = game.position.clone();
+    let before_hash = game.state_hash().expect("paused state hash");
+    assert_eq!(cemetery_count(&game, &magic_id), 0);
+
+    let mut ignored = game.clone();
+    ignored.apply_action(&order).expect("failed draw ends game");
+    let mut recorded = game.clone();
+    let (events, _) = recorded
         .apply_action_recorded(&order)
-        .expect("terminal Deathrite continuation");
-    assert_eq!(game.position.phase, Phase::Terminal);
-    assert!(!events.iter().any(|(kind, _)| kind == "spell-drawn"));
+        .expect("failed draw ends game");
+    assert_ne!(recorded.position, before);
+    assert_ne!(recorded.state_hash().expect("terminal hash"), before_hash);
+    assert!(
+        recorded
+            .legal_actions()
+            .expect("terminal actions")
+            .is_empty()
+    );
+    assert_eq!(recorded.position, ignored.position);
+    assert_eq!(
+        recorded.state_hash().expect("recorded hash"),
+        ignored.state_hash().expect("ignored hash")
+    );
     assert_eq!(
         events
             .iter()
-            .filter(|(kind, _)| kind == "magic-resolved")
-            .count(),
-        1
+            .map(|(kind, _)| kind.as_str())
+            .collect::<Vec<_>>(),
+        ["trigger-order-committed", "game-ended"]
     );
-    assert_eq!(cemetery_count(&game, &magic_id), 1);
+    assert_eq!(recorded.position.phase, Phase::Terminal);
+    let pending = recorded
+        .position
+        .pending_deathrites
+        .as_ref()
+        .expect("terminal wave retains its owner");
+    assert_eq!(token_count(&recorded), 1);
+    assert!(!pending.marked.is_empty());
+    for marked in &pending.marked {
+        assert!(
+            recorded
+                .position
+                .units
+                .iter()
+                .any(|unit| { marked.matches(&unit.card) && unit.death_marked })
+        );
+    }
+    assert_eq!(
+        recorded.authoritative_state()["pendingDeathrites"]["continuation"],
+        continuation
+    );
+    assert_eq!(cemetery_count(&recorded, &magic_id), 0);
+    assert!(!events.iter().any(|(kind, _)| {
+        ["spell-drawn", "magic-resolved", "minion-died"].contains(&kind.as_str())
+    }));
 }
 
 fn token_entry(game: &Game, token_id: &str, ordinal: usize) -> super::TokenEntryContinuation {
@@ -449,7 +491,52 @@ fn ordinary_token_choice_enters_regions_then_settles_before_genesis_and_parent_d
             game.position.sites[Cell::parse("C3").unwrap().index()] = None;
         }
         let before_draw = game.position.players[0].hand_spellbook.len();
-        let mut events = cast_and_choose_host(&mut game, &magic_id);
+        let mut events = if region == Region::Underground {
+            let cast = cast_action(&game, &magic_id);
+            let (cast_events, _) = game
+                .apply_action_recorded(&cast)
+                .expect("cast before marked-region guard");
+            assert_eq!(game.position.phase, Phase::AbilityChoice);
+            assert_eq!(token_count(&game), 0);
+            let choice = game
+                .legal_actions()
+                .expect("host choice before marked-region guard")
+                .into_iter()
+                .find(|action| matches!(action.descriptor, ActionDescriptor::ChooseAbility { .. }))
+                .expect("host choice");
+            let before = game.position.clone();
+            let before_hash = game.state_hash().expect("pre-guard state hash");
+            let before_actions = game.legal_actions().expect("pre-guard actions");
+            let mut ignored = game.clone();
+            assert!(matches!(
+                ignored.apply_action(&choice),
+                Err(GameError::UnsupportedMechanic(reason))
+                    if reason == "Genesis trigger during marked minion work"
+            ));
+            let mut recorded = game.clone();
+            assert!(matches!(
+                recorded.apply_action_recorded(&choice),
+                Err(GameError::UnsupportedMechanic(reason))
+                    if reason == "Genesis trigger during marked minion work"
+            ));
+            for branch in [&ignored, &recorded] {
+                assert_eq!(branch.position, before);
+                assert_eq!(
+                    branch.state_hash().expect("rollback state hash"),
+                    before_hash
+                );
+                assert_eq!(
+                    branch.legal_actions().expect("rollback actions"),
+                    before_actions
+                );
+                assert_eq!(token_count(branch), 0);
+                assert_eq!(cemetery_count(branch, &magic_id), 0);
+            }
+            assert!(!cast_events.iter().any(|(kind, _)| kind == "magic-resolved"));
+            cast_events
+        } else {
+            cast_and_choose_host(&mut game, &magic_id)
+        };
         assert!(
             game.position.units[0].warded,
             "ordinary choice consumes no Ward"
@@ -472,7 +559,14 @@ fn ordinary_token_choice_enters_regions_then_settles_before_genesis_and_parent_d
             assert_eq!(game.position, branch.position);
             events.extend(actual);
         }
-        assert_eq!(game.position.phase, Phase::Main);
+        assert_eq!(
+            game.position.phase,
+            if region == Region::Underground {
+                Phase::AbilityChoice
+            } else {
+                Phase::Main
+            }
+        );
         assert_eq!(
             token_count(&game),
             if survives { 2 } else { 0 },
@@ -481,8 +575,16 @@ fn ordinary_token_choice_enters_regions_then_settles_before_genesis_and_parent_d
         // Casting removes the Magic; its draw restores it. Only surviving token Genesis adds two.
         assert_eq!(
             game.position.players[0].hand_spellbook.len(),
-            before_draw + if survives { 2 } else { 0 }
+            if region == Region::Underground {
+                before_draw - 1
+            } else {
+                before_draw + if survives { 2 } else { 0 }
+            }
         );
+        if region == Region::Underground {
+            assert!(!events.iter().any(|(kind, _)| kind == "magic-resolved"));
+            continue;
+        }
         let summons: Vec<_> = events
             .iter()
             .enumerate()

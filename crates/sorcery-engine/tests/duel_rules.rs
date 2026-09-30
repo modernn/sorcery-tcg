@@ -7,6 +7,9 @@
 //! first-strike Duels pause in trigger-order, survive checkpoint round-trip, and
 //! finish through ordered Deathrites to terminal.
 
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::checkpoint::{
@@ -913,7 +916,11 @@ fn rule_catalog_0711_duel_magic_fights_through_avatar_ally_adjacent_to_enemy_min
 }
 
 #[test]
-fn rule_catalog_0712_duel_checkpoints_underground_first_strike_and_finishes_before_terminal() {
+#[expect(
+    clippy::too_many_lines,
+    reason = "one sequential Deathrite checkpoint and terminal proof"
+)]
+fn rule_catalog_0712_underground_duel_checkpoints_terminal_sequential_deathrites() {
     let encoded = seed_underground_duel_checkpoint(712);
     let (mut session, ally_id, mut target_ids) =
         try_setup_underground_duel_checkpoint(&encoded).expect("complete underground Duel setup");
@@ -930,6 +937,19 @@ fn rule_catalog_0712_duel_checkpoints_underground_first_strike_and_finishes_befo
                 && action.descriptor["target"]["instanceId"] == target_id
         })
         .expect("engine-issued underground Duel");
+    let before_cast = state(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("pre-cast Duel checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized pre-cast Duel");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed pre-cast Duel");
+    let mut resumed = resume_game_checkpoint(&parsed).expect("resumed pre-cast Duel");
+    assert_eq!(state(&resumed), before_cast);
+    let resumed_action = resumed
+        .legal_actions()
+        .expect("resumed Duel actions")
+        .into_iter()
+        .find(|action| action.action_id == duel_action.action_id)
+        .expect("same issued Duel action after checkpoint");
+    assert_eq!(resumed_action, duel_action);
     let StepResult::Accepted(cast) = session
         .step(ActionRequest {
             action_id: duel_action.action_id.to_string(),
@@ -947,47 +967,105 @@ fn rule_catalog_0712_duel_checkpoints_underground_first_strike_and_finishes_befo
             "fight-started",
             "strike-damage-allocated",
             "damage-dealt",
+            "site-drawn",
+            "minion-died",
+            "game-ended"
         ]
     );
-    let pending = state(&session);
-    assert_eq!(pending["phase"], "trigger-order");
-    assert_eq!(pending["decisionSeat"], "south");
+    assert_eq!(cast.events[4].payload["sourceInstanceId"], target_ids[0]);
+    assert_eq!(cast.events[5].payload["instanceId"], target_ids[0]);
     assert_eq!(
-        pending["pendingDeathrites"]["continuation"]["kind"],
+        cast.events[6].payload,
+        json!({
+            "loser": "south", "reason": "deck_empty", "winner": "north"
+        })
+    );
+    let terminal = state(&session);
+    assert_eq!(terminal["phase"], "terminal");
+    assert_eq!(
+        terminal["pendingDeathrites"]["continuation"]["kind"],
         "first-strike"
     );
     assert_eq!(
-        pending["pendingDeathrites"]["continuation"]["pending"]["region"],
+        terminal["pendingDeathrites"]["continuation"]["pending"]["region"],
         "underground"
     );
     assert_eq!(
-        pending["pendingDeathrites"]["deferredOutcomes"],
-        json!([{
-            "payload": {
-                "cardId": "north-duel",
-                "instanceId": cast.events[0].payload["instanceId"],
-                "owner": "north",
-            },
-            "type": "magic-resolved",
-        }])
+        terminal["pendingDeathrites"]["deferredOutcomes"][0]["type"],
+        "magic-resolved"
     );
-
-    let checkpoint = create_game_checkpoint(&session).expect("pending Duel checkpoint");
-    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized pending Duel");
-    session = resume_game_checkpoint(
-        &parse_game_checkpoint(&serialized).expect("parsed pending Duel checkpoint"),
-    )
-    .expect("resumed pending Duel checkpoint");
-    assert_eq!(state(&session), pending);
-    let (_, completed) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == target_ids[0]
-    });
-    let completed_types = event_types(&completed);
     assert_eq!(
-        &completed_types[completed_types.len() - 2..],
-        ["magic-resolved", "game-ended"]
+        terminal["pendingDeathrites"]["deferredOutcomes"][0]["payload"]["instanceId"],
+        cast.events[0].payload["instanceId"]
     );
-    assert_eq!(state(&session)["phase"], "terminal");
+    assert!(
+        terminal["pendingDeathrites"]["marked"]
+            .as_array()
+            .expect("remaining marked cohort")
+            .iter()
+            .any(|unit| unit["instanceId"] == target_ids[1])
+    );
+    let retained = realm_unit(&terminal, &target_ids[1]).expect("second buff remains underground");
+    assert_eq!(retained["region"], "underground");
+    assert_eq!(retained["damage"], 1);
+    assert_eq!(retained["deathMarked"], true);
+    assert_eq!(
+        terminal["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .filter(|card| card["instanceId"] == target_ids[0])
+            .count(),
+        1
+    );
+    assert_eq!(
+        terminal["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("North cemetery")
+            .iter()
+            .filter(|card| card["instanceId"] == cast.events[0].payload["instanceId"])
+            .count(),
+        1
+    );
+    assert_eq!(
+        cast.events.last().expect("terminal event").event_type,
+        "game-ended"
+    );
+    assert!(!event_types(&cast).contains(&"trigger-order-committed"));
+    assert!(!event_types(&cast).contains(&"magic-resolved"));
+    assert_eq!(state(&resumed), before_cast);
+    let resumed_action = resumed
+        .legal_actions()
+        .expect("resumed actions")
+        .into_iter()
+        .find(|action| action.action_id == duel_action.action_id)
+        .expect("same cast after restore");
+    let StepResult::Accepted(resumed_cast) = resumed
+        .step(ActionRequest {
+            action_id: resumed_action.action_id.to_string(),
+            seat: resumed_action.seat,
+            state_version: resumed_action.state_version,
+        })
+        .expect("resumed Duel cast")
+    else {
+        panic!("resumed issued Duel must be accepted")
+    };
+    assert_eq!(resumed_cast, cast);
+    assert_eq!(state(&resumed), terminal);
+    let terminal_checkpoint = create_game_checkpoint(&session).expect("terminal Duel checkpoint");
+    let terminal_serialized =
+        serialize_game_checkpoint(&terminal_checkpoint).expect("serialize terminal Duel");
+    let terminal_resumed = resume_game_checkpoint(
+        &parse_game_checkpoint(&terminal_serialized).expect("parse terminal Duel"),
+    )
+    .expect("restore terminal Duel");
+    assert_eq!(state(&terminal_resumed), terminal);
+    assert_eq!(
+        terminal_resumed.legal_actions().expect("terminal actions"),
+        Vec::new()
+    );
+    assert_exact_replay(&resumed);
+    assert_eq!(session.transcript(), resumed.transcript());
     assert_exact_replay(&session);
 }
 
@@ -1115,13 +1193,7 @@ fn rule_catalog_1045_duel_magic_withheld_during_pending_deathrite_order() {
     let paused = state(session);
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(realm_unit(&paused, &visitor_id).is_some());
     assert!(realm_unit(&paused, &ally_id).is_some());
     assert!(

@@ -8,6 +8,9 @@
 //! wait for ordering, cemetery-bottom Magic stays withheld until the chain
 //! drains.
 
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
@@ -787,10 +790,6 @@ fn deathrite_cemetery_bottom_seed_with(start: u32) -> String {
 }
 
 #[test]
-#[expect(
-    clippy::too_many_lines,
-    reason = "one deathrite interruption and resumed cemetery choice"
-)]
 fn rule_catalog_1070_cemetery_bottom_then_draw_withheld_during_pending_deathrite_order() {
     let encoded = deathrite_cemetery_bottom_seed_with(1070);
     let mut setup = try_pending_deathrite_with_cemetery_card(&encoded)
@@ -801,13 +800,7 @@ fn rule_catalog_1070_cemetery_bottom_then_draw_withheld_during_pending_deathrite
     let paused = state(session);
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(!cemetery_ids(&paused, "north").contains(&cemetery_id));
     assert_eq!(
         paused["pendingDeathrites"]["continuation"]["magic"]["instanceId"],

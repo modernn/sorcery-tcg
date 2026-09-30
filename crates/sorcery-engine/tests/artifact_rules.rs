@@ -8,6 +8,9 @@
 //! during trigger-order (RULE-CATALOG-1145), and Artifact casting withheld during
 //! trigger-order (RULE-CATALOG-1155).
 
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt};
@@ -1211,13 +1214,7 @@ fn rule_catalog_1144_activate_artifact_damage_withheld_during_pending_deathrite_
     let paused = state(session);
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert_eq!(
         realm_artifacts(&paused)
             .iter()
@@ -1887,13 +1884,7 @@ fn rule_catalog_1145_activate_artifact_discard_area_damage_withheld_during_pendi
     let paused = state(session);
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert_eq!(
         realm_artifacts(&paused)
             .iter()
@@ -2076,13 +2067,7 @@ fn rule_catalog_1155_cast_artifact_withheld_during_pending_deathrite_order() {
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(north_has_sword(&paused));
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(
         session
             .legal_actions()

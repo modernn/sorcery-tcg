@@ -7,6 +7,9 @@
 //! bind persistence, empty-repeat, enemy-arrival, multi-subset, far-cell, and
 //! new-summon branches on the session Pick Up matrix without re-proving ownership.
 
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt};
@@ -500,11 +503,7 @@ fn rule_catalog_1130_pick_up_artifacts_withheld_during_pending_deathrite_order()
     let paused = state(session);
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
-    assert!(
-        deathrite_ids
-            .iter()
-            .all(|instance_id| realm_unit(&paused, instance_id).is_none())
-    );
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert_eq!(
         realm_unit(&paused, &minion_id).expect("surviving bearer")["location"],
         "C4"
@@ -782,13 +781,7 @@ fn rule_catalog_1131_drop_artifacts_withheld_during_pending_deathrite_order() {
     let paused = state(session);
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(realm_unit(&paused, &bearer_id).is_some());
     assert!(carried_sword(&paused, &sword_id, &bearer_id).is_some());
     assert!(

@@ -755,8 +755,15 @@ fn rule_catalog_0978_defending_first_strike_deathrite_pauses_order_and_resumes_o
         paused["pendingDeathrites"]["continuation"]["firstCombatantInstanceIds"],
         json!([fs_defender_id])
     );
-    assert!(unit(&paused, &setup.attacker_id).is_none());
-    assert!(deathrite_ids.iter().all(|id| unit(&paused, id).is_none()));
+    assert_eq!(
+        unit(&paused, &setup.attacker_id).expect("marked attacker")["deathMarked"],
+        true
+    );
+    assert!(
+        deathrite_ids
+            .iter()
+            .all(|id| { unit(&paused, id).is_some_and(|value| value["deathMarked"] == true) })
+    );
     assert!(
         deathrite_ids
             .iter()
@@ -928,8 +935,15 @@ fn rule_catalog_0991_printed_first_strike_defending_deathrite_pauses_order_and_r
         paused["pendingDeathrites"]["continuation"]["firstCombatantInstanceIds"],
         json!([fs_defender_id])
     );
-    assert!(unit(&paused, &setup.attacker_id).is_none());
-    assert!(deathrite_ids.iter().all(|id| unit(&paused, id).is_none()));
+    assert_eq!(
+        unit(&paused, &setup.attacker_id).expect("marked attacker")["deathMarked"],
+        true
+    );
+    assert!(
+        deathrite_ids
+            .iter()
+            .all(|id| { unit(&paused, id).is_some_and(|value| value["deathMarked"] == true) })
+    );
     assert!(
         deathrite_ids
             .iter()

@@ -14,6 +14,9 @@ use sorcery_engine::checkpoint::{
 use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::session::{Session, StepResult};
 
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 fn avatar() -> Value {
     json!({
         "attack": 1,
@@ -254,8 +257,36 @@ fn rule_catalog_0296_deathrite_draw_spells_draws_a_hidden_spell_before_cemetery_
 #[test]
 fn rule_catalog_0297_deathrite_draw_spells_decks_out_on_an_empty_library() {
     let mut session = after_north_ready_to_end(297, &["north-source"; 3]);
-    assert_eq!(state(&session)["players"]["north"]["spellbook"], json!([]));
+    let before = state(&session);
+    assert_eq!(before["players"]["north"]["spellbook"], json!([]));
+    let source_id = before["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-source")
+        .expect("Deathrite source")["instanceId"]
+        .as_str()
+        .expect("source identity")
+        .to_owned();
+    let checkpoint = create_game_checkpoint(&session).expect("pre-terminal checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized checkpoint");
+    let mut resumed =
+        resume_game_checkpoint(&parse_game_checkpoint(&serialized).expect("parsed checkpoint"))
+            .expect("resumed pre-terminal session");
     let (_, receipt) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    let order = session.transcript().last().expect("terminal receipt");
+    let StepResult::Accepted(resumed_receipt) = resumed
+        .step(ActionRequest {
+            action_id: order.action_id.to_string(),
+            seat: order.seat,
+            state_version: order.state_version,
+        })
+        .expect("same issued terminal action after resume")
+    else {
+        panic!("resumed engine-issued action must be accepted");
+    };
+    assert_eq!(&resumed_receipt, order);
+    assert_eq!(state(&resumed), state(&session));
     assert!(
         receipt
             .events
@@ -272,5 +303,18 @@ fn rule_catalog_0297_deathrite_draw_spells_decks_out_on_an_empty_library() {
     assert_eq!(after["terminal"]["reason"], "deck_empty");
     assert_eq!(after["terminal"]["loser"], "north");
     assert_eq!(after["terminal"]["status"], "finished");
+    marked_death::assert_live_marked_before_cemetery(&after, &[source_id]);
+    let checkpoint = create_game_checkpoint(&session).expect("terminal checkpoint");
+    let serialized =
+        serialize_game_checkpoint(&checkpoint).expect("serialized terminal checkpoint");
+    let restored = resume_game_checkpoint(
+        &parse_game_checkpoint(&serialized).expect("parsed terminal checkpoint"),
+    )
+    .expect("resumed terminal checkpoint");
+    assert_eq!(state(&restored), after);
+    assert_eq!(
+        restored.legal_actions().expect("restored terminal actions"),
+        session.legal_actions().expect("terminal actions")
+    );
     assert_exact_replay(&session);
 }

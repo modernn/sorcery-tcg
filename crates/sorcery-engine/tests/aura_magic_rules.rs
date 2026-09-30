@@ -21,6 +21,9 @@
 //! Deathrites wait for ordering, Flood stays in hand and `cast-aura` is not
 //! offered until the pending chain drains.
 
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::checkpoint::{
@@ -866,13 +869,7 @@ fn rule_catalog_1148_cast_aura_withheld_during_pending_deathrite_order() {
             .as_array()
             .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-flood"))
     );
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(
         session
             .legal_actions()

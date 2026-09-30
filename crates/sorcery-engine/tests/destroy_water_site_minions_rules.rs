@@ -11,6 +11,9 @@
 //! no-op. This is one composed fact, exclusive of area damage and
 //! kill-mortal-here.
 
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt};
@@ -876,13 +879,7 @@ fn rule_catalog_1092_destroy_water_site_minions_withheld_during_pending_deathrit
     let paused = state(session);
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert_eq!(unit(&paused, &occupant_id)["location"], "C4");
     assert!(
         session

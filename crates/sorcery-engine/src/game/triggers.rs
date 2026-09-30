@@ -113,6 +113,11 @@ impl Game {
         mut triggers: Vec<GenesisTrigger>,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        if !triggers.is_empty() && self.position.units.iter().any(|unit| unit.death_marked) {
+            return Err(GameError::UnsupportedMechanic(
+                "Genesis trigger during marked minion work".to_owned(),
+            ));
+        }
         if triggers.len() == 1 && !triggers[0].needs_declaration() {
             return self.continue_resolution(
                 ResolutionContinuation::Genesis(triggers.pop().expect("one trigger")),

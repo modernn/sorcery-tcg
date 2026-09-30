@@ -12,10 +12,18 @@
 //! covers Unravel withheld while Deathrites wait for ordering, until the chain
 //! drains.
 
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
-use sorcery_engine::contract::{ActionRequest, Receipt};
-use sorcery_engine::session::{Session, StepResult};
+use sorcery_engine::checkpoint::{
+    create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+    serialize_game_checkpoint,
+};
+use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
+use sorcery_engine::game::GameError;
+use sorcery_engine::session::{Session, SessionError, StepResult};
 
 fn avatar() -> Value {
     json!({
@@ -357,6 +365,65 @@ fn state(session: &Session) -> Value {
     session.replay_value().expect("authoritative replay")["state"].clone()
 }
 
+fn assert_unsupported_action(session: &mut Session, predicate: impl Fn(&Value) -> bool) {
+    let checkpoint = create_game_checkpoint(session).expect("pre-attempt checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized checkpoint");
+    let checkpoint = parse_game_checkpoint(&serialized).expect("parsed checkpoint");
+    let before = session.replay_value().expect("pre-attempt replay");
+    let north_view = session.public_view(Seat::North).expect("North view");
+    let south_view = session.public_view(Seat::South).expect("South view");
+    let state_hash = session.state_hash().expect("pre-attempt state hash");
+    let transcript = session.transcript().to_vec();
+    let attempts = session.attempts().to_vec();
+    let action = session
+        .legal_actions()
+        .expect("pre-attempt legal actions")
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))
+        .expect("engine-issued Unravel action");
+    let request = ActionRequest {
+        action_id: action.action_id.to_string(),
+        seat: action.seat,
+        state_version: action.state_version,
+    };
+    let reason = "undead minion and artifact destruction overlap";
+
+    assert_unsupported(session.step(request.clone()), reason);
+    assert_eq!(session.unsupported_mechanic(), Some(reason));
+    assert_eq!(session.public_view(Seat::North).unwrap(), north_view);
+    assert_eq!(session.public_view(Seat::South).unwrap(), south_view);
+    assert_eq!(session.state_hash().unwrap(), state_hash);
+    assert_eq!(session.transcript(), transcript);
+    assert_eq!(session.attempts(), attempts);
+    assert_unsupported(session.legal_actions(), reason);
+    assert_unsupported(session.verify_replay(), reason);
+    assert!(create_game_checkpoint(session).is_err());
+
+    let mut branch = resume_game_checkpoint(&checkpoint).expect("restore pre-attempt branch");
+    assert_eq!(branch.replay_value().unwrap(), before);
+    assert_unsupported(branch.step(request), reason);
+    assert_eq!(branch.unsupported_mechanic(), Some(reason));
+    assert_eq!(branch.public_view(Seat::North).unwrap(), north_view);
+    assert_eq!(branch.public_view(Seat::South).unwrap(), south_view);
+    assert_eq!(branch.state_hash().unwrap(), state_hash);
+    assert_eq!(branch.transcript(), transcript);
+    assert_eq!(branch.attempts(), attempts);
+    assert!(branch.verify_replay().is_err());
+    assert!(create_game_checkpoint(&branch).is_err());
+    assert!(branch.replay_value().is_err());
+    assert!(branch.legal_actions().is_err());
+    let valid_branch = resume_game_checkpoint(&checkpoint).expect("restore valid checkpoint");
+    assert_eq!(valid_branch.replay_value().unwrap(), before);
+    assert!(valid_branch.verify_replay().unwrap());
+}
+
+fn assert_unsupported<T>(result: Result<T, SessionError>, reason: &str) {
+    assert!(matches!(
+        result,
+        Err(SessionError::Game(GameError::UnsupportedMechanic(actual))) if actual == reason
+    ));
+}
+
 fn event_types(receipt: &Receipt) -> Vec<&str> {
     receipt
         .events
@@ -396,13 +463,6 @@ fn seed_with_manifest(required: &[&str], manifest: impl Fn(u32) -> String) -> St
             required.iter().all(|id| hand.iter().any(|card| card == id))
         })
         .expect("bounded seed with required opening cards")
-}
-
-fn atlas_len(snapshot: &Value, seat: &str) -> usize {
-    snapshot["players"][seat]["atlas"]
-        .as_array()
-        .expect("atlas")
-        .len()
 }
 
 fn south_plays_c1_and_ends(session: &mut Session) {
@@ -665,20 +725,6 @@ fn undead_in_hand(snapshot: &Value) -> usize {
         .unwrap_or_default()
 }
 
-fn advance_full_round(session: &mut Session) {
-    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
-    accept_where(session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
-    });
-    let _ = try_accept_where(session, |descriptor| {
-        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
-    });
-    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
-    accept_where(session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    });
-}
-
 fn cast_unravel(session: &mut Session, cell: &str) -> Receipt {
     let (_, receipt) = accept_where(session, |descriptor| {
         descriptor["kind"] == "cast-magic"
@@ -845,7 +891,7 @@ fn seed_with_undead_and_relic_at_c4(start: u32) -> String {
 }
 
 #[test]
-fn rule_catalog_0575_destroy_undead_relics_here_destroys_undead_and_artifact_and_spares_beast() {
+fn rule_catalog_0575_mixed_undead_artifact_destruction_rolls_back_before_other_units_change() {
     let encoded = seed_with(&["north-unravel", "north-undead", "north-relic"]);
     let mut session = opening_main(&encoded);
     south_plays_c1_and_ends(&mut session);
@@ -869,67 +915,15 @@ fn rule_catalog_0575_destroy_undead_relics_here_destroys_undead_and_artifact_and
     );
     assert_eq!(unit(&before, &beast_id)["location"], "C4");
     assert_eq!(unit(&before, &beast_id)["damage"], 0);
+    assert!(!cemetery_has(&before, "north", &undead_id));
+    assert!(!cemetery_has(&before, "north", &relic_id));
     assert_eq!(unravel_locations(&session), ["C3", "C4"]);
 
-    let (cast, receipt) = accept_where(&mut session, |descriptor| {
+    assert_unsupported_action(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic"
             && descriptor["cardId"] == "north-unravel"
             && descriptor["targetLocation"]["cell"] == "C3"
     });
-    assert_eq!(
-        event_types(&receipt),
-        [
-            "magic-cast",
-            "minion-killed",
-            "minion-died",
-            "artifact-destroyed",
-            "magic-resolved"
-        ]
-    );
-    let kill = receipt
-        .events
-        .iter()
-        .find(|event| event.event_type == "minion-killed")
-        .expect("minion-killed");
-    assert_eq!(kill.payload["cardId"], "north-undead");
-    assert_eq!(kill.payload["instanceId"], undead_id);
-    assert_eq!(kill.payload["owner"], "north");
-    assert_eq!(kill.payload["seat"], "north");
-    assert_eq!(kill.payload["sourceInstanceId"], cast["cardInstanceId"]);
-    let destroyed = receipt
-        .events
-        .iter()
-        .find(|event| event.event_type == "artifact-destroyed")
-        .expect("artifact destruction");
-    assert_eq!(destroyed.payload["cardId"], "north-relic");
-    assert_eq!(destroyed.payload["instanceId"], relic_id);
-    assert_eq!(destroyed.payload["owner"], "north");
-    assert_eq!(
-        destroyed.payload["sourceInstanceId"],
-        cast["cardInstanceId"]
-    );
-    assert!(
-        !receipt
-            .events
-            .iter()
-            .any(|event| event.event_type == "damage-dealt")
-    );
-
-    let after = state(&session);
-    assert!(
-        after["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != undead_id)
-    );
-    assert!(realm_artifact(&after, &relic_id).is_none());
-    assert_eq!(unit(&after, &beast_id)["location"], "C4");
-    assert_eq!(unit(&after, &beast_id)["damage"], 0);
-    assert!(cemetery_has(&after, "north", &undead_id));
-    assert!(cemetery_has(&after, "north", &relic_id));
-    assert!(!cemetery_has(&after, "north", &beast_id));
-    assert_exact_replay(&session);
 }
 
 #[test]
@@ -972,7 +966,7 @@ fn rule_catalog_0576_destroy_undead_relics_here_empty_location_is_a_paid_noop() 
 }
 
 #[test]
-fn rule_catalog_1052_destroy_undead_relics_deathrite_draws_for_controller_on_kill() {
+fn rule_catalog_1052_mixed_undead_artifact_destruction_is_unsupported_before_deathrite_draw() {
     let encoded = (1052..1052 + 256)
         .map(unravel_deathrite_manifest)
         .find(|candidate| {
@@ -996,83 +990,19 @@ fn rule_catalog_1052_destroy_undead_relics_deathrite_draws_for_controller_on_kil
     });
     let relic_id = artifact_at(&session, "north-relic", "C3");
     let before = state(&session);
-    let north_atlas = atlas_len(&before, "north");
-    let south_atlas = atlas_len(&before, "south");
+    assert_eq!(unit(&before, &undead_id)["location"], "C3");
+    assert_eq!(
+        realm_artifact(&before, &relic_id).expect("relic at C3")["location"],
+        "C3"
+    );
+    assert!(!cemetery_has(&before, "north", &undead_id));
+    assert!(!cemetery_has(&before, "north", &relic_id));
 
-    let (cast, receipt) = accept_where(&mut session, |descriptor| {
+    assert_unsupported_action(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic"
             && descriptor["cardId"] == "north-unravel"
             && descriptor["targetLocation"]["cell"] == "C3"
     });
-    assert_eq!(
-        event_types(&receipt),
-        [
-            "magic-cast",
-            "minion-killed",
-            "site-drawn",
-            "minion-died",
-            "artifact-destroyed",
-            "magic-resolved",
-        ]
-    );
-    let kill = receipt
-        .events
-        .iter()
-        .find(|event| event.event_type == "minion-killed")
-        .expect("minion-killed");
-    assert_eq!(kill.payload["cardId"], "north-undead");
-    assert_eq!(kill.payload["instanceId"], undead_id);
-    assert_eq!(kill.payload["owner"], "north");
-    assert_eq!(kill.payload["seat"], "north");
-    assert_eq!(kill.payload["sourceInstanceId"], cast["cardInstanceId"]);
-    let drawn = receipt
-        .events
-        .iter()
-        .find(|event| event.event_type == "site-drawn")
-        .expect("Deathrite site draw");
-    assert_eq!(drawn.payload["seat"], "north");
-    assert_eq!(drawn.payload["sourceInstanceId"], undead_id);
-    let types = event_types(&receipt);
-    let site_drawn = types
-        .iter()
-        .position(|event_type| *event_type == "site-drawn")
-        .expect("site-drawn index");
-    let magic_resolved = types
-        .iter()
-        .position(|event_type| *event_type == "magic-resolved")
-        .expect("magic-resolved index");
-    assert!(
-        site_drawn < magic_resolved,
-        "magic-resolved must follow deathrite site-drawn"
-    );
-    assert_eq!(types.last(), Some(&"magic-resolved"));
-    let destroyed = receipt
-        .events
-        .iter()
-        .find(|event| event.event_type == "artifact-destroyed")
-        .expect("artifact destruction");
-    assert_eq!(destroyed.payload["cardId"], "north-relic");
-    assert_eq!(destroyed.payload["instanceId"], relic_id);
-    assert_eq!(destroyed.payload["owner"], "north");
-    assert_eq!(
-        destroyed.payload["sourceInstanceId"],
-        cast["cardInstanceId"]
-    );
-
-    let after = state(&session);
-    assert!(
-        after["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != undead_id)
-    );
-    assert!(realm_artifact(&after, &relic_id).is_none());
-    assert!(cemetery_has(&after, "north", &undead_id));
-    assert!(cemetery_has(&after, "north", &relic_id));
-    assert_eq!(atlas_len(&after, "north"), north_atlas - 1);
-    assert_eq!(atlas_len(&after, "south"), south_atlas);
-    assert_exact_replay(&session);
 }
 
 #[test]
@@ -1086,13 +1016,7 @@ fn rule_catalog_1098_destroy_undead_relics_withheld_during_pending_deathrite_ord
     let paused = state(session);
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert_eq!(
         realm_artifact(&paused, &relic_id).expect("nearby relic")["location"],
         "C4"
@@ -1160,20 +1084,21 @@ fn rule_catalog_1098_destroy_undead_relics_withheld_during_pending_deathrite_ord
 }
 
 #[test]
-fn rule_catalog_1853_killed_undead_stays_in_cemetery_after_turns_pass() {
+fn rule_catalog_1853_mixed_undead_artifact_destruction_is_unsupported_before_cemetery_persistence()
+{
     let encoded = seed_with_start(1853, &["north-undead", "north-relic", "north-unravel"]);
     let mut session = opening_main(&encoded);
     let undead_id = summon_at(&mut session, "north-undead", "C4");
     let relic_id = cast_relic_at(&mut session, "C4");
-    cast_unravel(&mut session, "C4");
-    assert!(unit_absent(&state(&session), &undead_id));
-    assert!(cemetery_has(&state(&session), "north", &undead_id));
-    assert!(cemetery_has(&state(&session), "north", &relic_id));
-    advance_full_round(&mut session);
-    assert!(unit_absent(&state(&session), &undead_id));
-    assert!(cemetery_has(&state(&session), "north", &undead_id));
-    assert!(cemetery_has(&state(&session), "north", &relic_id));
-    assert_exact_replay(&session);
+    let before = state(&session);
+    assert_eq!(unit(&before, &undead_id)["location"], "C4");
+    assert!(realm_artifact(&before, &relic_id).is_some());
+    assert!(unravel_locations(&session).contains(&"C4".to_owned()));
+    assert_unsupported_action(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-unravel"
+            && descriptor["targetLocation"]["cell"] == "C4"
+    });
 }
 
 #[test]
@@ -1221,58 +1146,40 @@ fn rule_catalog_1855_second_unravel_kills_a_newly_arrived_undead_at_the_same_cel
 }
 
 #[test]
-fn rule_catalog_1856_unravel_kills_every_undead_and_destroys_every_artifact_sharing_the_target_cell()
- {
+fn rule_catalog_1856_mixed_undead_artifact_cohort_is_unsupported_and_rolls_back() {
     let encoded = seed_with_undead_and_relic_at_c4(1856);
     let mut session = opening_main(&encoded);
     let undead_id = summon_at(&mut session, "north-undead", "C4");
     let relic_id = cast_relic_at(&mut session, "C4");
-    let destroyed = cast_unravel(&mut session, "C4");
-    let kills: Vec<_> = destroyed
-        .events
-        .iter()
-        .filter(|event| event.event_type == "minion-killed")
-        .map(|event| {
-            event.payload["instanceId"]
-                .as_str()
-                .expect("killed minion")
-                .to_owned()
-        })
-        .collect();
-    let relic_destroys: Vec<_> = destroyed
-        .events
-        .iter()
-        .filter(|event| event.event_type == "artifact-destroyed")
-        .map(|event| {
-            event.payload["instanceId"]
-                .as_str()
-                .expect("destroyed artifact")
-                .to_owned()
-        })
-        .collect();
-    assert_eq!(kills, vec![undead_id.clone()]);
-    assert_eq!(relic_destroys, vec![relic_id.clone()]);
-    assert!(unit_absent(&state(&session), &undead_id));
-    assert!(realm_artifact(&state(&session), &relic_id).is_none());
-    assert!(cemetery_has(&state(&session), "north", &undead_id));
-    assert!(cemetery_has(&state(&session), "north", &relic_id));
-    assert_exact_replay(&session);
+    let before = state(&session);
+    assert_eq!(unit(&before, &undead_id)["location"], "C4");
+    assert!(realm_artifact(&before, &relic_id).is_some());
+    assert_unsupported_action(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-unravel"
+            && descriptor["targetLocation"]["cell"] == "C4"
+    });
 }
 
 #[test]
-fn rule_catalog_1857_unravel_leaves_a_far_undead_untouched() {
+fn rule_catalog_1857_mixed_undead_artifact_destruction_rolls_back_with_far_unit_unchanged() {
     let encoded = seed_with_start(1857, &["north-undead", "north-relic", "north-unravel"]);
     let mut session = opening_main(&encoded);
     let undead_id = summon_at(&mut session, "north-undead", "C4");
     let relic_id = cast_relic_at(&mut session, "C4");
     let far_id = south_plays_c1_and_summons_undead(&mut session);
-    cast_unravel(&mut session, "C4");
-    assert!(unit_absent(&state(&session), &undead_id));
-    assert!(cemetery_has(&state(&session), "north", &undead_id));
-    assert!(cemetery_has(&state(&session), "north", &relic_id));
-    assert_eq!(unit(&state(&session), &far_id)["damage"], 0);
-    assert!(!cemetery_has(&state(&session), "south", &far_id));
-    assert_exact_replay(&session);
+    let before = state(&session);
+    assert_eq!(unit(&before, &undead_id)["location"], "C4");
+    assert!(realm_artifact(&before, &relic_id).is_some());
+    assert_eq!(unit(&before, &far_id)["damage"], 0);
+    assert!(!cemetery_has(&before, "north", &undead_id));
+    assert!(!cemetery_has(&before, "north", &relic_id));
+    assert!(!cemetery_has(&before, "south", &far_id));
+    assert_unsupported_action(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-unravel"
+            && descriptor["targetLocation"]["cell"] == "C4"
+    });
 }
 
 #[test]

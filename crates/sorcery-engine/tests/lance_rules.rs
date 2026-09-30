@@ -7,6 +7,9 @@ use sorcery_engine::checkpoint::{
 use sorcery_engine::contract::{ActionRequest, Receipt};
 use sorcery_engine::session::{Session, StepResult};
 
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 struct LanceSetup {
     attacker_id: String,
     session: Session,
@@ -504,6 +507,7 @@ fn rule_catalog_0742_lance_break_precedes_deathrite_deck_out_and_terminal_replay
     let lancer = minion(json!({ "attack": 1, "defense": 1, "lanceCount": 1 }));
     let deathrite = minion(json!({ "deathriteDrawSite": true, "defense": 2 }));
     let mut setup = prepare_lance(201, &lancer, &deathrite, true, 3);
+    let target_id = setup.target_id.clone().expect("Deathrite target");
     declare_attack(&mut setup, "minion");
     let receipt = close_defend(&mut setup.session, true);
 
@@ -515,7 +519,6 @@ fn rule_catalog_0742_lance_break_precedes_deathrite_deck_out_and_terminal_replay
             "strike-damage-allocated",
             "damage-dealt",
             "lance-broken",
-            "minion-died",
             "game-ended",
         ]
     );
@@ -535,6 +538,7 @@ fn rule_catalog_0742_lance_break_precedes_deathrite_deck_out_and_terminal_replay
             .expect("terminal legal actions")
             .is_empty()
     );
+    marked_death::assert_live_marked_before_cemetery(&state(&setup.session), &[target_id]);
     assert_exact_replay(&setup.session);
 }
 

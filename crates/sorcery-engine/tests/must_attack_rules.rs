@@ -5,6 +5,9 @@
 //! minions that can attack that unit to do so, before optional main-phase
 //! actions.
 
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
 use sorcery_engine::contract::{ActionRequest, Receipt};
@@ -699,13 +702,7 @@ fn rule_catalog_1170_must_attack_move_and_attack_withheld_during_pending_deathri
         unit_instance_id(&paused, "south-minion").as_ref(),
         Some(&target_id)
     );
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(
         session
             .legal_actions()
@@ -909,13 +906,7 @@ fn rule_catalog_1181_enemies_must_attack_move_and_attack_withheld_during_pending
         unit_instance_id(&paused, "south-minion").as_ref(),
         Some(&target_id)
     );
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(
         session
             .legal_actions()

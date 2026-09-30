@@ -4,9 +4,13 @@ use sorcery_engine::checkpoint::{
     create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
     serialize_game_checkpoint,
 };
-use sorcery_engine::contract::{ActionRequest, Receipt};
+use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
+use sorcery_engine::game::{Game, GameError};
 use sorcery_engine::session::{Session, StepResult};
 use sorcery_engine::synthetic::synthetic_demo_manifest_json;
+
+#[path = "common/marked_death.rs"]
+mod marked_death;
 
 struct AttackSetup {
     attacker_id: String,
@@ -166,6 +170,136 @@ fn event_types(receipt: &Receipt) -> Vec<&str> {
         .collect()
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "fixed terminal matrix keeps explicit seat, life, deck, and body parameters"
+)]
+fn fixed_terminal_manifest(
+    first_seat: &str,
+    north_life: u64,
+    south_life: u64,
+    north_atlas: usize,
+    south_atlas: usize,
+    body_facts: &Value,
+    area_kind: Option<&str>,
+    include_primer: bool,
+) -> String {
+    let mut area_query = json!({"area":{"realm":{}},"controller":"any","excludeSource":false});
+    if let Some(kind) = area_kind {
+        area_query["kind"] = json!(kind);
+    }
+    let mut cards = json!({
+        "north-avatar": {"attack":1,"cardType":"avatar","defense":1,"drawSpell":false,"life":north_life},
+        "south-avatar": {"attack":1,"cardType":"avatar","defense":1,"drawSpell":false,"life":south_life},
+        "site": {"cardType":"site","elements":["earth"]},
+        "victim": minion(body_facts),
+        "area": {"cardType":"magic","manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0},"effectProgram":{"effects":[
+            {"op":"damage","amount":1,"recipients":{"query":area_query}},
+            {"op":"draw","zone":"atlas","count":1}
+        ]}},
+        "filler": minion(&json!({})),
+    });
+    if include_primer {
+        cards["primer"] = json!({"cardType":"magic","manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0},"effectProgram":{"effects":[
+            {"op":"damage","amount":1,"recipients":{"query":{"area":{"realm":{}},"controller":"any","excludeSource":false,"kind":"avatar"}}}
+        ]}});
+    }
+    let first_cards = if include_primer {
+        vec!["victim", "primer", "area"]
+    } else {
+        vec!["victim", "victim", "area"]
+    };
+    let (north_spells, south_spells) = if first_seat == "north" {
+        (first_cards, vec!["filler", "filler", "filler"])
+    } else {
+        (vec!["filler", "filler", "filler"], first_cards)
+    };
+    finish_manifest(
+        json!({
+            "authority":{"contentHash":identity_hash(&json!({"fixture":"accepted-terminal-current-event-proof"})).expect("fixture identity"),"mode":"synthetic","revisionId":"synthetic-terminal-current-event-proof-v1"},
+            "cards":cards,
+            "decks":{
+                "north":{"atlas":vec!["site";north_atlas],"avatar":"north-avatar","spellbook":north_spells},
+                "south":{"atlas":vec!["site";south_atlas],"avatar":"south-avatar","spellbook":south_spells}
+            },
+            "engineVersion":"sorcery-core-v1","firstSeat":first_seat,"schemaVersion":1,"seed":9401
+        }),
+        "synthetic-terminal-current-event-proof-v1",
+    )
+}
+
+fn prepare_terminal_area(
+    encoded: &str,
+    first_seat: &str,
+    body_count: usize,
+    primer: bool,
+    later_turn: bool,
+) -> Session {
+    let mut session = Session::new(encoded).expect("valid accepted terminal fixture");
+    keep(&mut session);
+    keep(&mut session);
+    let first_cell = if first_seat == "north" { "C4" } else { "C1" };
+    let other_cell = if first_seat == "north" { "C1" } else { "C4" };
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == first_cell
+    });
+    for _ in 0..body_count {
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == "victim"
+                && descriptor["cell"] == first_cell
+        });
+    }
+    if primer {
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "primer"
+        });
+        if later_turn {
+            accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+            accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+            });
+            accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "play-site" && descriptor["cell"] == other_cell
+            });
+            accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+            accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+            });
+        }
+    }
+    assert_eq!(
+        session.acting_controller(),
+        if first_seat == "north" {
+            Seat::North
+        } else {
+            Seat::South
+        }
+    );
+    session
+}
+
+fn replay_game_for_session(session: &Session) -> Game {
+    let mut game = Game::from_manifest_json(session.manifest_json()).expect("replay Game fixture");
+    for receipt in session.transcript() {
+        let action = game
+            .legal_actions()
+            .expect("Ignore-path legal actions")
+            .into_iter()
+            .find(|action| {
+                action
+                    .to_legal_action()
+                    .expect("Ignore-path action")
+                    .action_id
+                    == receipt.action_id
+            })
+            .expect("accepted Session action exists in Ignore path");
+        game.apply_action(&action)
+            .expect("Ignore-path accepted action");
+    }
+    game
+}
+
 fn north_attacks_at_c2(manifest: &str) -> AttackSetup {
     let mut session = Session::new(manifest).expect("valid Deathrite combat scenario");
     keep(&mut session);
@@ -288,6 +422,10 @@ fn unit_ids_for_cards(session: &Session, card_ids: &[String]) -> Vec<String> {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one simultaneous Deathrite order and cemetery sequence proof"
+)]
 fn rule_catalog_0776_simultaneous_deathrites_resolve_nap_then_ap_before_cemetery() {
     let facts = json!({ "deathriteDrawSite": true });
     let manifest = combat_manifest(48, &facts, &facts, 20);
@@ -330,21 +468,77 @@ fn rule_catalog_0776_simultaneous_deathrites_resolve_nap_then_ap_before_cemetery
     assert_exact_replay(&setup.session);
 
     let empty_manifest = empty_atlas_combat_manifest(49, &facts);
-    let (deck_out, receipt) = resolve_minion_fight(&empty_manifest);
-    assert!(
-        receipt
-            .events
-            .iter()
-            .all(|event| event.event_type != "site-drawn")
+    let mut deck_out = north_attacks_at_c2(&empty_manifest);
+    accept_where(&mut deck_out.session, |descriptor| {
+        descriptor["kind"] == "declare-attack"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == deck_out.target_id
+    });
+    let action = deck_out
+        .session
+        .legal_actions()
+        .expect("final defense actions")
+        .into_iter()
+        .find(|action| {
+            action.descriptor["kind"] == "close-defend"
+                && action.descriptor["originalTargetParticipates"] == true
+        })
+        .expect("engine-issued lethal attack action");
+    let before_view = deck_out
+        .session
+        .public_view(Seat::North)
+        .expect("pre-attempt view");
+    let before_hash = deck_out.session.state_hash().expect("pre-attempt hash");
+    assert_checkpoint_round_trip(&deck_out.session);
+    let before_transcript = deck_out.session.transcript().to_vec();
+    let before_attempts = deck_out.session.attempts().to_vec();
+    let StepResult::Accepted(receipt) = deck_out
+        .session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .expect("the first failed Atlas draw ends the game")
+    else {
+        panic!("engine-issued Deathrite order must resolve");
+    };
+    assert_ne!(
+        deck_out.session.public_view(Seat::North).unwrap(),
+        before_view
+    );
+    assert_ne!(deck_out.session.state_hash().unwrap(), before_hash);
+    assert_ne!(deck_out.session.transcript(), before_transcript);
+    assert!(deck_out.session.attempts().len() > before_attempts.len());
+    assert!(deck_out.session.unsupported_mechanic().is_none());
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "defend-window-closed",
+            "fight-started",
+            "strike-damage-allocated",
+            "damage-dealt",
+            "damage-dealt",
+            "game-ended",
+        ]
     );
     assert_eq!(
         state(&deck_out.session)["terminal"],
-        json!({
-            "reason": "simultaneous_defeat",
-            "result": "draw",
-            "status": "finished",
-        })
+        json!({"status":"finished","winner":"north","loser":"south","reason":"deck_empty"})
     );
+    marked_death::assert_live_marked_before_cemetery(
+        &state(&deck_out.session),
+        &[deck_out.attacker_id.clone(), deck_out.target_id.clone()],
+    );
+    assert!(
+        !event_types(&receipt).iter().any(|kind| [
+            "site-drawn",
+            "minion-died",
+            "simultaneous-defeat"
+        ]
+        .contains(kind))
+    );
+    assert_checkpoint_round_trip(&deck_out.session);
     assert_exact_replay(&deck_out.session);
 }
 
@@ -1124,6 +1318,26 @@ fn rule_catalog_0877_deathrite_area_damage_chains_in_ordered_simultaneous_batche
         "non-active-order"
     );
     assert_checkpoint_round_trip(&session);
+    let paused_state = state(&session);
+    let paused_units = paused_state["realm"]["units"]
+        .as_array()
+        .expect("live marked wave units");
+    let paused_unit = |instance_id: &str| {
+        paused_units
+            .iter()
+            .find(|unit| unit["instanceId"] == instance_id)
+            .expect("live occurrence")
+    };
+    assert!(
+        scarab_ids
+            .iter()
+            .all(|id| paused_unit(id)["deathMarked"] == true)
+    );
+    assert_eq!(paused_unit(&chained_id)["deathMarked"], Value::Null);
+    assert_eq!(paused_unit(&source_id)["deathMarked"], Value::Null);
+    assert!(trigger.events.iter().all(|event| {
+        event.event_type != "deathrite-damage-allocated" && event.event_type != "minion-died"
+    }));
     let first_id = session
         .legal_actions()
         .expect("Deathrite ordering actions")[0]
@@ -1139,7 +1353,7 @@ fn rule_catalog_0877_deathrite_area_damage_chains_in_ordered_simultaneous_batche
         .iter()
         .filter(|event| event.event_type == "deathrite-damage-allocated")
         .collect();
-    assert_eq!(allocations.len(), 7);
+    assert_eq!(allocations.len(), 12);
     let mut source_order = Vec::new();
     for event in &allocations {
         let source = event.payload["sourceInstanceId"]
@@ -1154,7 +1368,76 @@ fn rule_catalog_0877_deathrite_area_damage_chains_in_ordered_simultaneous_batche
         .find(|id| **id != first_id)
         .expect("other initial Deathrite")
         .clone();
-    assert_eq!(source_order, [first_id, chained_id, other_id]);
+    assert_eq!(
+        source_order,
+        [first_id.clone(), chained_id.clone(), other_id.clone()]
+    );
+    let mut all_recipients = allocations
+        .iter()
+        .map(|event| {
+            event.payload["targetInstanceId"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect::<Vec<_>>();
+    all_recipients.extend([source_id.clone(), chained_id.clone()]);
+    all_recipients.extend(scarab_ids.iter().cloned());
+    all_recipients.sort();
+    all_recipients.dedup();
+    assert_eq!(
+        all_recipients.len(),
+        5,
+        "four minions plus the nearby avatar"
+    );
+    for source in &source_order {
+        let mut actual_targets = allocations
+            .iter()
+            .filter(|event| event.payload["sourceInstanceId"] == *source)
+            .map(|event| {
+                assert_eq!(event.payload["amount"], 1);
+                event.payload["targetInstanceId"]
+                    .as_str()
+                    .expect("allocated recipient")
+                    .to_owned()
+            })
+            .collect::<Vec<_>>();
+        actual_targets.sort();
+        let mut expected_targets = all_recipients
+            .iter()
+            .filter(|target| *target != source)
+            .cloned()
+            .collect::<Vec<_>>();
+        expected_targets.sort();
+        assert_eq!(actual_targets, expected_targets, "recipients for {source}");
+    }
+    let mut departed = resolved
+        .events
+        .iter()
+        .filter(|event| event.event_type == "minion-died")
+        .map(|event| event.payload["instanceId"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    departed.sort();
+    let mut expected_departed = source_order.clone();
+    expected_departed.sort();
+    assert_eq!(departed, expected_departed);
+    let final_state = state(&session);
+    let final_units = final_state["realm"]["units"]
+        .as_array()
+        .expect("final realm units");
+    assert!(expected_departed.iter().all(|id| {
+        !final_units
+            .iter()
+            .any(|unit| unit["instanceId"] == id.as_str())
+    }));
+    let south_cemetery = final_state["players"]["south"]["cemetery"]
+        .as_array()
+        .expect("owner cemetery");
+    assert!(expected_departed.iter().all(|id| {
+        south_cemetery
+            .iter()
+            .any(|card| card["instanceId"] == id.as_str())
+    }));
     let types = event_types(&resolved);
     assert!(
         types
@@ -1170,7 +1453,7 @@ fn rule_catalog_0877_deathrite_area_damage_chains_in_ordered_simultaneous_batche
         types.iter().filter(|kind| **kind == "minion-died").count(),
         3
     );
-    let after = state(&session);
+    let after = final_state;
     assert_eq!(after["players"]["north"]["avatar"]["life"], 20);
     assert_eq!(after["players"]["south"]["avatar"]["life"], 16);
     let units = after["realm"]["units"].as_array().expect("realm units");
@@ -1185,6 +1468,730 @@ fn rule_catalog_0877_deathrite_area_damage_chains_in_ordered_simultaneous_batche
     );
     assert!(resolved.random_draws.is_empty());
     assert_exact_replay(&session);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one simultaneous area event pins terminal current-event completion"
+)]
+fn simultaneous_area_terminal_preserves_marked_harmful_deathrite() {
+    let encoded = fixed_terminal_manifest(
+        "north",
+        20,
+        1,
+        8,
+        8,
+        &json!({"deathriteDamageEachUnitHere":1}),
+        None,
+        true,
+    );
+    let mut session = prepare_terminal_area(&encoded, "north", 1, true, true);
+    let before_cast = state(&session);
+    assert_eq!(before_cast["players"]["north"]["avatar"]["life"], 19);
+    assert_eq!(before_cast["players"]["south"]["avatar"]["life"], 0);
+    let victim_id = before_cast["realm"]["units"][0]["instanceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let action = session
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.descriptor["kind"] == "cast-magic" && a.descriptor["cardId"] == "area")
+        .expect("issued area Magic");
+    let mut ignored = replay_game_for_session(&session);
+    let ignored_action = ignored
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.to_legal_action().unwrap().action_id == action.action_id)
+        .expect("same issued action in Ignore path");
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .unwrap()
+    else {
+        panic!("area action accepted")
+    };
+    ignored
+        .apply_action(&ignored_action)
+        .expect("Ignore-path area action");
+    let after = state(&session);
+    assert_eq!(ignored.authoritative_state(), after);
+    assert_eq!(ignored.state_hash().unwrap(), session.state_hash().unwrap());
+    assert_eq!(event_types(&receipt).last(), Some(&"game-ended"));
+    assert_eq!(
+        receipt.events.last().unwrap().payload,
+        json!({"loser":"south","reason":"avatar_defeated","winner":"north"})
+    );
+    let damaged: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|e| e.event_type == "damage-dealt")
+        .map(|e| e.payload["instanceId"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(damaged.iter().filter(|id| *id == &victim_id).count(), 1);
+    assert_eq!(
+        damaged
+            .iter()
+            .filter(|id| *id
+                == after["players"]["north"]["avatar"]["card"]["instanceId"]
+                    .as_str()
+                    .unwrap())
+            .count(),
+        1
+    );
+    assert_eq!(
+        damaged
+            .iter()
+            .filter(|id| *id
+                == after["players"]["south"]["avatar"]["card"]["instanceId"]
+                    .as_str()
+                    .unwrap())
+            .count(),
+        1
+    );
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 18);
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .filter(|e| e.event_type == "death-blow" && e.payload["seat"] == "south")
+            .count(),
+        1
+    );
+    assert!(!event_types(&receipt).iter().any(|kind| {
+        [
+            "deathrite-damage-allocated",
+            "minion-died",
+            "site-drawn",
+            "magic-resolved",
+        ]
+        .contains(kind)
+    }));
+    assert_eq!(
+        after["realm"]["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|unit| unit["instanceId"] == victim_id)
+            .count(),
+        1
+    );
+    let victim = after["realm"]["units"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|unit| unit["instanceId"] == victim_id)
+        .unwrap();
+    assert_eq!(victim["deathMarked"], true);
+    assert_eq!(victim["damage"], 1);
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|card| card["instanceId"] != victim_id)
+    );
+    assert!(
+        after["pendingDeathrites"]["marked"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["instanceId"] == victim_id)
+    );
+    assert!(
+        after["pendingDeathrites"]["batches"][0]["resolving"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|source| source["instanceId"] == victim_id)
+    );
+    assert_eq!(after["pendingDeathrites"]["continuation"]["kind"], "effect");
+    assert_eq!(after["pendingDeathrites"]["continuation"]["entry"], "magic");
+    assert_eq!(after["pendingDeathrites"]["continuation"]["cursor"], 1);
+    let magic_id = receipt.events[0].payload["instanceId"].clone();
+    assert_eq!(
+        after["pendingDeathrites"]["continuation"]["magic"]["instanceId"],
+        magic_id
+    );
+    assert_eq!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|card| card["instanceId"] == magic_id)
+            .count(),
+        0
+    );
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|card| card["instanceId"] == magic_id)
+            .count(),
+        0
+    );
+    assert!(session.legal_actions().unwrap().is_empty());
+    assert_exact_replay(&session);
+    assert_checkpoint_round_trip(&session);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "mirrored simultaneous defeat and same-turn Death's Door are one bounded comparison"
+)]
+fn simultaneous_area_double_death_blow_and_same_turn_control() {
+    for (first, area_kind, later, expected_deathblows) in [
+        ("north", None, true, 2usize),
+        ("south", None, true, 2usize),
+        ("north", None, false, 0usize),
+    ] {
+        let encoded = fixed_terminal_manifest(
+            first,
+            1,
+            1,
+            8,
+            8,
+            &json!({"deathriteDamageEachUnitHere":1}),
+            area_kind,
+            true,
+        );
+        let mut session = prepare_terminal_area(&encoded, first, 1, true, later);
+        let before = state(&session);
+        let victim_id = before["realm"]["units"][0]["instanceId"].clone();
+        let action = session
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|a| a.descriptor["kind"] == "cast-magic" && a.descriptor["cardId"] == "area")
+            .unwrap();
+        let mut ignored = replay_game_for_session(&session);
+        let ignored_action = ignored
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|a| a.to_legal_action().unwrap().action_id == action.action_id)
+            .unwrap();
+        let StepResult::Accepted(receipt) = session
+            .step(ActionRequest {
+                action_id: action.action_id.to_string(),
+                seat: action.seat,
+                state_version: action.state_version,
+            })
+            .unwrap()
+        else {
+            panic!("area action accepted")
+        };
+        ignored.apply_action(&ignored_action).unwrap();
+        let after = state(&session);
+        assert_eq!(ignored.authoritative_state(), after);
+        assert_eq!(ignored.state_hash().unwrap(), session.state_hash().unwrap());
+        assert_eq!(
+            receipt
+                .events
+                .iter()
+                .filter(|event| event.event_type == "death-blow")
+                .count(),
+            expected_deathblows
+        );
+        if later {
+            assert_eq!(
+                receipt
+                    .events
+                    .iter()
+                    .filter(|event| event.event_type == "game-ended")
+                    .count(),
+                1
+            );
+            assert_eq!(
+                receipt
+                    .events
+                    .iter()
+                    .find(|event| event.event_type == "game-ended")
+                    .unwrap()
+                    .payload,
+                json!({"reason":"simultaneous_avatar_defeat","result":"draw"})
+            );
+            for seat in ["north", "south"] {
+                let avatar_id = before["players"][seat]["avatar"]["card"]["instanceId"].clone();
+                assert_eq!(
+                    receipt
+                        .events
+                        .iter()
+                        .filter(|event| event.event_type == "death-blow"
+                            && event.payload["instanceId"] == avatar_id)
+                        .count(),
+                    1
+                );
+            }
+            assert_eq!(after["realm"]["units"][0]["instanceId"], victim_id);
+            assert_eq!(after["realm"]["units"][0]["deathMarked"], true);
+            assert!(
+                event_types(&receipt)
+                    .iter()
+                    .position(|kind| *kind == "game-ended")
+                    .unwrap()
+                    > event_types(&receipt)
+                        .iter()
+                        .position(|kind| *kind == "damage-dealt")
+                        .unwrap()
+            );
+        } else {
+            assert_eq!(
+                receipt
+                    .events
+                    .iter()
+                    .filter(|event| event.event_type == "game-ended"
+                        || event.event_type == "death-blow")
+                    .count(),
+                0
+            );
+            for seat in ["north", "south"] {
+                let avatar_id = before["players"][seat]["avatar"]["card"]["instanceId"].clone();
+                assert!(
+                    receipt
+                        .events
+                        .iter()
+                        .any(|event| event.event_type == "damage-dealt"
+                            && event.payload["instanceId"] == avatar_id
+                            && event.payload["amount"] == 0)
+                );
+            }
+            assert_eq!(
+                receipt
+                    .events
+                    .iter()
+                    .filter(|event| event.event_type == "minion-died"
+                        && event.payload["instanceId"] == victim_id)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                receipt
+                    .events
+                    .iter()
+                    .filter(|event| event.event_type == "site-drawn")
+                    .count(),
+                1
+            );
+            assert_eq!(
+                receipt
+                    .events
+                    .iter()
+                    .filter(|event| event.event_type == "magic-resolved")
+                    .count(),
+                1
+            );
+            assert_eq!(
+                after["players"]["north"]["cemetery"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|card| card["instanceId"] == victim_id)
+                    .count(),
+                1
+            );
+        }
+        assert_exact_replay(&session);
+        assert_checkpoint_round_trip(&session);
+    }
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "terminal unsupported rollback is paired with its identical nonterminal control"
+)]
+fn mixed_terminal_deathrite_rolls_back_but_same_facts_nonterminal_completes() {
+    let body = json!({"deathriteDamageEachUnitHere":1,"deathriteHeal":1});
+    let encoded = fixed_terminal_manifest("north", 1, 1, 8, 8, &body, Some("minion"), true);
+    let mut session = prepare_terminal_area(&encoded, "north", 1, true, true);
+    let checkpoint_bytes =
+        serialize_game_checkpoint(&create_game_checkpoint(&session).unwrap()).unwrap();
+    let pre_state = state(&session);
+    let pre_hash = session.state_hash().unwrap();
+    let pre_version = session.state_version();
+    let pre_transcript = session.transcript().to_vec();
+    let pre_north = session.public_view(Seat::North).unwrap();
+    let pre_south = session.public_view(Seat::South).unwrap();
+    let pre_actions = session.legal_actions().unwrap();
+    assert_eq!(
+        pre_north["players"]["north"]["avatar"]["life"],
+        pre_state["players"]["north"]["avatar"]["life"]
+    );
+    assert_eq!(
+        pre_south["players"]["south"]["avatar"]["life"],
+        pre_state["players"]["south"]["avatar"]["life"]
+    );
+    let mut ignored = replay_game_for_session(&session);
+    let action = session
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.descriptor["kind"] == "cast-magic" && a.descriptor["cardId"] == "area")
+        .unwrap();
+    let ignored_action = ignored
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.to_legal_action().unwrap().action_id == action.action_id)
+        .unwrap();
+    let error = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .unwrap_err();
+    assert!(
+        matches!(error, sorcery_engine::session::SessionError::Game(GameError::UnsupportedMechanic(ref reason)) if reason == "mixed Deathrite clause at terminal damage")
+    );
+    assert_eq!(
+        session.unsupported_mechanic(),
+        Some("mixed Deathrite clause at terminal damage")
+    );
+    assert_eq!(session.state_hash().unwrap(), pre_hash);
+    assert_eq!(session.state_version(), pre_version);
+    assert_eq!(session.transcript(), pre_transcript);
+    assert_eq!(session.public_view(Seat::North).unwrap(), pre_north);
+    assert_eq!(session.public_view(Seat::South).unwrap(), pre_south);
+    assert!(session.replay_value().is_err());
+    assert!(session.session_hash().is_err());
+    assert!(session.verify_replay().is_err());
+    assert!(session.legal_actions().is_err());
+    assert!(create_game_checkpoint(&session).is_err());
+    let error = ignored.apply_action(&ignored_action).unwrap_err();
+    assert!(
+        matches!(error, GameError::UnsupportedMechanic(ref reason) if reason == "mixed Deathrite clause at terminal damage")
+    );
+    assert_eq!(ignored.authoritative_state(), pre_state);
+    let restored =
+        resume_game_checkpoint(&parse_game_checkpoint(&checkpoint_bytes).unwrap()).unwrap();
+    assert_eq!(state(&restored), pre_state);
+    assert_eq!(restored.legal_actions().unwrap(), pre_actions);
+    let restored_action = restored
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.action_id == action.action_id)
+        .expect("same issued cast after pre-failure checkpoint restore");
+    let mut restored = restored;
+    let restored_error = restored
+        .step(ActionRequest {
+            action_id: restored_action.action_id.to_string(),
+            seat: restored_action.seat,
+            state_version: restored_action.state_version,
+        })
+        .unwrap_err();
+    assert!(
+        matches!(restored_error, sorcery_engine::session::SessionError::Game(GameError::UnsupportedMechanic(ref reason)) if reason == "mixed Deathrite clause at terminal damage")
+    );
+
+    let control = fixed_terminal_manifest("north", 20, 20, 8, 8, &body, Some("minion"), true);
+    let mut positive = prepare_terminal_area(&control, "north", 1, true, true);
+    let before = state(&positive);
+    let victim_id = before["realm"]["units"][0]["instanceId"].clone();
+    let area_action = positive
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.descriptor["kind"] == "cast-magic" && a.descriptor["cardId"] == "area")
+        .unwrap();
+    let mut positive_ignore = replay_game_for_session(&positive);
+    let ignored_action = positive_ignore
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.to_legal_action().unwrap().action_id == area_action.action_id)
+        .unwrap();
+    let StepResult::Accepted(receipt) = positive
+        .step(ActionRequest {
+            action_id: area_action.action_id.to_string(),
+            seat: area_action.seat,
+            state_version: area_action.state_version,
+        })
+        .unwrap()
+    else {
+        panic!("nonterminal mixed path completes")
+    };
+    positive_ignore.apply_action(&ignored_action).unwrap();
+    assert_eq!(positive_ignore.authoritative_state(), state(&positive));
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .filter(
+                |event| event.event_type == "avatar-life-lost" && event.payload["seat"] == "north"
+            )
+            .count(),
+        1
+    );
+    assert_eq!(state(&positive)["players"]["north"]["avatar"]["life"], 19);
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .filter(|event| event.event_type == "avatar-healed" && event.payload["seat"] == "north")
+            .count(),
+        1
+    );
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .filter(|event| event.event_type == "minion-died"
+                && event.payload["instanceId"] == victim_id)
+            .count(),
+        1
+    );
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .filter(|event| event.event_type == "site-drawn")
+            .count(),
+        1
+    );
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .filter(|event| event.event_type == "magic-resolved")
+            .count(),
+        1
+    );
+    assert_exact_replay(&positive);
+    assert_checkpoint_round_trip(&positive);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "actual Session compiled-Magic checkpoint is proved through terminal and positive branches"
+)]
+fn compiled_magic_holds_card_through_terminal_deathrite_and_session_resume() {
+    for atlas_len in [3usize, 6usize] {
+        let encoded = fixed_terminal_manifest(
+            "north",
+            20,
+            20,
+            atlas_len,
+            8,
+            &json!({"deathriteDrawSite":true}),
+            Some("minion"),
+            false,
+        );
+        let mut session = prepare_terminal_area(&encoded, "north", 2, false, false);
+        let before_cast = state(&session);
+        let action = session
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|a| a.descriptor["kind"] == "cast-magic" && a.descriptor["cardId"] == "area")
+            .unwrap();
+        let StepResult::Accepted(cast) = session
+            .step(ActionRequest {
+                action_id: action.action_id.to_string(),
+                seat: action.seat,
+                state_version: action.state_version,
+            })
+            .unwrap()
+        else {
+            panic!("compiled area cast accepted")
+        };
+        assert_eq!(
+            session.replay_value().unwrap()["state"]["phase"],
+            "trigger-order"
+        );
+        assert_eq!(
+            cast.events
+                .iter()
+                .filter(|event| event.event_type == "damage-dealt")
+                .count(),
+            2
+        );
+        let ordered = state(&session);
+        let marked: Vec<_> = ordered["pendingDeathrites"]["marked"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["instanceId"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(marked.len(), 2);
+        assert_eq!(
+            ordered["pendingDeathrites"]["continuation"]["kind"],
+            "effect"
+        );
+        assert_eq!(ordered["pendingDeathrites"]["continuation"]["cursor"], 1);
+        assert_eq!(
+            ordered["pendingDeathrites"]["continuation"]["entry"],
+            "magic"
+        );
+        let magic_id = cast.events[0].payload["instanceId"].clone();
+        assert_eq!(
+            ordered["pendingDeathrites"]["continuation"]["magic"]["instanceId"],
+            magic_id
+        );
+        let checkpoint =
+            serialize_game_checkpoint(&create_game_checkpoint(&session).unwrap()).unwrap();
+        let parsed = parse_game_checkpoint(&checkpoint).unwrap();
+        let mut resumed = resume_game_checkpoint(&parsed).unwrap();
+        assert_eq!(state(&resumed), ordered);
+        assert_eq!(
+            resumed.legal_actions().unwrap(),
+            session.legal_actions().unwrap()
+        );
+        let choices: Vec<_> = session
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .filter(|a| a.descriptor["kind"] == "order-triggers")
+            .collect();
+        assert_eq!(choices.len(), 2);
+        let chosen = choices[0].descriptor["sourceInstanceId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let (_, first_receipt) = accept_where(&mut session, |d| {
+            d["kind"] == "order-triggers" && d["sourceInstanceId"] == chosen
+        });
+        let (_, resumed_receipt) = accept_where(&mut resumed, |d| {
+            d["kind"] == "order-triggers" && d["sourceInstanceId"] == chosen
+        });
+        assert_eq!(first_receipt, resumed_receipt);
+        assert_eq!(session.transcript(), resumed.transcript());
+        assert_eq!(state(&session), state(&resumed));
+        let after = state(&session);
+        if atlas_len == 3 {
+            assert_eq!(
+                event_types(&first_receipt),
+                ["trigger-order-committed", "game-ended"]
+            );
+            assert_eq!(
+                first_receipt.events.last().unwrap().payload,
+                json!({"loser":"north","reason":"deck_empty","winner":"south"})
+            );
+            assert!(
+                !event_types(&first_receipt).iter().any(|kind| [
+                    "site-drawn",
+                    "minion-died",
+                    "magic-resolved"
+                ]
+                .contains(kind))
+            );
+            assert_eq!(after["pendingDeathrites"]["continuation"]["cursor"], 1);
+            assert_eq!(
+                after["pendingDeathrites"]["continuation"]["magic"]["instanceId"],
+                magic_id
+            );
+            assert!(marked.iter().all(|id| {
+                after["realm"]["units"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|unit| unit["instanceId"] == *id && unit["deathMarked"] == true)
+            }));
+            assert_eq!(
+                after["players"]["north"]["cemetery"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|card| card["instanceId"] == magic_id)
+                    .count(),
+                0
+            );
+            assert_eq!(session.legal_actions().unwrap(), Vec::new());
+            let terminal_bytes =
+                serialize_game_checkpoint(&create_game_checkpoint(&session).unwrap()).unwrap();
+            let terminal_resume =
+                resume_game_checkpoint(&parse_game_checkpoint(&terminal_bytes).unwrap()).unwrap();
+            assert_eq!(state(&terminal_resume), after);
+            assert_eq!(terminal_resume.legal_actions().unwrap(), Vec::new());
+            let mut ignored = replay_game_for_session(&Session::new(&encoded).unwrap());
+            // Rebuild the exact pre-order transition through issued transcript actions.
+            for receipt in session.transcript() {
+                let issued = ignored
+                    .legal_actions()
+                    .unwrap()
+                    .into_iter()
+                    .find(|a| a.to_legal_action().unwrap().action_id == receipt.action_id)
+                    .unwrap();
+                let result = ignored.apply_action(&issued);
+                assert!(
+                    result.is_ok(),
+                    "recorded terminal choice has Ignore-path parity"
+                );
+            }
+            assert_eq!(ignored.authoritative_state(), after);
+        } else {
+            let drawn: Vec<_> = first_receipt
+                .events
+                .iter()
+                .filter(|event| event.event_type == "site-drawn")
+                .map(|event| event.payload["sourceInstanceId"].clone())
+                .collect();
+            assert_eq!(drawn.len(), 3);
+            assert_eq!(
+                &drawn[..2],
+                &[
+                    json!(chosen),
+                    json!(choices[1].descriptor["sourceInstanceId"])
+                ]
+            );
+            assert_eq!(drawn[2], magic_id);
+            assert_eq!(
+                first_receipt
+                    .events
+                    .iter()
+                    .filter(|event| event.event_type == "minion-died")
+                    .count(),
+                2
+            );
+            for id in &marked {
+                assert_eq!(
+                    first_receipt
+                        .events
+                        .iter()
+                        .filter(|event| event.event_type == "minion-died"
+                            && event.payload["instanceId"] == *id)
+                        .count(),
+                    1
+                );
+            }
+            assert_eq!(
+                first_receipt
+                    .events
+                    .iter()
+                    .filter(|event| event.event_type == "magic-resolved"
+                        && event.payload["instanceId"] == magic_id)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                after["players"]["north"]["cemetery"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|card| card["instanceId"] == magic_id)
+                    .count(),
+                1
+            );
+            assert_eq!(after["pendingDeathrites"], Value::Null);
+        }
+        assert_exact_replay(&session);
+        assert_exact_replay(&resumed);
+        assert_checkpoint_round_trip(&session);
+        assert_checkpoint_round_trip(&resumed);
+        assert_eq!(state(&resumed), state(&session));
+        assert_eq!(before_cast["realm"]["units"].as_array().unwrap().len(), 2);
+    }
 }
 
 #[test]

@@ -1,3 +1,6 @@
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::checkpoint::{
@@ -291,20 +294,18 @@ fn rule_catalog_0860_site_genesis_resumes_after_ordered_terrain_replacement_deat
             .len(),
         atlas_before - 1
     );
-    assert!(deathrites.iter().all(|unit| {
-        !state(&session)["realm"]["units"]
-            .as_array()
-            .expect("units")
+    marked_death::assert_live_marked_before_cemetery(
+        &state(&session),
+        &deathrites
             .iter()
-            .any(|candidate| candidate["instanceId"] == unit["instanceId"])
-    }));
-    assert!(deathrites.iter().all(|unit| {
-        !state(&session)["players"]["north"]["cemetery"]
-            .as_array()
-            .expect("cemetery")
-            .iter()
-            .any(|card| card["instanceId"] == unit["instanceId"])
-    }));
+            .map(|unit| {
+                unit["instanceId"]
+                    .as_str()
+                    .expect("Deathrite identity")
+                    .to_owned()
+            })
+            .collect::<Vec<_>>(),
+    );
     assert_eq!(
         state(&session)["pendingDeathrites"]["continuation"]["kind"],
         "site-genesis"
@@ -512,27 +513,64 @@ fn setup_if_water_is_last(
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one Burrow replacement and terminal Deathrite proof"
+)]
 fn rule_catalog_0737_geomancer_deathrite_should_end_game_when_atlas_is_empty() {
-    let (mut session, mana_before) = (244..1024)
+    let (mut session, top, deathrites, mana_before) = (244..1024)
         .map(terminal_manifest_with_seed)
         .find_map(|manifest| {
             let mut session = Session::new(&manifest).ok()?;
-            let (_, _, mana_before) = setup_if_water_is_last(&mut session, 1)?;
-            Some((session, mana_before))
+            let (top, deathrites, mana_before) = setup_if_water_is_last(&mut session, 1)?;
+            Some((session, top, deathrites, mana_before))
         })
         .expect("bounded seed with water-site as the last Atlas card");
-    let (_, terminal) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "replace-rubble-with-top-atlas-site"
-            && descriptor["targetCell"] == "C3"
-    });
+    let source_ids = deathrites
+        .iter()
+        .map(|unit| {
+            unit["instanceId"]
+                .as_str()
+                .expect("Deathrite ID")
+                .to_owned()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(source_ids.len(), 1);
+    let checkpoint = create_game_checkpoint(&session).expect("pre-replacement checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized pre-checkpoint");
+    let mut restored =
+        resume_game_checkpoint(&parse_game_checkpoint(&serialized).expect("parsed pre-checkpoint"))
+            .expect("restored pre-replacement checkpoint");
+    let replacement = session
+        .legal_actions()
+        .expect("replacement actions")
+        .into_iter()
+        .find(|action| {
+            action.descriptor["kind"] == "replace-rubble-with-top-atlas-site"
+                && action.descriptor["targetCell"] == "C3"
+        })
+        .expect("engine-issued Main replacement");
+    let request = ActionRequest {
+        action_id: replacement.action_id.to_string(),
+        seat: replacement.seat,
+        state_version: replacement.state_version,
+    };
+    let StepResult::Accepted(terminal) = session.step(request.clone()).expect("replacement") else {
+        panic!("engine-issued replacement must be accepted");
+    };
+    let StepResult::Accepted(replayed_terminal) =
+        restored.step(request).expect("replayed replacement")
+    else {
+        panic!("same issued replacement from checkpoint must be accepted");
+    };
+    assert_eq!(terminal, replayed_terminal);
+    assert_eq!(
+        session.state_hash().expect("terminal hash"),
+        restored.state_hash().expect("replayed terminal hash")
+    );
     assert_eq!(
         event_types(&terminal),
-        [
-            "rubble-replaced",
-            "site-played",
-            "minion-died",
-            "game-ended",
-        ]
+        ["rubble-replaced", "site-played", "game-ended"]
     );
     assert!(!event_types(&terminal).contains(&"mana-gained"));
     assert_eq!(
@@ -541,12 +579,72 @@ fn rule_catalog_0737_geomancer_deathrite_should_end_game_when_atlas_is_empty() {
             .expect("mana after empty Atlas Deathrite"),
         mana_before + 1
     );
-    assert_eq!(state(&session)["phase"], "terminal");
-    assert_eq!(state(&session)["pendingDeathrites"], Value::Null);
+    let finished = state(&session);
+    assert_eq!(finished["phase"], "terminal");
+    assert_eq!(
+        finished["terminal"],
+        json!({
+            "loser": "north",
+            "reason": "deck_empty",
+            "status": "finished",
+            "winner": "south",
+        })
+    );
+    assert_eq!(
+        finished["players"]["north"]["atlas"]
+            .as_array()
+            .expect("North Atlas")
+            .len(),
+        0
+    );
+    assert_eq!(finished["players"]["north"]["avatar"]["tapped"], true);
+    assert_eq!(
+        finished["realm"]["sites"]["C3"]["instanceId"],
+        top["instanceId"]
+    );
+    assert_eq!(
+        finished["pendingDeathrites"]["continuation"]["kind"],
+        "site-genesis"
+    );
+    assert_eq!(
+        finished["pendingDeathrites"]["continuation"]["descriptor"]["cardInstanceId"],
+        top["instanceId"]
+    );
+    assert_eq!(
+        finished["pendingDeathrites"]["continuation"]["descriptor"]["cell"],
+        "C3"
+    );
+    marked_death::assert_live_marked_before_cemetery(&finished, &source_ids);
+    assert_eq!(finished["realm"]["units"][0]["region"], "underwater");
+    assert!(
+        session
+            .legal_actions()
+            .expect("terminal legal actions")
+            .is_empty()
+    );
+    let after_checkpoint = create_game_checkpoint(&session).expect("post-terminal checkpoint");
+    let after_serialized =
+        serialize_game_checkpoint(&after_checkpoint).expect("serialized post-checkpoint");
+    let after_restored = resume_game_checkpoint(
+        &parse_game_checkpoint(&after_serialized).expect("parsed post-checkpoint"),
+    )
+    .expect("restored post-terminal checkpoint");
+    assert_eq!(state(&after_restored), finished);
+    assert!(
+        after_restored
+            .legal_actions()
+            .expect("finished actions")
+            .is_empty()
+    );
     assert_exact_replay(&session);
+    assert_exact_replay(&after_restored);
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one ordered terrain Deathrite and deferred Genesis terminal proof"
+)]
 fn rule_catalog_0897_ordered_terrain_deathrites_end_game_before_deferred_genesis_when_atlas_is_empty()
  {
     let (mut session, deathrites, mana_before) = (244..1024)
@@ -589,13 +687,18 @@ fn rule_catalog_0897_ordered_terrain_deathrites_end_game_before_deferred_genesis
         state(&session)["pendingDeathrites"]["continuation"]["descriptor"]["fromTopAtlas"],
         true
     );
-    assert!(deathrites.iter().all(|unit| {
-        !state(&session)["realm"]["units"]
-            .as_array()
-            .expect("units")
+    marked_death::assert_live_marked_before_cemetery(
+        &state(&session),
+        &deathrites
             .iter()
-            .any(|candidate| candidate["instanceId"] == unit["instanceId"])
-    }));
+            .map(|unit| {
+                unit["instanceId"]
+                    .as_str()
+                    .expect("Deathrite identity")
+                    .to_owned()
+            })
+            .collect::<Vec<_>>(),
+    );
     let orders = session
         .legal_actions()
         .expect("Deathrite order actions")
@@ -612,17 +715,27 @@ fn rule_catalog_0897_ordered_terrain_deathrites_end_game_before_deferred_genesis
     });
     assert_eq!(
         event_types(&terminal),
-        [
-            "trigger-order-committed",
-            "minion-died",
-            "minion-died",
-            "game-ended",
-        ]
+        ["trigger-order-committed", "game-ended"]
     );
     assert!(!event_types(&terminal).contains(&"site-drawn"));
     assert!(!event_types(&terminal).contains(&"mana-gained"));
     assert_eq!(state(&session)["phase"], "terminal");
-    assert_eq!(state(&session)["pendingDeathrites"], Value::Null);
+    assert_eq!(
+        state(&session)["pendingDeathrites"]["continuation"]["kind"],
+        "site-genesis"
+    );
+    marked_death::assert_live_marked_before_cemetery(
+        &state(&session),
+        &deathrites
+            .iter()
+            .map(|unit| {
+                unit["instanceId"]
+                    .as_str()
+                    .expect("Deathrite identity")
+                    .to_owned()
+            })
+            .collect::<Vec<_>>(),
+    );
     assert_eq!(
         state(&session)["players"]["north"]["mana"]
             .as_u64()
@@ -642,7 +755,7 @@ fn rule_catalog_0897_ordered_terrain_deathrites_end_game_before_deferred_genesis
             .as_array()
             .expect("cemetery")
             .iter()
-            .any(|card| card["instanceId"] == unit["instanceId"])
+            .all(|card| card["instanceId"] != unit["instanceId"])
     }));
     assert_exact_replay(&session);
 }
@@ -776,13 +889,18 @@ fn rule_catalog_0922_ordered_terrain_deathrites_draw_one_site_then_deck_out_befo
         state(&session)["realm"]["sites"]["C3"]["instanceId"],
         top["instanceId"]
     );
-    assert!(deathrites.iter().all(|unit| {
-        !state(&session)["realm"]["units"]
-            .as_array()
-            .expect("units")
+    marked_death::assert_live_marked_before_cemetery(
+        &state(&session),
+        &deathrites
             .iter()
-            .any(|candidate| candidate["instanceId"] == unit["instanceId"])
-    }));
+            .map(|unit| {
+                unit["instanceId"]
+                    .as_str()
+                    .expect("Deathrite identity")
+                    .to_owned()
+            })
+            .collect::<Vec<_>>(),
+    );
 
     let checkpoint = create_game_checkpoint(&session).expect("captured checkpoint");
     let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized checkpoint");
@@ -806,13 +924,7 @@ fn rule_catalog_0922_ordered_terrain_deathrites_draw_one_site_then_deck_out_befo
     });
     assert_eq!(
         event_types(&terminal),
-        [
-            "trigger-order-committed",
-            "site-drawn",
-            "minion-died",
-            "minion-died",
-            "game-ended",
-        ]
+        ["trigger-order-committed", "site-drawn", "game-ended"]
     );
     assert_eq!(
         terminal
@@ -824,7 +936,22 @@ fn rule_catalog_0922_ordered_terrain_deathrites_draw_one_site_then_deck_out_befo
     );
     assert!(!event_types(&terminal).contains(&"mana-gained"));
     assert_eq!(state(&restored)["phase"], "terminal");
-    assert_eq!(state(&restored)["pendingDeathrites"], Value::Null);
+    assert_eq!(
+        state(&restored)["pendingDeathrites"]["continuation"]["kind"],
+        "site-genesis"
+    );
+    marked_death::assert_live_marked_before_cemetery(
+        &state(&restored),
+        &deathrites
+            .iter()
+            .map(|unit| {
+                unit["instanceId"]
+                    .as_str()
+                    .expect("Deathrite identity")
+                    .to_owned()
+            })
+            .collect::<Vec<_>>(),
+    );
     assert_eq!(
         state(&restored)["players"]["north"]["atlas"]
             .as_array()
@@ -858,7 +985,7 @@ fn rule_catalog_0922_ordered_terrain_deathrites_draw_one_site_then_deck_out_befo
             .as_array()
             .expect("cemetery")
             .iter()
-            .any(|card| card["instanceId"] == unit["instanceId"])
+            .all(|card| card["instanceId"] != unit["instanceId"])
     }));
     assert_exact_replay(&restored);
 }
@@ -1137,13 +1264,7 @@ fn rule_catalog_1118_geomancer_replace_rubble_withheld_during_pending_deathrite_
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(paused["realm"]["sites"]["C3"]["rubble"], true);
     assert_eq!(paused["players"]["north"]["avatar"]["tapped"], false);
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(
         session
             .legal_actions()

@@ -7,7 +7,11 @@
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
-use sorcery_engine::contract::{ActionRequest, Receipt};
+use sorcery_engine::checkpoint::{
+    create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+    serialize_game_checkpoint,
+};
+use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::session::{Session, StepResult};
 
 fn thresholds(element: Option<&str>, required: u64) -> Value {
@@ -1032,7 +1036,7 @@ fn rule_catalog_0921_alternate_summon_payments_require_thresholds_before_offerin
             .iter()
             .map(|event| event.event_type.as_str())
             .collect::<Vec<_>>(),
-        ["minion-sacrificed", "minion-died", "minion-summoned"]
+        ["minion-sacrificed", "minion-summoned", "minion-died"]
     );
     assert!(
         allowed_sacrifice
@@ -1040,6 +1044,267 @@ fn rule_catalog_0921_alternate_summon_payments_require_thresholds_before_offerin
             .expect("verified sacrifice replay")
     );
 }
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one issued-action scenario pins the marked-sacrifice prompt and paid-effect barrier"
+)]
+fn rule_catalog_0921_paid_sacrifices_remain_live_through_deathrite_order_and_effect_completion() {
+    for first_seat in ["north", "south"] {
+        let other_seat = if first_seat == "north" {
+            "south"
+        } else {
+            "north"
+        };
+        let first_cell = if first_seat == "north" { "C4" } else { "C1" };
+        let provider_card_id = format!("{first_seat}-provider");
+        let helper_card_id = format!("{first_seat}-helper");
+        let paid_card_id = format!("{first_seat}-paid");
+        let mut provider = minion(0, &thresholds(None, 0));
+        provider["deathriteDrawSite"] = json!(true);
+        provider["otherNearbyAlliesPowerBonus"] = json!(1);
+        let mut helper = minion(0, &thresholds(None, 0));
+        helper["deathriteDrawSite"] = json!(true);
+        let mut paid = minion(4, &thresholds(None, 0));
+        paid["sacrificeMinionAtSummoningLocationForManaDiscount"] = json!(2);
+        let mut card_definitions = json!({
+                "north-avatar": {
+                    "attack": 1,
+                    "cardType": "avatar",
+                    "defense": 1,
+                    "drawSpell": false,
+                    "life": 20,
+                },
+                "south-avatar": {
+                    "attack": 1,
+                    "cardType": "avatar",
+                    "defense": 1,
+                    "drawSpell": false,
+                    "life": 20,
+                },
+                "north-site": site("earth"),
+                "south-site": site("earth"),
+                "north-helper": minion(0, &thresholds(None, 0)),
+                "south-helper": minion(0, &thresholds(None, 0)),
+        });
+        card_definitions[provider_card_id.as_str()] = provider;
+        card_definitions[helper_card_id.as_str()] = helper;
+        card_definitions[paid_card_id.as_str()] = paid;
+        let mut decks = json!({
+                "north": {
+                    "atlas": vec!["north-site"; 8],
+                    "avatar": "north-avatar",
+                    "spellbook": vec!["north-helper"; 6],
+                },
+                "south": {
+                    "atlas": vec!["south-site"; 8],
+                    "avatar": "south-avatar",
+                    "spellbook": vec!["south-helper"; 6],
+                },
+        });
+        decks[first_seat]["spellbook"] = json!([provider_card_id, helper_card_id, paid_card_id]);
+        decks[other_seat]["spellbook"] = json!(vec![format!("{other_seat}-helper"); 6]);
+        let encoded = finish_manifest(json!({
+            "authority": {
+                "contentHash": identity_hash(&json!({ "fixture": "marked-realm-and-paid-sacrifice-barrier" }))
+                    .expect("synthetic authority identity"),
+                "mode": "synthetic",
+                "revisionId": "synthetic-marked-realm-and-paid-sacrifice-barrier-v1",
+            },
+            "cards": card_definitions,
+            "decks": decks,
+            "engineVersion": "sorcery-core-v1",
+            "firstSeat": first_seat,
+            "schemaVersion": 1,
+            "seed": 924,
+        }));
+        let mut session = Session::new(&encoded).expect("valid marked paid-sacrifice scenario");
+        keep(&mut session);
+        keep(&mut session);
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == first_cell
+        });
+        let (provider, _) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == provider_card_id
+                && descriptor["cell"] == first_cell
+        });
+        let provider_id = provider["cardInstanceId"]
+            .as_str()
+            .expect("provider occurrence")
+            .to_owned();
+        let (helper, _) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == helper_card_id
+                && descriptor["cell"] == first_cell
+        });
+        let helper_id = helper["cardInstanceId"]
+            .as_str()
+            .expect("helper occurrence")
+            .to_owned();
+        let before = state(&session);
+        assert_eq!(before["realm"]["units"].as_array().expect("units").len(), 2);
+        let before_avatar = session
+            .public_view(if first_seat == "north" {
+                Seat::North
+            } else {
+                Seat::South
+            })
+            .expect("active-seat public view")["players"][first_seat]["avatar"]
+            .clone();
+        assert_eq!(before_avatar["attack"], 2);
+        assert_eq!(before_avatar["defense"], 2);
+
+        let (payment, payment_receipt) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == paid_card_id
+                && descriptor["sacrificedMinionInstanceIds"]
+                    .as_array()
+                    .is_some_and(|ids| ids.len() == 2)
+        });
+        let sacrificed = payment["sacrificedMinionInstanceIds"]
+            .as_array()
+            .expect("paid sacrifice instances");
+        assert!(sacrificed.contains(&json!(provider_id)));
+        assert!(sacrificed.contains(&json!(helper_id)));
+        assert_eq!(payment["manaCost"], 0);
+        assert_eq!(
+            event_types(&payment_receipt),
+            ["minion-sacrificed", "minion-sacrificed"]
+        );
+
+        let paused = state(&session);
+        assert_eq!(paused["phase"], "trigger-order");
+        let choices: Vec<_> = session
+            .legal_actions()
+            .expect("Deathrite ordering choices")
+            .into_iter()
+            .filter(|action| action.descriptor["kind"] == "order-triggers")
+            .collect();
+        assert_eq!(choices.len(), 2);
+        let paused_avatar = session
+            .public_view(if first_seat == "north" {
+                Seat::North
+            } else {
+                Seat::South
+            })
+            .expect("active-seat prompt view")["players"][first_seat]["avatar"]
+            .clone();
+        let checkpoint = create_game_checkpoint(&session).expect("capture ordering checkpoint");
+        let serialized =
+            serialize_game_checkpoint(&checkpoint).expect("serialize ordering checkpoint");
+        let decoded_checkpoint =
+            parse_game_checkpoint(&serialized).expect("parse ordering checkpoint");
+        let mut resumed =
+            resume_game_checkpoint(&decoded_checkpoint).expect("resume ordering checkpoint");
+        assert_eq!(state(&resumed), paused);
+        assert_eq!(
+            resumed.legal_actions().expect("resumed ordering choices"),
+            choices
+        );
+
+        let chosen_source = choices[0].descriptor["sourceInstanceId"]
+            .as_str()
+            .expect("Deathrite source identity")
+            .to_owned();
+        let (direct_descriptor, direct_receipt) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "order-triggers"
+                && descriptor["sourceInstanceId"] == chosen_source
+        });
+        let (resumed_descriptor, resumed_receipt) = accept_where(&mut resumed, |descriptor| {
+            descriptor["kind"] == "order-triggers"
+                && descriptor["sourceInstanceId"] == chosen_source
+        });
+        assert_eq!(resumed_descriptor, direct_descriptor);
+        assert_eq!(resumed_receipt, direct_receipt);
+        assert_eq!(state(&resumed), state(&session));
+        assert_exact_replay(&session);
+        assert_exact_replay(&resumed);
+
+        let paused_unit_ids: Vec<_> = paused["realm"]["units"]
+            .as_array()
+            .expect("prompt realm units")
+            .iter()
+            .map(|unit| unit["instanceId"].clone())
+            .collect();
+        assert!(paused_unit_ids.contains(&json!(provider_id)));
+        assert!(paused_unit_ids.contains(&json!(helper_id)));
+        assert_eq!(
+            paused_avatar["attack"], before_avatar["attack"],
+            "the nearby provider remains active while marked bodies are pending"
+        );
+        assert_eq!(paused_avatar["defense"], before_avatar["defense"]);
+        for id in [&provider_id, &helper_id] {
+            assert!(
+                !paused["players"][first_seat]["cemetery"]
+                    .as_array()
+                    .expect("active-seat cemetery")
+                    .iter()
+                    .any(|card| card["instanceId"] == *id)
+            );
+        }
+
+        let after = state(&session);
+        let types = [event_types(&payment_receipt), event_types(&direct_receipt)].concat();
+        let summon_index = types
+            .iter()
+            .position(|kind| *kind == "minion-summoned")
+            .expect("paid summon completion");
+        let first_death_index = types
+            .iter()
+            .position(|kind| *kind == "minion-died")
+            .expect("sacrifice departure");
+        assert!(
+            summon_index < first_death_index,
+            "paid placement precedes sacrifice departure"
+        );
+        assert_eq!(
+            types.iter().filter(|kind| **kind == "minion-died").count(),
+            2
+        );
+        assert_eq!(
+            types
+                .iter()
+                .filter(|kind| **kind == "minion-summoned")
+                .count(),
+            1
+        );
+        for id in [&provider_id, &helper_id] {
+            assert_eq!(
+                direct_receipt
+                    .events
+                    .iter()
+                    .filter(|event| {
+                        event.event_type == "minion-died" && event.payload["instanceId"] == *id
+                    })
+                    .count(),
+                1
+            );
+            assert!(realm_unit(&after, id).is_none());
+            assert_eq!(
+                after["players"][first_seat]["cemetery"]
+                    .as_array()
+                    .expect("active-seat cemetery")
+                    .iter()
+                    .filter(|card| card["instanceId"] == *id)
+                    .count(),
+                1
+            );
+        }
+        let after_avatar = session
+            .public_view(if first_seat == "north" {
+                Seat::North
+            } else {
+                Seat::South
+            })
+            .expect("active-seat settled view")["players"][first_seat]["avatar"]
+            .clone();
+        assert_eq!(after_avatar["attack"], 1);
+        assert_eq!(after_avatar["defense"], 1);
+    }
+}
+
 #[test]
 fn rule_catalog_2523_sacrifice_summoned_gnarled_stays_on_the_board_after_turns_pass() {
     let encoded = supplemental_seed_sacrifice(2523, 1, 1);
@@ -1056,7 +1321,7 @@ fn rule_catalog_2523_sacrifice_summoned_gnarled_stays_on_the_board_after_turns_p
     let (gnarled_id, receipt) = accept_gnarled_sacrifice(&mut session, &helper_id);
     assert_eq!(
         event_types(&receipt),
-        ["minion-sacrificed", "minion-died", "minion-summoned"]
+        ["minion-sacrificed", "minion-summoned", "minion-died"]
     );
     assert!(realm_unit(&state(&session), &helper_id).is_none());
     assert_eq!(unit(&state(&session), &gnarled_id)["location"], "C4");
@@ -1089,7 +1354,7 @@ fn rule_catalog_2525_second_gnarled_sacrifices_a_newly_arrived_helper_after_enem
     let (_, receipt) = accept_gnarled_sacrifice(&mut session, &helper_id);
     assert_eq!(
         event_types(&receipt),
-        ["minion-sacrificed", "minion-died", "minion-summoned"]
+        ["minion-sacrificed", "minion-summoned", "minion-died"]
     );
     assert!(realm_unit(&state(&session), &helper_id).is_none());
     assert_exact_replay(&session);
@@ -1128,7 +1393,7 @@ fn rule_catalog_2527_gnarled_sacrifice_leaves_a_far_helper_untouched() {
     let (_, receipt) = accept_gnarled_sacrifice(&mut session, &near_id);
     assert_eq!(
         event_types(&receipt),
-        ["minion-sacrificed", "minion-died", "minion-summoned"]
+        ["minion-sacrificed", "minion-summoned", "minion-died"]
     );
     assert!(realm_unit(&state(&session), &near_id).is_none());
     assert!(realm_unit(&state(&session), &far_id).is_some());
@@ -1145,7 +1410,7 @@ fn rule_catalog_2528_second_gnarled_sacrifices_a_newly_summoned_helper() {
     let (_, receipt) = accept_gnarled_sacrifice(&mut session, &helper_id);
     assert_eq!(
         event_types(&receipt),
-        ["minion-sacrificed", "minion-died", "minion-summoned"]
+        ["minion-sacrificed", "minion-summoned", "minion-died"]
     );
     assert!(realm_unit(&state(&session), &helper_id).is_none());
     assert_exact_replay(&session);

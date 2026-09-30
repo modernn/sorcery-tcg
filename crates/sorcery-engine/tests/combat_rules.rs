@@ -1,3 +1,6 @@
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::checkpoint::{
@@ -2375,11 +2378,7 @@ fn rule_catalog_1019_move_and_attack_withheld_during_pending_deathrite_order() {
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(realm_unit(&paused, &aura_id).is_none());
-    assert!(
-        deathrite_ids
-            .iter()
-            .all(|instance_id| realm_unit(&paused, instance_id).is_none())
-    );
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(
         session
             .legal_actions()
@@ -2408,8 +2407,21 @@ fn rule_catalog_1019_move_and_attack_withheld_during_pending_deathrite_order() {
             "site-drawn",
             "minion-died",
             "minion-died",
-            "minion-died",
         ]
+    );
+    let resolved_death_ids = resolved
+        .events
+        .iter()
+        .filter(|event| event.event_type == "minion-died")
+        .map(|event| {
+            event.payload["instanceId"]
+                .as_str()
+                .expect("death identity")
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        resolved_death_ids,
+        deathrite_ids.iter().map(String::as_str).collect()
     );
 
     while matches!(
@@ -2684,11 +2696,7 @@ fn rule_catalog_1153_declare_attack_withheld_during_pending_deathrite_order() {
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "north");
     assert_eq!(paused["pendingDeathrites"]["returnPhase"], "attack");
-    assert!(
-        deathrite_ids
-            .iter()
-            .all(|instance_id| realm_unit(&paused, instance_id).is_none())
-    );
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert_eq!(
         realm_unit(&paused, &attacker_id).expect("arrived attacker")["location"],
         "C2"

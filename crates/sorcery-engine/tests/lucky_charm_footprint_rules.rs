@@ -13,6 +13,9 @@
 //! power bonus drops during random-choice, Deathrites settle first and the
 //! extra-random actions return only after the order drains.
 
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 use serde_json::{Value, json};
 use sorcery_engine::action::ActionDescriptor;
 use sorcery_engine::canonical::identity_hash;
@@ -696,13 +699,7 @@ fn rule_catalog_1147_activate_discard_random_damage_withheld_during_pending_deat
     assert_eq!(giant["location"], "A3");
     assert_eq!(giant["occupiedCells"], json!(["A3", "A4", "B3", "B4"]));
     assert_eq!(giant["damage"], 1);
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(
         session
             .legal_actions()
@@ -1074,13 +1071,7 @@ fn rule_catalog_1167_random_choice_withheld_during_pending_deathrite_order() {
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(paused["pendingDeathrites"]["returnPhase"], "random-choice");
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(
         branched
             .legal_actions()

@@ -14,6 +14,9 @@
 //! trigger-order (RULE-CATALOG-1163), and stacked start-turn triggers
 //! withheld during trigger-order (RULE-CATALOG-1183–1310).
 
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
 use sorcery_engine::contract::{ActionRequest, Receipt, RejectionCode, Seat};
@@ -3411,13 +3414,7 @@ fn rule_catalog_1163_resolve_start_turn_trigger_withheld_during_pending_deathrit
     let paused = state(session);
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(
         session
             .legal_actions()
@@ -3638,13 +3635,7 @@ fn rule_catalog_1180_start_turn_teleport_trigger_withheld_during_pending_deathri
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(paused["pendingDeathrites"]["returnPhase"], "start-turn");
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(
         session
             .legal_actions()

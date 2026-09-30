@@ -1,3 +1,6 @@
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
@@ -706,6 +709,28 @@ fn sacrifice_summon_descriptors_order_and_receipt_should_match_typescript() {
         .replay_value()
         .expect("Rust pending replay state")["state"]
         .clone();
+    let marked_ids = pending_state["pendingDeathrites"]["marked"]
+        .as_array()
+        .expect("marked Deathrite cohort")
+        .iter()
+        .map(|reference| reference["instanceId"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    let marked_owners = marked_ids
+        .iter()
+        .map(|instance_id| {
+            let owner = pending_state["realm"]["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|unit| unit["instanceId"] == instance_id.as_str())
+                .expect("marked minion remains in realm")["owner"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            (instance_id.clone(), owner)
+        })
+        .collect::<Vec<_>>();
+    marked_death::assert_live_marked_before_cemetery(&pending_state, &marked_ids);
     assert_eq!(
         pending_state["phase"],
         fixture["deathrite"]["pending"]["phase"]
@@ -804,6 +829,23 @@ fn sacrifice_summon_descriptors_order_and_receipt_should_match_typescript() {
     );
     let resolved_state =
         restored.replay_value().expect("Rust resolved replay state")["state"].clone();
+    for (instance_id, owner) in &marked_owners {
+        assert!(
+            resolved_state["realm"]["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|unit| unit["instanceId"] != instance_id.as_str()),
+            "resolved Deathrite victim leaves the realm"
+        );
+        let dead = resolved_state["players"][owner]["cemetery"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|card| card["instanceId"] == instance_id.as_str())
+            .expect("resolved Deathrite victim enters its owner's cemetery");
+        assert_eq!(dead.get("deathMarked"), None);
+    }
     assert_eq!(
         resolved_state["phase"],
         fixture["deathrite"]["resolved"]["phase"]
@@ -1400,6 +1442,28 @@ fn duel_descriptors_order_and_transitions_should_match_typescript() {
         .replay_value()
         .expect("Rust underground Duel pending state")["state"]
         .clone();
+    let marked_ids = pending_state["pendingDeathrites"]["marked"]
+        .as_array()
+        .expect("underground marked Deathrite cohort")
+        .iter()
+        .map(|reference| reference["instanceId"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    let marked_owners = marked_ids
+        .iter()
+        .map(|instance_id| {
+            let owner = pending_state["realm"]["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|unit| unit["instanceId"] == instance_id.as_str())
+                .expect("marked underground minion remains in realm")["owner"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            (instance_id.clone(), owner)
+        })
+        .collect::<Vec<_>>();
+    marked_death::assert_live_marked_before_cemetery(&pending_state, &marked_ids);
     assert_eq!(
         pending_state["pendingDeathrites"]["continuation"],
         underground["pending"]["continuation"]
@@ -1506,6 +1570,23 @@ fn duel_descriptors_order_and_transitions_should_match_typescript() {
         .replay_value()
         .expect("Rust underground Duel resolved state")["state"]
         .clone();
+    for (instance_id, owner) in &marked_owners {
+        assert!(
+            resolved_state["realm"]["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|unit| unit["instanceId"] != instance_id.as_str()),
+            "resolved underground casualty leaves the realm"
+        );
+        let dead = resolved_state["players"][owner]["cemetery"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|card| card["instanceId"] == instance_id.as_str())
+            .expect("resolved underground casualty enters its owner's cemetery");
+        assert_eq!(dead.get("deathMarked"), None);
+    }
     assert_eq!(resolved_state["phase"], underground["resolved"]["phase"]);
     assert_eq!(
         resolved_state["decisionSeat"],

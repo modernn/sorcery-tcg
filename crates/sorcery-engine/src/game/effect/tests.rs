@@ -813,8 +813,10 @@ fn damage_cohort_orders_deathrites_then_resumes_draw_and_magic_cleanup() {
     let caster_id = caster.card.instance_id.clone();
     let first = minion(&game, "south-spell-1", Seat::North, "deathrite-a", false);
     let first_id = first.card.instance_id.clone();
+    let first_ref = RealmReference::from_card(&first.card);
     let second = minion(&game, "south-spell-2", Seat::North, "deathrite-b", false);
     let second_id = second.card.instance_id.clone();
+    let second_ref = RealmReference::from_card(&second.card);
     game.position.units = vec![caster, first, second];
     let before_draw = game.position.players[seat_index(Seat::North)]
         .hand_spellbook
@@ -854,9 +856,25 @@ fn damage_cohort_orders_deathrites_then_resumes_draw_and_magic_cleanup() {
             .iter()
             .all(|card| card.instance_id != magic_id)
     );
-    assert_eq!(game.position.units.len(), 1);
-    assert_ne!(game.position.units[0].card.instance_id, first_id);
-    assert_ne!(game.position.units[0].card.instance_id, second_id);
+    assert_eq!(game.position.units.len(), 3);
+    assert!(
+        game.position
+            .units
+            .iter()
+            .any(|unit| { unit.card.instance_id == first_id && unit.death_marked })
+    );
+    assert!(
+        game.position
+            .units
+            .iter()
+            .any(|unit| { unit.card.instance_id == second_id && unit.death_marked })
+    );
+    assert!(
+        game.position
+            .units
+            .iter()
+            .any(|unit| { unit.card.instance_id == caster_id && !unit.death_marked })
+    );
     let serialized = game.pending_deathrites_value(
         game.position
             .pending_deathrites
@@ -887,35 +905,114 @@ fn damage_cohort_orders_deathrites_then_resumes_draw_and_magic_cleanup() {
     exhausted.position.players[seat_index(Seat::North)]
         .spellbook
         .clear();
-    let (terminal_events, _) = exhausted
+    let ignored = exhausted.clone();
+    let before_exhausted_position = exhausted.position.clone();
+    let before_exhausted_hash = exhausted.state_hash().unwrap();
+    let before_continuation = serialized["continuation"].clone();
+    assert_eq!(exhausted.position, ignored.position);
+    assert_eq!(
+        exhausted.state_hash().unwrap(),
+        ignored.state_hash().unwrap()
+    );
+    assert_eq!(
+        exhausted.legal_actions().unwrap(),
+        ignored.legal_actions().unwrap(),
+        "Record and Ignore branches share the same issued order"
+    );
+    let (terminal_events, terminal_random) = exhausted
         .apply_action_recorded(&order)
-        .expect("terminal interruption");
+        .expect("the first failed Spellbook draw ends the game");
+    let ignored_order = ignored
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .find(|action| {
+            action.descriptor == order.descriptor
+                && action.seat == order.seat
+                && action.state_version == order.state_version
+        })
+        .expect("same issued order in Ignore branch");
+    let mut ignored = ignored;
+    ignored
+        .apply_action(&ignored_order)
+        .expect("Ignore branch reaches the same terminal state");
+    assert!(terminal_random.is_empty());
+    assert_eq!(exhausted.position, ignored.position);
+    assert_eq!(
+        exhausted.state_hash().unwrap(),
+        ignored.state_hash().unwrap()
+    );
+    assert_ne!(exhausted.position, before_exhausted_position);
+    assert_ne!(exhausted.state_hash().unwrap(), before_exhausted_hash);
+    assert_eq!(
+        terminal_events
+            .iter()
+            .map(|(kind, _)| kind.as_str())
+            .collect::<Vec<_>>(),
+        ["trigger-order-committed", "game-ended"]
+    );
+    assert_eq!(
+        terminal_events[1].1,
+        json!({ "loser": Seat::North, "reason": "deck_empty", "winner": Seat::South })
+    );
+    assert!(exhausted.legal_actions().unwrap().is_empty());
     assert_eq!(exhausted.position.phase, Phase::Terminal);
     assert_eq!(
+        exhausted.authoritative_state()["terminal"],
+        json!({
+            "loser": "north",
+            "reason": "deck_empty",
+            "status": "finished",
+            "winner": "south",
+        })
+    );
+    let pending = exhausted
+        .position
+        .pending_deathrites
+        .as_ref()
+        .expect("terminal marked wave retains its owner");
+    let terminal_continuation = exhausted.pending_deathrites_value(pending)["continuation"].clone();
+    assert_eq!(terminal_continuation, before_continuation);
+    assert_eq!(terminal_continuation["kind"], "effect");
+    assert_eq!(
+        terminal_continuation["magic"]["instanceId"],
+        json!(magic_id)
+    );
+    assert_eq!(
+        terminal_continuation["cursor"], 1,
+        "the next Draw remains unexecuted in the held Effect frame"
+    );
+    for reference in [&first_ref, &second_ref] {
+        let victim = exhausted
+            .position
+            .units
+            .iter()
+            .find(|unit| reference.matches(&unit.card))
+            .expect("marked victim remains live");
+        assert!(victim.death_marked);
+        assert!(
+            exhausted.position.players[seat_index(victim.card.owner)]
+                .cemetery
+                .iter()
+                .all(|card| card.instance_id != victim.card.instance_id)
+        );
+    }
+    assert!(
+        exhausted
+            .position
+            .units
+            .iter()
+            .any(|unit| { unit.card.instance_id == caster_id && !unit.death_marked })
+    );
+    assert!(
         exhausted.position.players[seat_index(Seat::North)]
             .cemetery
             .iter()
-            .filter(|card| card.instance_id == magic_id)
-            .count(),
-        1
+            .all(|card| card.instance_id != magic_id)
     );
-    assert_eq!(
-        terminal_events
-            .iter()
-            .filter(|(kind, _)| kind == "magic-resolved")
-            .count(),
-        1
-    );
-    assert!(
-        terminal_events
-            .iter()
-            .position(|(kind, _)| kind == "magic-resolved")
-            .unwrap()
-            < terminal_events
-                .iter()
-                .position(|(kind, _)| kind == "game-ended")
-                .unwrap()
-    );
+    assert!(!terminal_events.iter().any(|(kind, _)| {
+        ["spell-drawn", "minion-died", "magic-resolved"].contains(&kind.as_str())
+    }));
     let (branch_events, _) = branch
         .apply_action_recorded(&order)
         .expect("cloned continuation");
@@ -2519,11 +2616,10 @@ fn disable_settlement_survives_region_and_static_power_interruptions() {
         json!("region")
     );
     assert!(
-        !game
-            .position
+        game.position
             .units
             .iter()
-            .any(|unit| unit.card.instance_id == provider_instance_id)
+            .any(|unit| { unit.card.instance_id == provider_instance_id && unit.death_marked })
     );
     assert!(
         game.position

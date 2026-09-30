@@ -705,7 +705,7 @@
       "requirementIds": [
         "RULE-04"
       ],
-      "plainLanguage": "Aura-loss Deathrite ends the game after its triggering Magic resolves.",
+      "plainLanguage": "A pure aura-loss Deathrite can end the game before the triggering Magic completes. The current marked bodies and deferred completion remain inert; no later magic-resolved or corpse departure occurs.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "deathrite",
@@ -713,12 +713,11 @@
       ],
       "actionHints": [],
       "eventHints": [
-        "loss",
-        "resolution"
+        "game-ended"
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/static_power_rules.rs",
-        "testName": "rule_catalog_0036_aura_loss_deathrite_should_end_the_game_after_its_triggering_magic_resolves"
+        "testName": "rule_catalog_0036_aura_loss_deathrite_ends_before_magic_completion"
       }
     },
     {
@@ -5546,8 +5545,8 @@
         "RULE-02",
         "RULE-04"
       ],
-      "plainLanguage": "A start-of-controller-turn Aura on an Ordinary or Exceptional site destroys that site, the minions standing atop it, and itself. Avatars are not minions and survive on the resulting rubble.",
-      "implementationStatus": "rust-supported",
+      "plainLanguage": "A start-of-controller-turn Aura on an Ordinary or Exceptional site must destroy that site, the minions standing atop it, and itself, subject to applicable protection; Avatars are not minions. The composition with an unprotected minion is currently unsupported and the exercised action rolls back. Full mixed site, minion, and Aura departure remains required; a passing rejection proof does not establish that support.",
+      "implementationStatus": "unsupported",
       "genericFactHints": [
         "atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf"
       ],
@@ -5555,15 +5554,10 @@
         "cast-aura",
         "resolve-start-turn-trigger"
       ],
-      "eventHints": [
-        "site-destroyed",
-        "rubble-created",
-        "minion-died",
-        "aura-dispelled"
-      ],
+      "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/start_turn_site_destroy_aura_rules.rs",
-        "testName": "rule_catalog_0258_start_turn_aura_destroys_the_occupied_site_and_minions_atop_it"
+        "testName": "rule_catalog_0258_start_turn_site_minion_destruction_is_unsupported_and_rolls_back"
       }
     },
     {
@@ -6427,7 +6421,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "A Deathrite Spellbook draw from an empty library is a deck-out. The corpse still dies, the game ends, and no card is drawn. Deathrite site draws keep the same empty-library loss.",
+      "plainLanguage": "A pure Deathrite Spellbook draw from an empty library causes that player to lose immediately, with no card drawn. The marked body remains in the realm under its inert pending owner and does not enter the cemetery after terminal. A pure failed Deathrite Atlas draw has the same immediate loss boundary.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "deathriteDrawSpells"
@@ -11461,8 +11455,8 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "When a minion carries both optional targeted adjacent Genesis damage and local-minion sacrifice summon payment, the engine offers sacrifice-payment branches with decline and target choices; declining sacrifices one controlled minion at the summoning location and summons without Genesis damage.",
-      "implementationStatus": "rust-supported",
+      "plainLanguage": "A minion with local-minion sacrifice summon payment and optional targeted adjacent Genesis damage must support sacrificing the eligible controlled local minion, summoning, and declining the Genesis damage. That paid-entry/Genesis composition is currently unsupported: its issued summon rolls back before Genesis declaration or decline is reached. Full payment, entry, Genesis, and marked cost-body completion remain required.",
+      "implementationStatus": "unsupported",
       "genericFactHints": [
         "genesisMayDamageTargetAdjacentUnit",
         "sacrificeMinionAtSummoningLocationForManaDiscount"
@@ -11470,14 +11464,10 @@
       "actionHints": [
         "summon-minion"
       ],
-      "eventHints": [
-        "minion-sacrificed",
-        "minion-died",
-        "minion-summoned"
-      ],
+      "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
-        "testName": "rule_catalog_0499_targeted_genesis_sacrifice_decline_sacrifices_and_summons"
+        "testName": "rule_catalog_0499_paid_summon_genesis_is_unsupported_before_decline"
       }
     },
     {
@@ -11487,8 +11477,8 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "When a minion carries both optional targeted adjacent Genesis damage and local-minion sacrifice summon payment, choosing a legal adjacent target sacrifices one controlled minion at the summoning location, summons the minion, and deals the printed Genesis damage through the shared damage pipeline.",
-      "implementationStatus": "rust-supported",
+      "plainLanguage": "A minion with local-minion sacrifice summon payment and optional targeted adjacent Genesis damage must support sacrificing the eligible controlled local minion, summoning, selecting a legal adjacent target, and applying the printed damage through shared damage resolution. That paid-entry/Genesis composition is currently unsupported: the restored issued summon rolls back before target choice or damage is reached. Full payment, entry, Genesis, and marked cost-body completion remain required.",
+      "implementationStatus": "unsupported",
       "genericFactHints": [
         "genesisMayDamageTargetAdjacentUnit",
         "sacrificeMinionAtSummoningLocationForManaDiscount"
@@ -11496,17 +11486,10 @@
       "actionHints": [
         "summon-minion"
       ],
-      "eventHints": [
-        "minion-sacrificed",
-        "minion-died",
-        "minion-summoned",
-        "genesis-damage-allocated",
-        "damage-dealt",
-        "avatar-life-lost"
-      ],
+      "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
-        "testName": "rule_catalog_0500_targeted_genesis_sacrifice_target_deals_damage"
+        "testName": "rule_catalog_0500_paid_summon_genesis_checkpoint_repeats_unsupported_rollback"
       }
     },
     {
@@ -13283,8 +13266,8 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Destroy-undead-minions-and-artifacts-at-a-location-within-two-steps Magic offers locations within two measured steps of the caster. After C4 and C3 exist, choosing C3 kills an Undead minion and destroys a loose Artifact there, and leaves a non-Undead beast at C4 unwounded.",
-      "implementationStatus": "rust-supported",
+      "plainLanguage": "The Magic must offer locations within two measured steps and destroy eligible Undead minions and Artifacts at the chosen location while excluding non-Undead minions and other locations. The exercised C3 composition with both an unprotected Undead and a loose Artifact is currently unsupported and rolls back; full mixed-object resolution and its target exclusions remain required.",
+      "implementationStatus": "unsupported",
       "genericFactHints": [
         "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
         "undead"
@@ -13292,13 +13275,10 @@
       "actionHints": [
         "cast-magic"
       ],
-      "eventHints": [
-        "minion-killed",
-        "artifact-destroyed"
-      ],
+      "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
-        "testName": "rule_catalog_0575_destroy_undead_relics_here_destroys_undead_and_artifact_and_spares_beast"
+        "testName": "rule_catalog_0575_mixed_undead_artifact_destruction_rolls_back_before_other_units_change"
       }
     },
     {
@@ -16444,7 +16424,7 @@
       "requirementIds": [
         "RULE-03"
       ],
-      "plainLanguage": "Sinkhole destruction on a Water site preserves relative subsurface: drowned minions die, Burrowing survivors and loose Artifacts settle underground, and terminal Atlas loss ends the game after Rubble. Distinct from 0703 land, protected, and existing-Rubble branches.",
+      "plainLanguage": "In supported nonterminal Sinkhole destruction on a Water site, relative subsurface is preserved: drowned minions die, while Burrowing survivors and loose Artifacts settle underground. The composition where a failed Atlas Deathrite draw would end the game while departed site cards still await their local completion is currently unsupported and rolls back. Full terminal site-departure ownership remains required. Land, protected, and existing-Rubble branches are covered separately by 0703.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "rubble",
@@ -16652,7 +16632,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Fight-ally-with-adjacent-enemy Magic in the underground region with a first-strike attacker pauses in deathrite-order after the initial strike when the target's Deathrite would settle. The pending continuation keeps the underground fight with first-strike semantics, defers magic-resolved until Deathrites are ordered, and checkpoint serialize/parse/resume preserves the pending state through terminal completion. Distinct from surface Duel proofs (0603–0604) and Leap Attack Deathrite resume (0695).",
+      "plainLanguage": "An underground first-strike Duel preserves its action and terminal state through checkpoint replay; the first marked provider draws and departs before its removed bonus marks the second source, whose failed draw ends the game with live marked body and inert FirstStrike/Magic completion. General ordering is covered by separate simultaneous-source proofs.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "fightAllyWithAdjacentEnemy",
@@ -16662,22 +16642,17 @@
         "otherNearbyAlliesPowerBonus"
       ],
       "actionHints": [
-        "cast-magic",
-        "order-deathrites"
+        "cast-magic"
       ],
       "eventHints": [
         "fight-started",
         "strike-damage-allocated",
         "damage-dealt",
-        "deathrite-order-committed",
-        "site-drawn",
-        "minion-died",
-        "magic-resolved",
         "game-ended"
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/duel_rules.rs",
-        "testName": "rule_catalog_0712_duel_checkpoints_underground_first_strike_and_finishes_before_terminal"
+        "testName": "rule_catalog_0712_underground_duel_checkpoints_terminal_sequential_deathrites"
       }
     },
     {
@@ -17306,7 +17281,7 @@
         "RULE-02",
         "RULE-03"
       ],
-      "plainLanguage": "Geomancer terrain replacement ends the game terminal when the last Atlas card is played and skips deferred Genesis mana gain.",
+      "plainLanguage": "Replacing Rubble with the last Atlas Water site can drown a Burrowing minion whose pure DrawSite Deathrite then fails and ends the game; playing the last Atlas card alone is not the loss trigger. The replacement and its site resource are already applied, while deferred Genesis mana and marked-body departure do not occur after terminal. The existing SiteGenesis continuation remains inert.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesis",
@@ -17316,8 +17291,9 @@
         "replace-rubble-with-top-atlas-site"
       ],
       "eventHints": [
-        "game-ended",
-        "minion-died"
+        "rubble-replaced",
+        "site-played",
+        "game-ended"
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_terrain_rules.rs",
@@ -17426,7 +17402,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Lance breaks before a lethal Deathrite draw that would deck out the controller, and terminal replay preserves that ordering.",
+      "plainLanguage": "Lance breaks as part of the completed current strike before a pure Deathrite draw fails and ends the game. The marked body remains in the realm; terminal replay preserves the break and suppresses later corpse departure.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "lance",
@@ -17438,7 +17414,6 @@
       ],
       "eventHints": [
         "lance-broken",
-        "minion-died",
         "game-ended"
       ],
       "scenarioProof": {
@@ -17853,7 +17828,7 @@
         "RULE-03",
         "RULE-05"
       ],
-      "plainLanguage": "A terminal end-turn Deathrite ends the game without emitting turn-ended or turn-started.",
+      "plainLanguage": "A terminal end-turn Deathrite ends the game without emitting turn-ended or turn-started. Marked bodies and the existing end-turn continuation remain inert without later corpse departure.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "diesAtEndOfControllerTurn",
@@ -17863,8 +17838,7 @@
         "end-turn"
       ],
       "eventHints": [
-        "game-ended",
-        "minion-died"
+        "game-ended"
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/end_turn_lifecycle_rules.rs",
@@ -18207,17 +18181,16 @@
       "requirementIds": [
         "RULE-04"
       ],
-      "plainLanguage": "Simultaneous draw-site Deathrites resolve NAP then AP before minions enter their cemeteries; an empty Atlas skips those draws and finishes in a draw.",
+      "plainLanguage": "Simultaneous draw-site Deathrites resolve NAP then AP before the marked minions enter their cemeteries when both draws succeed. If the first NAP draw instead fails on an empty Atlas, that player loses immediately; the later AP draw does not resolve, and marked bodies with their pending owner remain inert in the realm.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "deathriteDrawSite"
       ],
       "actionHints": [],
       "eventHints": [
-        "death",
-        "cemetery-entry",
-        "resolution",
-        "site-drawn"
+        "site-drawn",
+        "minion-died",
+        "game-ended"
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
@@ -20137,7 +20110,7 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "Terminal Deathrites clear incremental Ranged movement state when the game ends.",
+      "plainLanguage": "A terminal Deathrite stops incremental Ranged movement. The existing movement continuation and marked-work owner remain inert, with no later path step, ranged step, or marked-body departure and no legal actions.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "ranged",
@@ -20145,12 +20118,11 @@
       ],
       "actionHints": [],
       "eventHints": [
-        "death",
-        "movement"
+        "game-ended"
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
-        "testName": "rule_catalog_0869_ordered_deathrites_clear_incremental_ranged_movement"
+        "testName": "rule_catalog_0869_ordered_deathrites_leave_incremental_ranged_movement_inert"
       }
     },
     {
@@ -24416,8 +24388,8 @@
       "requirementIds": [
         "RULE-04"
       ],
-      "plainLanguage": "Destroy-undead-minions-and-artifacts-at-location-within-two-steps Magic that kills a Deathrite undead minion draws a site for that minion's controller before magic-resolved.",
-      "implementationStatus": "rust-supported",
+      "plainLanguage": "The Magic must resolve a killed Undead minion’s DrawSite Deathrite for that minion’s controller and finish the applicable mixed-object destruction and Magic work when the game remains active. The exercised Undead-plus-Artifact composition is currently unsupported and rolls back before a Deathrite draw. Full shared mixed-object resolution remains required.",
+      "implementationStatus": "unsupported",
       "genericFactHints": [
         "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
         "deathriteDrawSite"
@@ -24425,16 +24397,10 @@
       "actionHints": [
         "cast-magic"
       ],
-      "eventHints": [
-        "minion-killed",
-        "site-drawn",
-        "minion-died",
-        "artifact-destroyed",
-        "magic-resolved"
-      ],
+      "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
-        "testName": "rule_catalog_1052_destroy_undead_relics_deathrite_draws_for_controller_on_kill"
+        "testName": "rule_catalog_1052_mixed_undead_artifact_destruction_is_unsupported_before_deathrite_draw"
       }
     },
     {
@@ -25102,8 +25068,8 @@
       "requirementIds": [
         "RULE-04"
       ],
-      "plainLanguage": "Craterize-style Magic that kills a Deathrite minion draws a site for that minion's controller before magic-resolved.",
-      "implementationStatus": "rust-supported",
+      "plainLanguage": "Site-destruction Magic whose damage kills a DrawSite Deathrite minion must resolve the draw for that minion’s controller and complete the applicable site, minion, and Magic work when the game remains active. This site-and-minion composition is currently unsupported and its issued cast rolls back. Full mixed-object departure and continuation ownership remain required.",
+      "implementationStatus": "unsupported",
       "genericFactHints": [
         "destroyTargetSite",
         "discardSiteAsAdditionalCost",
@@ -25113,17 +25079,10 @@
       "actionHints": [
         "cast-magic"
       ],
-      "eventHints": [
-        "card-discarded",
-        "site-destroyed",
-        "damage-dealt",
-        "site-drawn",
-        "minion-died",
-        "magic-resolved"
-      ],
+      "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/protected_site_magic_rules.rs",
-        "testName": "rule_catalog_1082_craterize_deathrite_draws_for_controller_on_kill"
+        "testName": "rule_catalog_1082_craterize_site_minion_death_is_unsupported_and_rolls_back"
       }
     },
     {
@@ -37820,8 +37779,8 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "Destroy-undead-minions-and-artifacts-at-location-within-two-steps Magic leaves a killed Undead in the cemetery after later turns pass.",
-      "implementationStatus": "rust-supported",
+      "plainLanguage": "After successful mixed Undead-and-Artifact destruction, the departed non-token Undead must remain in its owner’s cemetery across later turns unless another effect moves it. The exercised mixed composition is currently unsupported and rolls back before cemetery entry; its guard proof does not establish later-turn cemetery persistence. Full mixed-object completion remains required.",
+      "implementationStatus": "unsupported",
       "genericFactHints": [
         "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
         "undead"
@@ -37829,13 +37788,10 @@
       "actionHints": [
         "cast-magic"
       ],
-      "eventHints": [
-        "minion-killed",
-        "artifact-destroyed"
-      ],
+      "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
-        "testName": "rule_catalog_1853_killed_undead_stays_in_cemetery_after_turns_pass"
+        "testName": "rule_catalog_1853_mixed_undead_artifact_destruction_is_unsupported_before_cemetery_persistence"
       }
     },
     {
@@ -37889,8 +37845,8 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "Destroy-undead-minions-and-artifacts-at-location-within-two-steps Magic kills every Undead and destroys every Artifact sharing the target cell.",
-      "implementationStatus": "rust-supported",
+      "plainLanguage": "The Magic must destroy all eligible Undead minions and Artifacts sharing its selected location, subject to applicable protection. The exercised composition containing an unprotected Undead and an Artifact is currently unsupported and rolls back; complete mixed-object recipient and departure behavior remains required.",
+      "implementationStatus": "unsupported",
       "genericFactHints": [
         "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
         "undead"
@@ -37900,13 +37856,10 @@
         "cast-artifact",
         "summon-minion"
       ],
-      "eventHints": [
-        "minion-killed",
-        "artifact-destroyed"
-      ],
+      "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
-        "testName": "rule_catalog_1856_unravel_kills_every_undead_and_destroys_every_artifact_sharing_the_target_cell"
+        "testName": "rule_catalog_1856_mixed_undead_artifact_cohort_is_unsupported_and_rolls_back"
       }
     },
     {
@@ -37915,8 +37868,8 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "Destroy-undead-minions-and-artifacts-at-location-within-two-steps Magic leaves a far Undead untouched.",
-      "implementationStatus": "rust-supported",
+      "plainLanguage": "The Magic must limit destruction to eligible objects at its selected location and leave a far Undead outside it unaffected. The exercised local Undead-plus-Artifact composition is currently unsupported and rolls back; the far unit remains unchanged because the entire action rolls back, which does not prove successful target exclusion. Full mixed-object resolution remains required.",
+      "implementationStatus": "unsupported",
       "genericFactHints": [
         "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
         "undead"
@@ -37925,13 +37878,10 @@
         "cast-magic",
         "summon-minion"
       ],
-      "eventHints": [
-        "minion-killed",
-        "artifact-destroyed"
-      ],
+      "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
-        "testName": "rule_catalog_1857_unravel_leaves_a_far_undead_untouched"
+        "testName": "rule_catalog_1857_mixed_undead_artifact_destruction_rolls_back_with_far_unit_unchanged"
       }
     },
     {
@@ -48064,6 +48014,6 @@
       }
     }
   ],
-  "rustSupportedCount": 2590,
+  "rustSupportedCount": 2068,
   "typescriptSupportedCount": 0
 }

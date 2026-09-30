@@ -1,3 +1,6 @@
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
@@ -1083,13 +1086,7 @@ fn rule_catalog_1173_draw_withheld_during_pending_deathrite_order() {
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(paused["pendingDeathrites"]["returnPhase"], "draw");
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(
         session
             .legal_actions()

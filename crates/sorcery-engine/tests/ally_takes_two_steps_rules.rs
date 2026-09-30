@@ -6,6 +6,9 @@
 //! paid no-op without a step event. While Deathrites wait for ordering,
 //! ally-step Magic stays withheld until the chain drains.
 
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt};
@@ -605,13 +608,7 @@ fn rule_catalog_1049_ally_takes_two_steps_withheld_during_pending_deathrite_orde
     let paused = state(session);
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(realm_unit(&paused, &ally_id).is_some());
     assert!(
         session

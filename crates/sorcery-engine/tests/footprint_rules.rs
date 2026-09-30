@@ -1586,7 +1586,7 @@ fn rule_catalog_0180_oversized_sacrifice_uses_every_occupied_summoning_cell() {
         .to_owned();
     assert_eq!(
         event_types(&receipt),
-        ["minion-sacrificed", "minion-died", "minion-summoned"]
+        ["minion-sacrificed", "minion-summoned", "minion-died"]
     );
     assert_eq!(
         unit(&state(&session), &giant)["occupiedCells"],

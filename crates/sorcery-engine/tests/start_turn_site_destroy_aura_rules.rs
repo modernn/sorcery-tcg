@@ -8,8 +8,13 @@
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
-use sorcery_engine::contract::{ActionRequest, Receipt};
-use sorcery_engine::session::{Session, StepResult};
+use sorcery_engine::checkpoint::{
+    create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+    serialize_game_checkpoint,
+};
+use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
+use sorcery_engine::game::{Game, GameError};
+use sorcery_engine::session::{Session, SessionError, StepResult};
 
 fn avatar() -> Value {
     json!({
@@ -127,6 +132,27 @@ fn aura_id(session: &Session) -> Value {
     state(session)["realm"]["auras"][0]["instanceId"].clone()
 }
 
+fn replay_game_for_session(session: &Session) -> Game {
+    let mut game = Game::from_manifest_json(session.manifest_json()).expect("Game fixture");
+    for receipt in session.transcript() {
+        let action = game
+            .legal_actions()
+            .expect("Ignore-path legal actions")
+            .into_iter()
+            .find(|action| {
+                action
+                    .to_legal_action()
+                    .expect("materialized Ignore-path action")
+                    .action_id
+                    == receipt.action_id
+            })
+            .expect("Session-issued action exists in Ignore path");
+        game.apply_action(&action)
+            .expect("Ignore-path setup action");
+    }
+    game
+}
+
 fn assert_exact_replay(session: &Session) {
     let action_ids: Vec<_> = session
         .transcript()
@@ -140,6 +166,110 @@ fn assert_exact_replay(session: &Session) {
     );
     assert_eq!(replayed.transcript(), session.transcript());
     assert!(session.verify_replay().expect("verified replay"));
+}
+
+fn all_warded_manifest() -> String {
+    let mut value: Value = serde_json::from_str(&manifest(false)).expect("base fixture manifest");
+    let mut north_minion = minion();
+    north_minion["ward"] = json!(true);
+    value["cards"]["north-ward-minion"] = north_minion;
+    value["cards"]["south-minion"]["ward"] = json!(true);
+    value["decks"]["north"]["spellbook"] = json!([
+        "north-ward-minion",
+        "north-ward-minion",
+        "north-ward-minion",
+        "north-aura",
+        "north-aura",
+        "north-aura",
+    ]);
+    value["seed"] = json!(1);
+    value.as_object_mut().unwrap().remove("manifestId");
+    value["manifestId"] = json!(identity_hash(&value).expect("warded fixture manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical warded manifest")
+}
+
+fn protection_lost_manifest() -> String {
+    let mut value: Value = serde_json::from_str(&all_warded_manifest()).unwrap();
+    value["cards"]["north-freeze"] = json!({
+        "cardType": "magic",
+        "disableTargetNearbyMinionUntilNextTurn": true,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    });
+    value["decks"]["north"]["spellbook"] = json!([
+        "north-aura",
+        "north-ward-minion",
+        "north-aura",
+        "north-aura",
+        "north-aura",
+        "north-freeze",
+    ]);
+    value.as_object_mut().unwrap().remove("manifestId");
+    value["manifestId"] = json!(identity_hash(&value).expect("protection-lost manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).unwrap()
+}
+
+fn after_aura_disabling_its_warded_minion() -> Session {
+    let encoded = protection_lost_manifest();
+    let mut session = Session::new(&encoded).expect("valid protection-lost session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let (_, summon) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ward-minion"
+            && descriptor["cell"] == "C4"
+    });
+    let minion_id = summon
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-summoned")
+        .expect("issued protected minion summon")
+        .payload["instanceId"]
+        .clone();
+    let (_, disabled) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-freeze"
+            && descriptor["target"]["instanceId"] == minion_id
+    });
+    assert!(disabled.events.iter().any(|event| {
+        event.event_type == "minion-disabled" && event.payload["wardRemoved"] == true
+    }));
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-aura"
+            && descriptor["cardId"] == "north-aura"
+            && descriptor["cells"] == json!(["C4"])
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    session
+}
+
+fn after_aura_with_warded_minion_on_c4() -> Session {
+    let encoded = all_warded_manifest();
+    after_aura_with_manifest(&encoded)
+}
+
+fn after_aura_with_manifest(encoded: &str) -> Session {
+    let mut session = Session::new(encoded).expect("valid protected-recipient session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ward-minion"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-aura"
+            && descriptor["cardId"] == "north-aura"
+            && descriptor["cells"] == json!(["C4"])
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    session
 }
 
 fn after_aura_on_c4(unique_south: bool) -> Session {
@@ -180,7 +310,7 @@ fn resolve_start_turn_destroy(session: &mut Session, source_id: &Value) -> Recei
 }
 
 #[test]
-fn rule_catalog_0258_start_turn_aura_destroys_the_occupied_site_and_minions_atop_it() {
+fn rule_catalog_0258_start_turn_site_minion_destruction_is_unsupported_and_rolls_back() {
     let mut session = after_aura_on_c4(false);
     let source_id = aura_id(&session);
     accept_where(&mut session, |descriptor| {
@@ -197,51 +327,455 @@ fn rule_catalog_0258_start_turn_aura_destroys_the_occupied_site_and_minions_atop
             && descriptor["cell"] == "C4"
     });
     accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
-    let target_id = state(&session)["realm"]["units"]
+
+    let before_north = session.public_view(Seat::North).unwrap();
+    let before_south = session.public_view(Seat::South).unwrap();
+    let before_hash = session.state_hash().unwrap();
+    let before_draws_hash = session.initial_random_draws_hash().unwrap();
+    let before_transcript = session.transcript().to_vec();
+    let before_attempts = session.attempts().to_vec();
+    let action = session
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .find(|action| {
+            action.descriptor["kind"] == "resolve-start-turn-trigger"
+                && action.descriptor["sourceInstanceId"] == source_id
+        })
+        .expect("issued occupied-site Aura trigger");
+    let result = session.step(ActionRequest {
+        action_id: action.action_id.to_string(),
+        seat: action.seat,
+        state_version: action.state_version,
+    });
+    assert!(matches!(
+        result,
+        Err(SessionError::Game(GameError::UnsupportedMechanic(reason)))
+            if reason == "start-turn site and minion destruction overlap"
+    ));
+    assert_eq!(session.public_view(Seat::North).unwrap(), before_north);
+    assert_eq!(session.public_view(Seat::South).unwrap(), before_south);
+    assert_eq!(session.state_hash().unwrap(), before_hash);
+    assert_eq!(
+        session.initial_random_draws_hash().unwrap(),
+        before_draws_hash
+    );
+    assert_eq!(session.transcript(), before_transcript);
+    assert_eq!(session.attempts(), before_attempts);
+    assert!(session.unsupported_mechanic().is_some());
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one protected start-turn destruction and ward interaction proof"
+)]
+fn protected_start_turn_destruction_consumes_ward_without_marking_minions() {
+    let mut session = after_aura_with_warded_minion_on_c4();
+    let source_id = aura_id(&session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    let before = state(&session);
+    let before_hash = session.state_hash().expect("pre-trigger hash");
+    let mut ignored = replay_game_for_session(&session);
+    assert_eq!(ignored.authoritative_state(), before);
+    assert_eq!(ignored.state_hash().unwrap(), before_hash);
+    let checkpoint_before =
+        create_game_checkpoint(&session).expect("pre-effect protected trigger checkpoint");
+    let encoded_before =
+        serialize_game_checkpoint(&checkpoint_before).expect("serialize pre-effect checkpoint");
+    let parsed_before =
+        parse_game_checkpoint(&encoded_before).expect("parse pre-effect checkpoint");
+    let mut restored_before =
+        resume_game_checkpoint(&parsed_before).expect("resume pre-effect checkpoint");
+    assert_eq!(
+        restored_before.replay_value().unwrap(),
+        session.replay_value().unwrap()
+    );
+    assert_eq!(
+        restored_before.legal_actions().unwrap(),
+        session.legal_actions().unwrap()
+    );
+    assert_eq!(restored_before.transcript(), session.transcript());
+    let action = session
+        .legal_actions()
+        .expect("protected start-turn actions")
+        .into_iter()
+        .find(|action| {
+            action.descriptor["kind"] == "resolve-start-turn-trigger"
+                && action.descriptor["sourceInstanceId"] == source_id
+        })
+        .expect("issued occupied-site Aura trigger");
+    let ignore_action = ignored
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.to_legal_action().unwrap().action_id == action.action_id)
+        .expect("same issued trigger in Ignore path");
+    ignored
+        .apply_action(&ignore_action)
+        .expect("Ignore-path protected trigger");
+    let restored_action = restored_before
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.action_id == action.action_id)
+        .expect("same issued trigger after checkpoint resume");
+    let StepResult::Accepted(restored_receipt) = restored_before
+        .step(ActionRequest {
+            action_id: restored_action.action_id.to_string(),
+            seat: restored_action.seat,
+            state_version: restored_action.state_version,
+        })
+        .expect("resumed protected trigger")
+    else {
+        panic!("resumed issued trigger must be accepted");
+    };
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .expect("Ward-protected destruction should resolve")
+    else {
+        panic!("issued start-turn trigger must be accepted");
+    };
+
+    assert_eq!(
+        serde_json::to_value(&restored_receipt).unwrap(),
+        serde_json::to_value(&receipt).unwrap()
+    );
+    assert_eq!(
+        restored_before.replay_value().unwrap(),
+        session.replay_value().unwrap()
+    );
+    assert_eq!(restored_before.transcript(), session.transcript());
+    let warded_recipients = before["realm"]["units"]
         .as_array()
-        .expect("units")
+        .expect("two actual Surface recipients")
         .iter()
-        .find(|unit| unit["cardId"] == "south-minion")
-        .expect("south minion")["instanceId"]
-        .clone();
-    let receipt = resolve_start_turn_destroy(&mut session, &source_id);
-    assert!(
-        receipt
-            .events
+        .map(|unit| (unit["instanceId"].clone(), unit["controller"].clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(warded_recipients.len(), 2);
+    let ward_events = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "ward-broken")
+        .map(|event| event.payload.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ward_events,
+        warded_recipients
             .iter()
-            .any(|event| event.event_type == "site-destroyed" && event.payload["cell"] == "C4")
+            .map(|(instance_id, controller)| json!({
+                "instanceId": instance_id,
+                "seat": controller,
+            }))
+            .collect::<Vec<_>>()
     );
     assert!(
-        receipt
-            .events
-            .iter()
-            .any(|event| event.event_type == "rubble-created" && event.payload["cell"] == "C4")
+        receipt.events.iter().all(|event| {
+            event.event_type != "minion-died" && event.event_type != "minion-killed"
+        })
     );
-    assert!(receipt.events.iter().any(|event| {
-        event.event_type == "minion-died" && event.payload["instanceId"] == target_id
-    }));
-    assert!(receipt.events.iter().any(|event| {
-        event.event_type == "aura-dispelled" && event.payload["instanceId"] == source_id
-    }));
     let after = state(&session);
+    assert_eq!(ignored.authoritative_state(), after);
+    assert_eq!(ignored.state_hash().unwrap(), session.state_hash().unwrap());
+    assert_eq!(
+        ignored
+            .legal_actions()
+            .unwrap()
+            .iter()
+            .map(|action| action.to_legal_action().unwrap())
+            .collect::<Vec<_>>(),
+        session.legal_actions().unwrap()
+    );
+    for (id, _) in &warded_recipients {
+        let unit = after["realm"]["units"]
+            .as_array()
+            .expect("surviving protected units")
+            .iter()
+            .find(|unit| unit["instanceId"] == *id)
+            .expect("Ward-protected recipient remains live");
+        assert_eq!(unit["warded"], false);
+        assert_ne!(unit["deathMarked"], true);
+    }
     assert_eq!(after["phase"], "draw");
     assert_eq!(after["realm"]["sites"]["C4"]["rubble"], true);
     assert!(after["realm"].get("auras").is_none());
-    assert!(
-        after["realm"]["units"]
-            .as_array()
-            .expect("units")
-            .iter()
-            .all(|unit| unit["instanceId"] != target_id)
+    assert_ne!(
+        session.state_hash().expect("post-trigger hash"),
+        before_hash
     );
-    assert_eq!(after["players"]["north"]["avatar"]["location"], "C4");
-    assert!(
-        after["players"]["south"]["cemetery"]
-            .as_array()
-            .expect("south cemetery")
-            .iter()
-            .any(|card| card["instanceId"] == target_id)
+    for seat in ["north", "south"] {
+        assert!(
+            state(&session)["players"][seat]["cemetery"]
+                .as_array()
+                .expect("owner cemetery")
+                .iter()
+                .all(|card| warded_recipients
+                    .iter()
+                    .all(|(id, _)| card["instanceId"] != *id))
+        );
+    }
+    let checkpoint = create_game_checkpoint(&session).expect("protected trigger checkpoint");
+    let encoded_checkpoint =
+        serialize_game_checkpoint(&checkpoint).expect("serialize protected trigger checkpoint");
+    let parsed = parse_game_checkpoint(&encoded_checkpoint).expect("parse protected checkpoint");
+    let restored = resume_game_checkpoint(&parsed).expect("resume protected checkpoint");
+    assert_eq!(
+        restored.replay_value().unwrap(),
+        session.replay_value().unwrap()
     );
+    assert_eq!(
+        serde_json::to_value(restored.legal_actions().unwrap()).unwrap(),
+        serde_json::to_value(session.legal_actions().unwrap()).unwrap()
+    );
+    assert_eq!(restored.transcript(), session.transcript());
+    assert_exact_replay(&restored);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn protected_and_unprotected_start_turn_cohort_rolls_back_before_mutation() {
+    let mut value: Value = serde_json::from_str(&all_warded_manifest()).unwrap();
+    value["cards"]["south-minion"]
+        .as_object_mut()
+        .unwrap()
+        .remove("ward");
+    value.as_object_mut().unwrap().remove("manifestId");
+    value["manifestId"] = json!(identity_hash(&value).expect("mixed fixture identity"));
+    let encoded = sorcery_engine::canonical::canonical_json(&value).unwrap();
+    let mut session = after_aura_with_manifest(&encoded);
+    let source_id = aura_id(&session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    let before_state = state(&session);
+    let mut ignored = replay_game_for_session(&session);
+    assert_eq!(ignored.authoritative_state(), before_state);
+    let before_north_view = session.public_view(Seat::North).unwrap();
+    let before_south_view = session.public_view(Seat::South).unwrap();
+    let before_hash = session.state_hash().unwrap();
+    let before_draws_hash = session.initial_random_draws_hash().unwrap();
+    let before_transcript = session.transcript().to_vec();
+    let before_attempts = session.attempts().to_vec();
+    let action = session
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .find(|action| {
+            action.descriptor["kind"] == "resolve-start-turn-trigger"
+                && action.descriptor["sourceInstanceId"] == source_id
+        })
+        .expect("issued occupied-site Aura trigger");
+    let ignored_action = ignored
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.to_legal_action().unwrap().action_id == action.action_id)
+        .expect("same issued mixed trigger in Ignore path");
+    let ignored_result = ignored.apply_action(&ignored_action);
+    let result = session.step(ActionRequest {
+        action_id: action.action_id.to_string(),
+        seat: action.seat,
+        state_version: action.state_version,
+    });
+    assert!(matches!(
+        result,
+        Err(SessionError::Game(GameError::UnsupportedMechanic(reason)))
+            if reason == "start-turn site and minion destruction overlap"
+    ));
+    assert!(
+        matches!(ignored_result, Err(GameError::UnsupportedMechanic(reason))
+        if reason == "start-turn site and minion destruction overlap")
+    );
+    assert_eq!(ignored.authoritative_state(), before_state);
+    assert_eq!(ignored.state_hash().unwrap(), before_hash);
+    assert_eq!(session.public_view(Seat::North).unwrap(), before_north_view);
+    assert_eq!(session.public_view(Seat::South).unwrap(), before_south_view);
+    assert_eq!(session.state_hash().unwrap(), before_hash);
+    assert_eq!(
+        session.initial_random_draws_hash().unwrap(),
+        before_draws_hash
+    );
+    assert_eq!(session.transcript(), before_transcript);
+    assert_eq!(session.attempts(), before_attempts);
+    assert!(session.unsupported_mechanic().is_some());
+}
+
+#[test]
+fn disabled_ward_recipient_still_hits_the_fresh_unprotected_guard() {
+    let mut session = after_aura_disabling_its_warded_minion();
+    let source_id = aura_id(&session);
+    let protected_id = state(&session)["realm"]["units"][0]["instanceId"].clone();
+    assert_eq!(state(&session)["realm"]["units"][0]["warded"], false);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    let before_north = session.public_view(Seat::North).unwrap();
+    let before_south = session.public_view(Seat::South).unwrap();
+    let before_hash = session.state_hash().unwrap();
+    let before_transcript = session.transcript().to_vec();
+    let action = session
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .find(|action| {
+            action.descriptor["kind"] == "resolve-start-turn-trigger"
+                && action.descriptor["sourceInstanceId"] == source_id
+        })
+        .expect("issued occupied-site Aura trigger");
+    let result = session.step(ActionRequest {
+        action_id: action.action_id.to_string(),
+        seat: action.seat,
+        state_version: action.state_version,
+    });
+    assert!(matches!(result,
+        Err(SessionError::Game(GameError::UnsupportedMechanic(reason)))
+            if reason == "start-turn site and minion destruction overlap"));
+    assert_eq!(session.public_view(Seat::North).unwrap(), before_north);
+    assert_eq!(session.public_view(Seat::South).unwrap(), before_south);
+    assert_eq!(session.state_hash().unwrap(), before_hash);
+    assert_eq!(session.transcript(), before_transcript);
+    assert_eq!(
+        session.unsupported_mechanic(),
+        Some("start-turn site and minion destruction overlap")
+    );
+    assert_eq!(
+        session.public_view(Seat::North).unwrap()["realm"]["units"][0]["instanceId"],
+        protected_id
+    );
+}
+
+#[test]
+fn warded_minion_off_the_aura_cell_keeps_ward_and_is_not_a_recipient() {
+    let mut session = after_aura_with_warded_minion_on_c4();
+    let source_id = aura_id(&session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    let before = state(&session);
+    let off_cell = before["realm"]["units"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|unit| unit["controller"] == "south")
+        .expect("off-cell Ward minion")["instanceId"]
+        .clone();
+    let receipt = resolve_start_turn_destroy(&mut session, &source_id);
+    let wards = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "ward-broken")
+        .map(|event| event.payload["instanceId"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(wards.len(), 1);
+    assert_ne!(wards[0], off_cell);
+    let after = state(&session);
+    let unit = after["realm"]["units"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|unit| unit["instanceId"] == off_cell)
+        .expect("unrelated minion remains live");
+    assert_eq!(unit["warded"], true);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn unwarded_minion_off_the_aura_cell_is_not_a_recipient() {
+    let mut value: Value = serde_json::from_str(&all_warded_manifest()).unwrap();
+    value["cards"]["south-minion"]
+        .as_object_mut()
+        .unwrap()
+        .remove("ward");
+    value.as_object_mut().unwrap().remove("manifestId");
+    value["manifestId"] =
+        json!(identity_hash(&value).expect("unwarded off-cell manifest identity"));
+    let encoded = sorcery_engine::canonical::canonical_json(&value).unwrap();
+    let mut session = after_aura_with_manifest(&encoded);
+    let source_id = aura_id(&session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+    });
+    let off_cell = summon["cardInstanceId"].clone();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert_eq!(
+        state(&session)["realm"]["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|unit| unit["instanceId"] == off_cell)
+            .expect("issued off-cell minion")["warded"],
+        false
+    );
+
+    let receipt = resolve_start_turn_destroy(&mut session, &source_id);
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .filter(|event| event.event_type == "ward-broken")
+            .count(),
+        1,
+        "only the Ward-protected in-footprint minion consumes Ward"
+    );
+    let after = state(&session);
+    let unit = after["realm"]["units"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|unit| unit["instanceId"] == off_cell)
+        .expect("unwarded off-cell minion remains live");
+    assert_eq!(unit["warded"], false);
+    assert_eq!(unit.get("deathMarked"), None);
     assert_exact_replay(&session);
 }
 

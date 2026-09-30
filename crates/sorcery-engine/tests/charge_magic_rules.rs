@@ -8,6 +8,9 @@
 
 #[path = "common/mod.rs"]
 mod common;
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 use common::modifier_sources;
 
 use serde_json::{Value, json};
@@ -720,13 +723,7 @@ fn rule_catalog_1033_charge_magic_withheld_during_pending_deathrite_order() {
     let paused = state(session);
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert!(
         paused["realm"]["units"]
             .as_array()

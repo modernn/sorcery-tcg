@@ -302,8 +302,9 @@ the compiler does not silently admit a supported prefix.
 
 The frame preserves the next operation, source context, target protection, and held
 Magic across the existing death-trigger driver. A resolving spell enters its owner's
-cemetery when resolution finishes, including terminal interruption. Physical cards
-carry a realm-entry counter so an old reference cannot bind to a returned card.
+cemetery when resolution finishes. If the game ends during a suspended Deathrite,
+the compiled frame retains its held Magic and remaining work without executing them.
+Physical cards carry a realm-entry counter so an old reference cannot bind to a returned card.
 Target bindings follow current control while retaining their object incarnation;
 the authoritative state hash includes all suspended-frame data and entry counters.
 Ward protects the dependent target operations once while independent draws proceed.
@@ -330,8 +331,13 @@ a token's Genesis can suspend that sequence for Deathrite ordering. All members 
 an entry group enter before any Genesis resolves. Compiled Genesis and Deathrite
 groups use the same player-selected ordering kernel and public `order-triggers`
 action. The active player commits their order first; the non-active player's
-effects resolve first. Each nested death chain finishes its corpse cleanup before
-the next Genesis resumes. Trigger records retain the ability's controller and
+effects resolve first. Death marking is irreversible on the existing live minion
+occurrence: healing or restored power does not undo it. Marked minions remain in
+ordinary realm queries, with their ongoing effects, carried Artifacts and source-bound
+control, until actual departure. The existing death-trigger driver captures fresh
+sources once, resolves the owned waves, and removes the departing cohort before
+relationship cleanup and any resulting secondary deaths. The next parent operation
+resumes only after that work finishes. Trigger records retain the ability's controller and
 source incarnation; a departed or re-entered source cannot start its old trigger.
 Single Genesis invocations without target declarations bypass the ordering batch;
 targeted invocations retain their compiled frame until declaration. The batch moves
@@ -339,8 +345,18 @@ records into resolution without cloning them. Simultaneous uncompiled Genesis re
 explicitly unsupported until its choices and ordered effects migrate. Site effects
 and raised-minion Magic resume their remaining work through the same continuation. The pending state
 includes the full sequence and any held Magic, so checkpoint branches preserve both
-event order and card ownership. Terminal cleanup retires the spell once and skips
-remaining effects and draws.
+event order and card ownership. If simultaneous damage ends the game, that damage
+event completes before play stops. A failed draw ends the game at that draw.
+Subsequent triggers, departures and parent operations do not run.
+The pending owner retains any live marked bodies and held compiled Magic.
+
+Compositions involving Genesis during marked work, changed captured Deathrite operands,
+post-mark banishment or return, and mixed-object regional exits remain explicitly
+unsupported where their full timing is not implemented. Exercising a guard rolls back
+the action and invalidates the Session; a passing rejection test does not establish
+support for that composition. Checkpoint loading still reconstructs history and checks
+the expected Session hash. Older checkpoints whose reconstructed result changes are
+rejected rather than silently migrated; unchanged histories continue to round-trip.
 
 Direct scenarios cover protected targets, independent effects, death-trigger order,
 cloned checkpoint continuation, terminal cleanup, source departure, re-entry, control

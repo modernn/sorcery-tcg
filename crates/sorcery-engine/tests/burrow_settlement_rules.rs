@@ -14,6 +14,9 @@
 //! burrows every Deathrite then pauses in trigger-order, and from 1913–1918 /
 //! 2243–2248, which kill ordinary minions without a same-receipt site draw.
 
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::checkpoint::{create_game_checkpoint, resume_game_checkpoint};
@@ -445,11 +448,7 @@ fn rule_catalog_0692_cave_in_burrows_then_orders_deathrites() {
 
     let pending = state(&session);
     assert_eq!(pending["phase"], "trigger-order");
-    assert!(
-        victim_ids
-            .iter()
-            .all(|instance_id| realm_unit(&pending, instance_id).is_none())
-    );
+    marked_death::assert_live_marked_before_cemetery(&pending, &victim_ids);
     assert_eq!(
         pending["pendingDeathrites"]["deferredOutcomes"],
         json!([{

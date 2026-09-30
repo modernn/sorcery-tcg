@@ -7,6 +7,9 @@ use sorcery_engine::checkpoint::{
 use sorcery_engine::contract::{ActionRequest, Receipt, RejectionCode};
 use sorcery_engine::session::{Session, StepResult};
 
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 fn thresholds(element: Option<&str>, required: u64) -> Value {
     let mut value = json!({ "air": 0, "earth": 0, "fire": 0, "water": 0 });
     if let Some(element) = element {
@@ -701,7 +704,7 @@ fn rule_catalog_0873_gnarled_wendigo_sacrifices_local_allies_before_paying_mana(
             .iter()
             .map(|event| event.event_type.as_str())
             .collect::<Vec<_>>(),
-        ["minion-sacrificed", "minion-died", "minion-summoned"]
+        ["minion-sacrificed", "minion-summoned", "minion-died"]
     );
     assert_eq!(
         first.events[0].payload,
@@ -713,7 +716,7 @@ fn rule_catalog_0873_gnarled_wendigo_sacrifices_local_allies_before_paying_mana(
             "sourceInstanceId": source_id,
         })
     );
-    assert_eq!(first.events[2].payload["manaPaid"], 4);
+    assert_eq!(first.events[1].payload["manaPaid"], 4);
     let after = state(&session);
     assert_eq!(after["players"]["north"]["mana"], 0);
     assert!(
@@ -886,13 +889,7 @@ fn rule_catalog_0874_gnarled_wendigo_payment_deathrites_resume_one_summon_and_co
             .iter()
             .any(|unit| unit["cardId"] == "north-wendigo")
     );
-    assert!(local_ids.iter().all(|instance_id| {
-        !pending["players"]["north"]["cemetery"]
-            .as_array()
-            .expect("pending cemetery")
-            .iter()
-            .any(|card| card["instanceId"] == instance_id.as_str())
-    }));
+    marked_death::assert_live_marked_before_cemetery(&pending, &local_ids);
 
     let checkpoint = create_game_checkpoint(&session).expect("pending Wendigo checkpoint");
     let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized pending checkpoint");
@@ -956,9 +953,9 @@ fn rule_catalog_0874_gnarled_wendigo_payment_deathrites_resume_one_summon_and_co
                 "trigger-order-committed",
                 "site-drawn",
                 "site-drawn",
-                "minion-died",
-                "minion-died",
                 "minion-summoned",
+                "minion-died",
+                "minion-died",
             ]
         );
         assert_eq!(
@@ -1070,6 +1067,10 @@ fn rule_catalog_0875_gnarled_wendigo_terminal_deathrite_ends_before_deferred_sum
                 && action.descriptor["sacrificedMinionInstanceIds"] == json!(local_ids)
         })
         .expect("terminal double-sacrifice payment");
+    let paid_card_id = payment.descriptor["cardInstanceId"]
+        .as_str()
+        .expect("paid Wendigo identity")
+        .to_owned();
     let StepResult::Accepted(interrupted) = session
         .step(ActionRequest {
             action_id: payment.action_id.to_string(),
@@ -1089,13 +1090,21 @@ fn rule_catalog_0875_gnarled_wendigo_terminal_deathrite_ends_before_deferred_sum
         ["minion-sacrificed", "minion-sacrificed"]
     );
     assert_eq!(state(&session)["phase"], "trigger-order");
+    let pre_order = create_game_checkpoint(&session).expect("paid-summon order checkpoint");
+    let pre_order_json =
+        serialize_game_checkpoint(&pre_order).expect("serialized order checkpoint");
+    let mut resumed = resume_game_checkpoint(
+        &parse_game_checkpoint(&pre_order_json).expect("parsed order checkpoint"),
+    )
+    .expect("resumed before Deathrite order");
+    assert_eq!(state(&resumed), state(&session));
     let order = session
         .legal_actions()
         .expect("terminal Deathrite order actions")
         .into_iter()
         .find(|action| action.descriptor["kind"] == "order-triggers")
         .expect("terminal Deathrite order");
-    let StepResult::Accepted(terminal) = session
+    let StepResult::Accepted(terminal) = resumed
         .step(ActionRequest {
             action_id: order.action_id.to_string(),
             seat: order.seat,
@@ -1111,13 +1120,7 @@ fn rule_catalog_0875_gnarled_wendigo_terminal_deathrite_ends_before_deferred_sum
             .iter()
             .map(|event| event.event_type.as_str())
             .collect::<Vec<_>>(),
-        [
-            "trigger-order-committed",
-            "site-drawn",
-            "minion-died",
-            "minion-died",
-            "game-ended",
-        ]
+        ["trigger-order-committed", "site-drawn", "game-ended"]
     );
     assert!(
         !terminal
@@ -1125,9 +1128,18 @@ fn rule_catalog_0875_gnarled_wendigo_terminal_deathrite_ends_before_deferred_sum
             .iter()
             .any(|event| event.event_type == "minion-summoned")
     );
+    session = resumed;
     let after = state(&session);
     assert_eq!(after["phase"], "terminal");
-    assert_eq!(after["pendingDeathrites"], Value::Null);
+    assert_eq!(
+        after["pendingDeathrites"]["continuation"]["kind"],
+        "paid-summon"
+    );
+    assert_eq!(
+        after["pendingDeathrites"]["continuation"]["unit"]["instanceId"],
+        paid_card_id
+    );
+    marked_death::assert_live_marked_before_cemetery(&after, &local_ids);
     assert_eq!(
         after["terminal"],
         json!({
@@ -1143,7 +1155,7 @@ fn rule_catalog_0875_gnarled_wendigo_terminal_deathrite_ends_before_deferred_sum
             .as_array()
             .expect("terminal cemetery")
             .iter()
-            .any(|card| card["instanceId"] == instance_id.as_str())
+            .all(|card| card["instanceId"] != instance_id.as_str())
     }));
     assert!(
         !after["realm"]["units"]
@@ -1165,6 +1177,21 @@ fn rule_catalog_0875_gnarled_wendigo_terminal_deathrite_ends_before_deferred_sum
             .expect("terminal cemetery")
             .iter()
             .any(|card| card["cardId"] == "north-wendigo")
+    );
+    let terminal_checkpoint =
+        create_game_checkpoint(&session).expect("terminal paid-summon checkpoint");
+    let terminal_json =
+        serialize_game_checkpoint(&terminal_checkpoint).expect("serialized terminal checkpoint");
+    let terminal_restored = resume_game_checkpoint(
+        &parse_game_checkpoint(&terminal_json).expect("parsed terminal checkpoint"),
+    )
+    .expect("resumed terminal paid-summon");
+    assert_eq!(state(&terminal_restored), after);
+    assert_eq!(
+        terminal_restored
+            .legal_actions()
+            .expect("restored terminal actions"),
+        session.legal_actions().expect("terminal actions")
     );
     assert!(session.verify_replay().expect("verified terminal replay"));
 }

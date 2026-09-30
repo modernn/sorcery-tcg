@@ -9,6 +9,9 @@ use sorcery_engine::checkpoint::{
 use sorcery_engine::contract::{ActionRequest, Receipt};
 use sorcery_engine::session::{Session, StepResult};
 
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 fn avatar() -> Value {
     json!({
         "attack": 1,
@@ -640,10 +643,10 @@ fn rule_catalog_0037_aura_loss_deaths_cannot_restore_stale_combat_during_a_defen
         "leaving the aura mid-path must kill both allies and owe an ordered Deathrite"
     );
 
-    // Both allies are off the board but stay out of the cemetery until North orders them.
+    // Both allies remain live and marked until North orders them.
     let paused_cemetery = cemetery_order(&paused, "north");
+    marked_death::assert_live_marked_before_cemetery(&paused, &fragile_ids);
     for fragile_id in &fragile_ids {
-        assert!(realm_unit(&paused, fragile_id).is_none());
         assert!(!paused_cemetery.contains(fragile_id));
     }
     let mut owed: Vec<String> = session
@@ -713,7 +716,7 @@ fn rule_catalog_0037_aura_loss_deaths_cannot_restore_stale_combat_during_a_defen
 }
 
 #[test]
-fn rule_catalog_0036_aura_loss_deathrite_should_end_the_game_after_its_triggering_magic_resolves() {
+fn rule_catalog_0036_aura_loss_deathrite_ends_before_magic_completion() {
     let cards = json!({
         "north-ally": minion(json!({ "deathriteDrawSite": true })),
         "north-avatar": avatar(),
@@ -779,17 +782,21 @@ fn rule_catalog_0036_aura_loss_deathrite_should_end_the_game_after_its_triggerin
             .iter()
             .map(|event| event.event_type.as_str())
             .collect::<Vec<_>>(),
-        [
-            "magic-cast",
-            "unit-teleported",
-            "minion-died",
-            "magic-resolved",
-            "game-ended",
-        ],
-        "the triggering Magic must resolve before the Deathrite's empty draw ends the game"
+        ["magic-cast", "unit-teleported", "game-ended"],
+        "the failed Deathrite draw interrupts the remaining Magic completion"
     );
     let finished = state(&session);
-    assert!(realm_unit(&finished, &ally_id).is_none());
+    marked_death::assert_live_marked_before_cemetery(&finished, std::slice::from_ref(&ally_id));
+    let teleport_id = receipt.events[0].payload["instanceId"]
+        .as_str()
+        .expect("cast Magic identity");
+    assert!(
+        finished["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("North cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == teleport_id)
+    );
     assert_eq!(
         finished["terminal"],
         json!({

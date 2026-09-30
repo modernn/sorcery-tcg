@@ -1,3 +1,6 @@
+#[path = "common/marked_death.rs"]
+mod marked_death;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::checkpoint::{
@@ -671,7 +674,6 @@ fn rule_catalog_0867_ranged_strikes_apply_ward_lethal_deathrites_and_terminal_re
             "projectile-shot",
             "strike-damage-allocated",
             "damage-dealt",
-            "minion-died",
             "game-ended",
         ]
     );
@@ -689,6 +691,10 @@ fn rule_catalog_0867_ranged_strikes_apply_ward_lethal_deathrites_and_terminal_re
             .legal_actions()
             .expect("terminal actions")
             .is_empty()
+    );
+    marked_death::assert_live_marked_before_cemetery(
+        &state(&terminal),
+        std::slice::from_ref(target_id),
     );
     assert_exact_replay(&terminal);
 }
@@ -1018,7 +1024,7 @@ fn rule_catalog_0868_ranged_minion_pauses_defend_movement_for_one_strike() {
     clippy::too_many_lines,
     reason = "one direct scenario proves terminal cleanup after ordered Deathrites interrupt movement"
 )]
-fn rule_catalog_0869_ordered_deathrites_clear_incremental_ranged_movement() {
+fn rule_catalog_0869_ordered_deathrites_leave_incremental_ranged_movement_inert() {
     let cards = json!({
         "north-avatar": avatar(),
         "north-mover": minion(json!({
@@ -1150,7 +1156,16 @@ fn rule_catalog_0869_ordered_deathrites_clear_incremental_ranged_movement() {
     let shot = fire_south(&mut session, &mover_id, &south_ids[0]);
     assert_eq!(
         event_types(&shot),
-        ["projectile-shot", "strike-damage-allocated", "damage-dealt",]
+        [
+            "projectile-shot",
+            "strike-damage-allocated",
+            "damage-dealt",
+            "minion-died",
+        ]
+    );
+    assert_eq!(
+        shot.events.last().expect("provider death").payload["instanceId"],
+        south_ids[0]
     );
     let ordered = state(&session);
     assert_eq!(ordered["phase"], "trigger-order");
@@ -1160,6 +1175,17 @@ fn rule_catalog_0869_ordered_deathrites_clear_incremental_ranged_movement() {
         mover_id
     );
     assert!(ordered.get("pendingRangedStep").is_none());
+    assert!(
+        ordered["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == south_ids[0])
+    );
+    marked_death::assert_live_marked_before_cemetery(
+        &ordered,
+        &[south_ids[1].clone(), south_ids[2].clone()],
+    );
     assert_checkpoint_round_trip(&session);
 
     let (_, resolved) = accept_where(&mut session, |descriptor| {
@@ -1167,13 +1193,7 @@ fn rule_catalog_0869_ordered_deathrites_clear_incremental_ranged_movement() {
     });
     assert_eq!(
         event_types(&resolved),
-        [
-            "trigger-order-committed",
-            "minion-died",
-            "minion-died",
-            "minion-died",
-            "game-ended",
-        ]
+        ["trigger-order-committed", "game-ended"]
     );
     let terminal = state(&session);
     assert_eq!(
@@ -1185,8 +1205,15 @@ fn rule_catalog_0869_ordered_deathrites_clear_incremental_ranged_movement() {
             "winner": "north",
         })
     );
-    assert!(terminal.get("pendingBasicMovement").is_none());
+    assert_eq!(
+        terminal["pendingBasicMovement"]["sourceInstanceId"],
+        mover_id
+    );
     assert!(terminal.get("pendingRangedStep").is_none());
+    marked_death::assert_live_marked_before_cemetery(
+        &terminal,
+        &[south_ids[1].clone(), south_ids[2].clone()],
+    );
     assert!(
         session
             .legal_actions()
@@ -1414,49 +1441,71 @@ fn rule_catalog_0871_ranged_step_does_not_queue_after_shooter_loses_derived_defe
     });
     assert_eq!(unit(&state(&session), &shooter_id)["damage"], 1);
 
+    let before_shot = create_game_checkpoint(&session).expect("pre-shot checkpoint");
+    let serialized_before_shot =
+        serialize_game_checkpoint(&before_shot).expect("serialized pre-shot checkpoint");
+    let mut repeated = resume_game_checkpoint(
+        &parse_game_checkpoint(&serialized_before_shot).expect("parsed pre-shot checkpoint"),
+    )
+    .expect("resumed pre-shot checkpoint");
     let shot = fire_south(&mut session, &shooter_id, &aura_id);
+    let repeated_shot = fire_south(&mut repeated, &shooter_id, &aura_id);
+    assert_eq!(shot, repeated_shot);
+    assert_eq!(
+        state(&session),
+        state(&repeated),
+        "same issued shot after checkpoint must produce the same state"
+    );
+    assert_eq!(
+        session.state_hash().expect("shot state hash"),
+        repeated.state_hash().expect("repeated shot state hash")
+    );
+    assert_eq!(
+        session.legal_actions().expect("post-shot legal actions"),
+        repeated
+            .legal_actions()
+            .expect("repeated post-shot legal actions")
+    );
     assert_eq!(
         event_types(&shot),
-        ["projectile-shot", "strike-damage-allocated", "damage-dealt"]
-    );
-    let ordered = state(&session);
-    assert_eq!(ordered["phase"], "trigger-order");
-    assert_eq!(ordered["decisionSeat"], "north");
-    assert!(ordered.get("pendingRangedStep").is_none());
-    assert!(
-        ordered["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != shooter_id && unit["instanceId"] != aura_id)
-    );
-    assert_eq!(
-        ordered["pendingDeathrites"]["batches"][0]["activeRemaining"]
-            .as_array()
-            .map(Vec::len),
-        Some(2)
-    );
-    assert_checkpoint_round_trip(&session);
-
-    let (_, resolved) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-triggers"
-    });
-    assert_eq!(
-        event_types(&resolved),
         [
-            "trigger-order-committed",
-            "site-drawn",
+            "projectile-shot",
+            "strike-damage-allocated",
+            "damage-dealt",
             "site-drawn",
             "minion-died",
+            "site-drawn",
             "minion-died",
         ]
     );
-    let resumed = state(&session);
-    assert_eq!(resumed["phase"], "main");
-    assert_eq!(resumed["decisionSeat"], "north");
-    assert!(resumed.get("pendingRangedStep").is_none());
+    let death_sources = shot
+        .events
+        .iter()
+        .filter(|event| event.event_type == "minion-died")
+        .map(|event| {
+            event.payload["instanceId"]
+                .as_str()
+                .expect("death identity")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(death_sources, [aura_id.as_str(), shooter_id.as_str()]);
+    let draw_sources = shot
+        .events
+        .iter()
+        .filter(|event| event.event_type == "site-drawn")
+        .map(|event| {
+            event.payload["sourceInstanceId"]
+                .as_str()
+                .expect("draw source")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(draw_sources, [aura_id.as_str(), shooter_id.as_str()]);
+    let finished = state(&session);
+    assert_eq!(finished["phase"], "main");
+    assert_eq!(finished["decisionSeat"], "north");
+    assert!(finished.get("pendingRangedStep").is_none());
     assert_eq!(
-        resumed["players"]["north"]["cemetery"]
+        finished["players"]["north"]["cemetery"]
             .as_array()
             .expect("North cemetery")
             .iter()
@@ -1711,13 +1760,33 @@ fn rule_catalog_1006_continue_basic_movement_withheld_during_pending_deathrite_o
     let shot = fire_south(&mut session, &mover_id, &south_ids[0]);
     assert_eq!(
         event_types(&shot),
-        ["projectile-shot", "strike-damage-allocated", "damage-dealt",]
+        [
+            "projectile-shot",
+            "strike-damage-allocated",
+            "damage-dealt",
+            "minion-died",
+        ]
+    );
+    assert_eq!(
+        shot.events.last().expect("provider death").payload["instanceId"],
+        south_ids[0]
     );
     let paused = state(&session);
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(paused["pendingBasicMovement"]["sourceInstanceId"], mover_id);
     assert!(paused.get("pendingRangedStep").is_none());
+    assert!(
+        paused["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == south_ids[0])
+    );
+    marked_death::assert_live_marked_before_cemetery(
+        &paused,
+        &[south_ids[1].clone(), south_ids[2].clone()],
+    );
     assert!(
         session
             .legal_actions()
@@ -1734,9 +1803,20 @@ fn rule_catalog_1006_continue_basic_movement_withheld_during_pending_deathrite_o
     );
     assert_checkpoint_round_trip(&session);
 
-    let (_, resolved) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-triggers"
-    });
+    let order = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .find(|action| action.descriptor["kind"] == "order-triggers")
+        .expect("first Deathrite source order");
+    let chosen = order.descriptor["sourceInstanceId"]
+        .as_str()
+        .expect("chosen source");
+    let other = [&south_ids[1], &south_ids[2]]
+        .into_iter()
+        .find(|instance_id| instance_id.as_str() != chosen)
+        .expect("other Deathrite source");
+    let (_, resolved) = accept_where(&mut session, |descriptor| descriptor == &order.descriptor);
     assert_eq!(
         event_types(&resolved),
         [
@@ -1745,8 +1825,38 @@ fn rule_catalog_1006_continue_basic_movement_withheld_during_pending_deathrite_o
             "site-drawn",
             "minion-died",
             "minion-died",
-            "minion-died",
         ]
+    );
+    let draw_sources = resolved
+        .events
+        .iter()
+        .filter(|event| event.event_type == "site-drawn")
+        .map(|event| {
+            event.payload["sourceInstanceId"]
+                .as_str()
+                .expect("draw source")
+        })
+        .collect::<Vec<_>>();
+    let death_sources = resolved
+        .events
+        .iter()
+        .filter(|event| event.event_type == "minion-died")
+        .map(|event| {
+            event.payload["instanceId"]
+                .as_str()
+                .expect("death identity")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(draw_sources, [chosen, other.as_str()]);
+    assert_eq!(
+        death_sources
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>(),
+        [&south_ids[1], &south_ids[2]]
+            .into_iter()
+            .map(String::as_str)
+            .collect()
     );
     let resumed = state(&session);
     assert_eq!(resumed["phase"], "movement");
@@ -1757,6 +1867,24 @@ fn rule_catalog_1006_continue_basic_movement_withheld_during_pending_deathrite_o
     );
     assert!(resumed["pendingDeathrites"].is_null());
     assert_eq!(resumed["terminal"]["status"], "active");
+    for instance_id in [&south_ids[0], &south_ids[1], &south_ids[2]] {
+        assert!(
+            !resumed["realm"]["units"]
+                .as_array()
+                .expect("realm units")
+                .iter()
+                .any(|unit| unit["instanceId"] == instance_id.as_str())
+        );
+        assert_eq!(
+            resumed["players"]["south"]["cemetery"]
+                .as_array()
+                .expect("South cemetery")
+                .iter()
+                .filter(|card| card["instanceId"] == instance_id.as_str())
+                .count(),
+            1
+        );
+    }
     assert!(
         session
             .legal_actions()
@@ -1896,7 +2024,16 @@ fn rule_catalog_1160_resolve_ranged_step_withheld_during_pending_deathrite_order
     let shot = fire_south(&mut session, &stepper_id, &south_ids[0]);
     assert_eq!(
         event_types(&shot),
-        ["projectile-shot", "strike-damage-allocated", "damage-dealt"]
+        [
+            "projectile-shot",
+            "strike-damage-allocated",
+            "damage-dealt",
+            "minion-died",
+        ]
+    );
+    assert_eq!(
+        shot.events.last().expect("provider death").payload["instanceId"],
+        south_ids[0]
     );
     let paused = state(&session);
     assert_eq!(paused["phase"], "trigger-order");
@@ -1904,6 +2041,17 @@ fn rule_catalog_1160_resolve_ranged_step_withheld_during_pending_deathrite_order
     assert_eq!(paused["pendingDeathrites"]["returnPhase"], "ranged-step");
     assert_eq!(paused["pendingRangedStep"]["sourceInstanceId"], stepper_id);
     assert_eq!(unit(&paused, &stepper_id)["cardId"], "north-stepper");
+    assert!(
+        paused["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == south_ids[0])
+    );
+    marked_death::assert_live_marked_before_cemetery(
+        &paused,
+        &[south_ids[1].clone(), south_ids[2].clone()],
+    );
     assert!(
         session
             .legal_actions()
@@ -1920,9 +2068,20 @@ fn rule_catalog_1160_resolve_ranged_step_withheld_during_pending_deathrite_order
     );
     assert_checkpoint_round_trip(&session);
 
-    let (_, resolved) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-triggers"
-    });
+    let order = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .find(|action| action.descriptor["kind"] == "order-triggers")
+        .expect("first Deathrite source order");
+    let chosen = order.descriptor["sourceInstanceId"]
+        .as_str()
+        .expect("chosen source");
+    let other = [&south_ids[1], &south_ids[2]]
+        .into_iter()
+        .find(|instance_id| instance_id.as_str() != chosen)
+        .expect("other Deathrite source");
+    let (_, resolved) = accept_where(&mut session, |descriptor| descriptor == &order.descriptor);
     assert_eq!(
         event_types(&resolved),
         [
@@ -1931,14 +2090,62 @@ fn rule_catalog_1160_resolve_ranged_step_withheld_during_pending_deathrite_order
             "site-drawn",
             "minion-died",
             "minion-died",
-            "minion-died",
         ]
+    );
+    let draw_sources = resolved
+        .events
+        .iter()
+        .filter(|event| event.event_type == "site-drawn")
+        .map(|event| {
+            event.payload["sourceInstanceId"]
+                .as_str()
+                .expect("draw source")
+        })
+        .collect::<Vec<_>>();
+    let death_sources = resolved
+        .events
+        .iter()
+        .filter(|event| event.event_type == "minion-died")
+        .map(|event| {
+            event.payload["instanceId"]
+                .as_str()
+                .expect("death identity")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(draw_sources, [chosen, other.as_str()]);
+    assert_eq!(
+        death_sources
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>(),
+        [&south_ids[1], &south_ids[2]]
+            .into_iter()
+            .map(String::as_str)
+            .collect()
     );
     let resumed = state(&session);
     assert_eq!(resumed["phase"], "ranged-step");
     assert_eq!(resumed["decisionSeat"], "north");
     assert!(resumed["pendingDeathrites"].is_null());
     assert_eq!(resumed["pendingRangedStep"]["sourceInstanceId"], stepper_id);
+    for instance_id in [&south_ids[0], &south_ids[1], &south_ids[2]] {
+        assert!(
+            !resumed["realm"]["units"]
+                .as_array()
+                .expect("realm units")
+                .iter()
+                .any(|unit| unit["instanceId"] == instance_id.as_str())
+        );
+        assert_eq!(
+            resumed["players"]["south"]["cemetery"]
+                .as_array()
+                .expect("South cemetery")
+                .iter()
+                .filter(|card| card["instanceId"] == instance_id.as_str())
+                .count(),
+            1
+        );
+    }
     assert!(
         session
             .legal_actions()
@@ -2115,13 +2322,7 @@ fn rule_catalog_1119_shoot_projectile_withheld_during_pending_deathrite_order() 
     let paused = state(session);
     assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
-    assert!(deathrite_ids.iter().all(|instance_id| {
-        paused["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .iter()
-            .all(|unit| unit["instanceId"] != *instance_id)
-    }));
+    marked_death::assert_live_marked_before_cemetery(&paused, &deathrite_ids);
     assert_eq!(unit(&paused, &shooter_id)["cardId"], "north-shooter");
     assert!(ranged_actions(session, &shooter_id).is_empty());
     assert!(

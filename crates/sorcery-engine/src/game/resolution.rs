@@ -99,6 +99,20 @@ impl Game {
                     .map(|reference| (seat, reference, card_id))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let has_entry_program = sources.iter().any(|(seat, reference, card_id)| {
+            self.compiled_ability(*card_id, super::AbilityEntry::Entry)
+                .is_some()
+                && self.position.units.iter().any(|unit| {
+                    reference.matches(&unit.card)
+                        && unit.controller == *seat
+                        && !self.minion_abilities_lost(unit)
+                })
+        });
+        if has_entry_program && self.position.units.iter().any(|unit| unit.death_marked) {
+            return Err(GameError::UnsupportedMechanic(
+                "Entry equipment effect during marked minion work".to_owned(),
+            ));
+        }
         for (seat, reference, card_id) in &sources {
             if self
                 .compiled_ability(*card_id, super::AbilityEntry::Entry)
@@ -148,6 +162,11 @@ impl Game {
             }
         }
         if settle_regions {
+            if !triggers.is_empty() && self.position.units.iter().any(|unit| unit.death_marked) {
+                return Err(GameError::UnsupportedMechanic(
+                    "Genesis trigger during marked minion work".to_owned(),
+                ));
+            }
             self.settle_region_occupancy(outcomes)?;
         }
         self.begin_genesis_triggers(triggers, outcomes)
@@ -178,7 +197,14 @@ impl Game {
         continuation: ResolutionContinuation,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
-        if self.position.terminal.is_some() {
+        if self.position.terminal.is_some()
+            && let Some(pending) = &mut self.position.pending_deathrites
+        {
+            pending.continuation = Some(match pending.continuation.take() {
+                Some(first) => first.followed_by(continuation),
+                None => continuation,
+            });
+        } else if self.position.terminal.is_some() {
             self.emit_interrupted_magic_resolved(Some(&continuation), outcomes);
         } else if let Some(pending) = &mut self.position.pending_damage_order {
             pending.after = Some(match pending.after.take() {
