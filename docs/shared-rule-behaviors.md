@@ -42,6 +42,26 @@ dependency queue. Negation, owner type, regions, target versus ordinary choice,
 source lifetime, rarity, thresholds, and ability suppression can make similar wording
 require different behavior. No clause or characteristic may be stripped to fit a fact.
 
+## Machine records and human views
+
+Agents query `.local/authority/catalog/card-tracker.sqlite3` directly, using a
+read-only connection and stable card IDs to retrieve current status, contextual
+requirements, blockers and validation jobs. Read only the rows and fields needed
+for the current packet; do not load or render the workbook to make decisions.
+
+Official source snapshots define authority. Reviewed binding JSON and immutable
+source, contract and proof receipts supply the guarded evidence. SQLite indexes
+that evidence for operational queries; check the source, dependency and engine
+hashes before dispatch or admission. A copied status or readiness annotation is
+insufficient, and a stale database must be synchronized from its machine inputs.
+
+Data flows from authority and reviewed machine records into SQLite, then into the
+workbook and its JSON/CSV exports. These exports are human views, never inputs to
+rule design, worker dispatch, card eligibility or registry promotion. Preserve
+historical export-based receipts as provenance; recheck current decisions against
+the database and exact receipts. Refresh the workbook after accepted batches for
+human review; agents do not need it to continue work.
+
 ## What to share
 
 - Triggers: entry, departure, strike, damage, casting, and turn boundaries. Reuse
