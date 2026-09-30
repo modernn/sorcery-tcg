@@ -1645,6 +1645,665 @@ fn simultaneous_area_terminal_preserves_marked_harmful_deathrite() {
 #[test]
 #[expect(
     clippy::too_many_lines,
+    reason = "mirrored Crater terminal proof keeps the whole-event and held-Magic boundaries explicit"
+)]
+fn crater_grid_completes_before_prior_turn_double_avatar_terminal_both_seats() {
+    for first_seat in ["north", "south"] {
+        let encoded = fixed_terminal_manifest(
+            first_seat,
+            1,
+            1,
+            8,
+            8,
+            &json!({
+                "deathriteDamageEachUnitHere": 1,
+                "deathriteDrawSite": true,
+                "summonToAnySite": true,
+            }),
+            None,
+            true,
+        );
+        let mut manifest: Value = serde_json::from_str(&encoded).expect("terminal fixture");
+        manifest.as_object_mut().unwrap().remove("manifestId");
+        manifest["cards"]["area"] = json!({
+            "cardType": "magic",
+            "damageUnitsAboveAndBelowTargetSiteByManhattanDistance": [1, 1, 1, 1, 1],
+            "destroyTargetSite": true,
+            "discardSiteAsAdditionalCost": true,
+            "manaCost": 0,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        });
+        let encoded = finish_manifest(manifest, "synthetic-terminal-current-event-proof-v1");
+        let mut session = prepare_terminal_area(&encoded, first_seat, 1, true, true);
+        let cell = if first_seat == "north" { "C3" } else { "C2" };
+        let other_cell = if first_seat == "north" { "C1" } else { "C4" };
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == cell
+        });
+        let first = if first_seat == "north" {
+            Seat::North
+        } else {
+            Seat::South
+        };
+        let before = state(&session);
+        assert_eq!(before["terminal"], json!({ "status": "active" }));
+        assert_eq!(before["players"]["north"]["avatar"]["life"], 0);
+        assert_eq!(before["players"]["south"]["avatar"]["life"], 0);
+        for seat in ["north", "south"] {
+            assert!(before["players"][seat]["avatar"]["deathDoorTurn"].is_number());
+            assert!(
+                before["players"][seat]["avatar"]["deathDoorTurn"]
+                    .as_u64()
+                    .unwrap()
+                    < before["turnNumber"].as_u64().unwrap(),
+                "both Avatars reached Death's Door on an earlier turn"
+            );
+        }
+        let site_id = before["realm"]["sites"][cell]["instanceId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let other_site_id = before["realm"]["sites"][other_cell]["instanceId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let victim_id = before["realm"]["units"][0]["instanceId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let north_avatar_id = before["players"]["north"]["avatar"]["card"]["instanceId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let south_avatar_id = before["players"]["south"]["avatar"]["card"]["instanceId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let atlas_before = before["players"][first_seat]["hand"]["atlas"]
+            .as_array()
+            .unwrap()
+            .len();
+        assert!(atlas_before > 0);
+
+        let fingerprint = |branch: &Session| {
+            let checkpoint = create_game_checkpoint(branch).expect("complete terminal checkpoint");
+            json!({
+                "checkpoint": serialize_game_checkpoint(&checkpoint).expect("checkpoint bytes"),
+                "stateHash": branch.state_hash().expect("state hash"),
+                "sessionHash": branch.session_hash().expect("session hash"),
+                "replay": branch.replay_value().expect("replay envelope"),
+                "transcript": branch.transcript(),
+                "northView": branch.public_view(Seat::North).unwrap(),
+                "southView": branch.public_view(Seat::South).unwrap(),
+                "legalActions": serde_json::to_value(branch.legal_actions().unwrap()).unwrap(),
+            })
+        };
+        let retained_parent = session.clone();
+        let parent_fingerprint = fingerprint(&retained_parent);
+        let before_fingerprint = fingerprint(&session);
+        assert_eq!(parent_fingerprint, before_fingerprint);
+        let before_checkpoint = create_game_checkpoint(&session).unwrap();
+        let before_bytes = serialize_game_checkpoint(&before_checkpoint).unwrap();
+        let mut restored_before = resume_game_checkpoint(
+            &parse_game_checkpoint(&before_bytes).expect("parse pre-Crater checkpoint"),
+        )
+        .expect("restore pre-Crater checkpoint");
+        assert_eq!(fingerprint(&restored_before), before_fingerprint);
+
+        let action = session
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| {
+                action.descriptor["kind"] == "cast-magic"
+                    && action.descriptor["cardId"] == "area"
+                    && action.descriptor["targetLocation"]["cell"] == cell
+                    && action.descriptor["targetSiteInstanceId"] == site_id
+                    && action.descriptor["discardSiteInstanceId"].is_string()
+            })
+            .expect("engine-issued Crater on the marked home Site");
+        assert_eq!(action.seat, first);
+        assert_eq!(action.descriptor["targetLocation"]["region"], "surface");
+        let magic_id = action.descriptor["cardInstanceId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let discard_id = action.descriptor["discardSiteInstanceId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let restored_action = restored_before
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.action_id == action.action_id)
+            .expect("same issued Crater after checkpoint restore");
+        assert_eq!(restored_action.descriptor, action.descriptor);
+
+        let mut ignored = replay_game_for_session(&session);
+        let ignored_action = ignored
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.to_legal_action().unwrap().action_id == action.action_id)
+            .expect("same issued Crater in Ignore replay");
+        let StepResult::Accepted(receipt) = session
+            .step(ActionRequest {
+                action_id: action.action_id.to_string(),
+                seat: action.seat,
+                state_version: action.state_version,
+            })
+            .expect("Crater accepted")
+        else {
+            panic!("engine-issued Crater must be accepted");
+        };
+        let StepResult::Accepted(restored_receipt) = restored_before
+            .step(ActionRequest {
+                action_id: restored_action.action_id.to_string(),
+                seat: restored_action.seat,
+                state_version: restored_action.state_version,
+            })
+            .expect("restored Crater accepted")
+        else {
+            panic!("restored engine-issued Crater must be accepted");
+        };
+        ignored
+            .apply_action(&ignored_action)
+            .expect("Ignore Crater");
+        assert_eq!(
+            serde_json::to_value(&restored_receipt).unwrap(),
+            serde_json::to_value(&receipt).unwrap()
+        );
+        let after = state(&session);
+        assert_eq!(fingerprint(&session), fingerprint(&restored_before));
+        assert_eq!(ignored.authoritative_state(), after);
+        assert_eq!(ignored.state_hash().unwrap(), session.state_hash().unwrap());
+        let ignored_actions = ignored
+            .legal_actions()
+            .unwrap()
+            .iter()
+            .map(|action| action.to_legal_action().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(ignored_actions, session.legal_actions().unwrap());
+        assert_eq!(fingerprint(&retained_parent), parent_fingerprint);
+        let terminal_bytes =
+            serialize_game_checkpoint(&create_game_checkpoint(&session).unwrap()).unwrap();
+        let terminal_restored = resume_game_checkpoint(
+            &parse_game_checkpoint(&terminal_bytes).expect("parse terminal Crater checkpoint"),
+        )
+        .expect("restore terminal Crater checkpoint");
+        assert_eq!(fingerprint(&terminal_restored), fingerprint(&session));
+        assert_exact_replay(&session);
+        assert_checkpoint_round_trip(&session);
+
+        assert_eq!(
+            after["terminal"],
+            json!({ "status": "finished", "result": "draw", "reason": "simultaneous_avatar_defeat" })
+        );
+        assert!(session.legal_actions().unwrap().is_empty());
+        let event_kinds = event_types(&receipt);
+        let ended_index = event_kinds
+            .iter()
+            .position(|kind| *kind == "game-ended")
+            .expect("terminal event");
+        assert!(receipt.events.iter().enumerate().all(|(index, event)| {
+            ![
+                "magic-damage-allocated",
+                "damage-dealt",
+                "avatar-life-lost",
+                "death-blow",
+                "site-destroyed",
+                "rubble-created",
+            ]
+            .contains(&event.event_type.as_str())
+                || index < ended_index
+        }));
+        assert_eq!(
+            receipt.events[ended_index].payload["reason"],
+            "simultaneous_avatar_defeat"
+        );
+        assert_eq!(receipt.events[ended_index].payload["result"], "draw");
+        assert_eq!(
+            receipt
+                .events
+                .iter()
+                .filter(|event| event.event_type == "death-blow")
+                .count(),
+            2
+        );
+        for avatar_id in [&north_avatar_id, &south_avatar_id] {
+            assert_eq!(
+                receipt
+                    .events
+                    .iter()
+                    .filter(|event| event.event_type == "death-blow"
+                        && event.payload["instanceId"] == *avatar_id)
+                    .count(),
+                1
+            );
+        }
+        let allocations = receipt
+            .events
+            .iter()
+            .filter(|event| event.event_type == "magic-damage-allocated")
+            .collect::<Vec<_>>();
+        assert_eq!(allocations.len(), 3);
+        let mut allocation_ids = allocations
+            .iter()
+            .map(|event| {
+                assert_eq!(event.payload["amount"], 1);
+                event.payload["targetInstanceId"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>();
+        allocation_ids.sort();
+        let mut expected_allocations = vec![
+            victim_id.clone(),
+            north_avatar_id.clone(),
+            south_avatar_id.clone(),
+        ];
+        expected_allocations.sort();
+        assert_eq!(allocation_ids, expected_allocations);
+        let damage_ids = receipt
+            .events
+            .iter()
+            .filter(|event| event.event_type == "damage-dealt")
+            .map(|event| event.payload["instanceId"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(damage_ids.len(), 3);
+        for target_id in [&victim_id, &north_avatar_id, &south_avatar_id] {
+            assert_eq!(damage_ids.iter().filter(|id| *id == target_id).count(), 1);
+        }
+        for required in [
+            "card-discarded",
+            "magic-cast",
+            "site-destroyed",
+            "rubble-created",
+        ] {
+            let index = event_kinds
+                .iter()
+                .position(|kind| *kind == required)
+                .unwrap_or_else(|| panic!("missing completed Crater event {required}"));
+            assert!(
+                index < ended_index,
+                "{required} must finish before terminal"
+            );
+        }
+        let cost = receipt
+            .events
+            .iter()
+            .find(|event| event.event_type == "card-discarded")
+            .expect("Crater pays its Atlas discard cost");
+        assert_eq!(cost.payload["instanceId"], discard_id);
+        assert_eq!(cost.payload["zone"], "atlas");
+        let destroyed = receipt
+            .events
+            .iter()
+            .find(|event| event.event_type == "site-destroyed")
+            .expect("Crater destroys its target Site");
+        assert_eq!(destroyed.payload["cell"], cell);
+        assert_eq!(destroyed.payload["instanceId"], site_id);
+        assert_eq!(destroyed.payload["owner"], first_seat);
+        assert_eq!(destroyed.payload["sourceInstanceId"], magic_id);
+        let rubble = receipt
+            .events
+            .iter()
+            .find(|event| event.event_type == "rubble-created")
+            .expect("Crater creates Rubble");
+        assert_eq!(rubble.payload["cell"], cell);
+        assert_eq!(rubble.payload["sourceInstanceId"], magic_id);
+        assert!(
+            allocations
+                .iter()
+                .all(|event| event.payload["sourceInstanceId"] == magic_id)
+        );
+        assert!(!event_kinds.iter().any(|kind| {
+            [
+                "deathrite-damage-allocated",
+                "site-drawn",
+                "minion-died",
+                "magic-resolved",
+            ]
+            .contains(kind)
+        }));
+        let victim = after["realm"]["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|unit| unit["instanceId"] == victim_id)
+            .expect("harmful Deathrite remains live");
+        assert_eq!(victim["deathMarked"], true);
+        assert_eq!(victim["damage"], 1);
+        assert_eq!(
+            after["pendingDeathrites"]["marked"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|entry| entry["instanceId"] == victim_id)
+                .count(),
+            1
+        );
+        assert_eq!(
+            after["pendingDeathrites"]["continuation"]["kind"],
+            "magic-resolved"
+        );
+        assert_eq!(
+            after["pendingDeathrites"]["continuation"]["heldCard"]["instanceId"],
+            magic_id
+        );
+        assert!(
+            after["players"][first_seat]["cemetery"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|card| card["instanceId"] != magic_id)
+        );
+        assert!(
+            after["players"][first_seat]["hand"]["spellbook"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|card| card["instanceId"] != magic_id)
+        );
+        assert_eq!(
+            after["players"][first_seat]["cemetery"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|card| card["instanceId"] == site_id)
+                .count(),
+            1
+        );
+        assert_eq!(
+            after["players"][first_seat]["cemetery"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|card| card["instanceId"] == discard_id)
+                .count(),
+            1
+        );
+        assert!(
+            after["players"][first_seat]["cemetery"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|card| card["instanceId"] != victim_id)
+        );
+        assert_eq!(after["realm"]["sites"][cell]["rubble"], true);
+        assert_ne!(after["realm"]["sites"][cell]["instanceId"], site_id);
+        assert_eq!(after["realm"]["sites"][other_cell]["rubble"], Value::Null);
+        assert_eq!(
+            after["realm"]["sites"][other_cell]["instanceId"],
+            other_site_id
+        );
+        assert_eq!(after["players"]["north"]["avatar"]["life"], 0);
+        assert_eq!(after["players"]["south"]["avatar"]["life"], 0);
+        assert!(
+            event_kinds
+                .iter()
+                .position(|kind| *kind == "rubble-created")
+                .unwrap()
+                < ended_index
+        );
+        assert!(
+            event_kinds
+                .iter()
+                .position(|kind| *kind == "damage-dealt")
+                .unwrap()
+                < ended_index
+        );
+        assert_eq!(
+            after["players"][first_seat]["hand"]["atlas"]
+                .as_array()
+                .unwrap()
+                .len(),
+            atlas_before - 1
+        );
+    }
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "paired life-20 Crater control proves the same harmful Deathrite executes normally"
+)]
+fn crater_grid_harmful_deathrite_nonterminal_control_both_seats() {
+    for first_seat in ["north", "south"] {
+        let encoded = fixed_terminal_manifest(
+            first_seat,
+            20,
+            20,
+            8,
+            8,
+            &json!({
+                "deathriteDamageEachUnitHere": 1,
+                "deathriteDrawSite": true,
+                "summonToAnySite": true,
+            }),
+            None,
+            true,
+        );
+        let mut manifest: Value = serde_json::from_str(&encoded).expect("control fixture");
+        manifest.as_object_mut().unwrap().remove("manifestId");
+        manifest["cards"]["area"] = json!({
+            "cardType": "magic",
+            "damageUnitsAboveAndBelowTargetSiteByManhattanDistance": [1, 1, 1, 1, 1],
+            "destroyTargetSite": true,
+            "discardSiteAsAdditionalCost": true,
+            "manaCost": 0,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        });
+        let encoded = finish_manifest(manifest, "synthetic-terminal-current-event-proof-v1");
+        let mut session = prepare_terminal_area(&encoded, first_seat, 1, true, true);
+        let cell = if first_seat == "north" { "C3" } else { "C2" };
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == cell
+        });
+
+        let before = state(&session);
+        assert_eq!(before["terminal"], json!({ "status": "active" }));
+        assert_eq!(before["players"]["north"]["avatar"]["life"], 19);
+        assert_eq!(before["players"]["south"]["avatar"]["life"], 19);
+        let site_id = before["realm"]["sites"][cell]["instanceId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let victim_id = before["realm"]["units"][0]["instanceId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let north_avatar_id = before["players"]["north"]["avatar"]["card"]["instanceId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let south_avatar_id = before["players"]["south"]["avatar"]["card"]["instanceId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let first_avatar_id = if first_seat == "north" {
+            north_avatar_id.as_str()
+        } else {
+            south_avatar_id.as_str()
+        };
+        let fingerprint = |branch: &Session| {
+            let checkpoint = create_game_checkpoint(branch).expect("control checkpoint");
+            json!({
+                "checkpoint": serialize_game_checkpoint(&checkpoint).expect("checkpoint bytes"),
+                "stateHash": branch.state_hash().expect("state hash"),
+                "sessionHash": branch.session_hash().expect("session hash"),
+                "replay": branch.replay_value().expect("replay envelope"),
+                "transcript": branch.transcript(),
+                "northView": branch.public_view(Seat::North).unwrap(),
+                "southView": branch.public_view(Seat::South).unwrap(),
+                "legalActions": serde_json::to_value(branch.legal_actions().unwrap()).unwrap(),
+            })
+        };
+        let retained_parent = session.clone();
+        let parent_fingerprint = fingerprint(&retained_parent);
+        let before_fingerprint = fingerprint(&session);
+        let before_bytes =
+            serialize_game_checkpoint(&create_game_checkpoint(&session).unwrap()).unwrap();
+        let mut restored = resume_game_checkpoint(
+            &parse_game_checkpoint(&before_bytes).expect("parse control checkpoint"),
+        )
+        .expect("restore control checkpoint");
+        assert_eq!(fingerprint(&restored), before_fingerprint);
+
+        let action = session
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| {
+                action.descriptor["kind"] == "cast-magic"
+                    && action.descriptor["cardId"] == "area"
+                    && action.descriptor["targetLocation"]["cell"] == cell
+                    && action.descriptor["targetSiteInstanceId"] == site_id
+                    && action.descriptor["discardSiteInstanceId"].is_string()
+            })
+            .expect("issued control Crater");
+        let restored_action = restored
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.action_id == action.action_id)
+            .expect("same Crater after restore");
+        let StepResult::Accepted(receipt) = session
+            .step(ActionRequest {
+                action_id: action.action_id.to_string(),
+                seat: action.seat,
+                state_version: action.state_version,
+            })
+            .expect("control Crater accepted")
+        else {
+            panic!("issued control Crater must be accepted");
+        };
+        let StepResult::Accepted(restored_receipt) = restored
+            .step(ActionRequest {
+                action_id: restored_action.action_id.to_string(),
+                seat: restored_action.seat,
+                state_version: restored_action.state_version,
+            })
+            .expect("restored control Crater accepted")
+        else {
+            panic!("restored control Crater must be accepted");
+        };
+        assert_eq!(restored_receipt, receipt);
+        assert_eq!(fingerprint(&session), fingerprint(&restored));
+        assert_eq!(fingerprint(&retained_parent), parent_fingerprint);
+        assert_exact_replay(&session);
+        assert_checkpoint_round_trip(&session);
+
+        let after = state(&session);
+        assert_eq!(after["terminal"], json!({ "status": "active" }));
+        assert!(!session.legal_actions().unwrap().is_empty());
+        for seat in ["north", "south"] {
+            assert!(after["players"][seat]["avatar"]["life"].as_u64().unwrap() > 0);
+        }
+        let deathrite_damage = receipt
+            .events
+            .iter()
+            .find(|event| {
+                event.event_type == "deathrite-damage-allocated"
+                    && event.payload["sourceInstanceId"] == victim_id
+            })
+            .expect("harmful Damage1 Deathrite executes");
+        assert_eq!(
+            deathrite_damage.payload,
+            json!({
+                "amount": 1,
+                "sourceInstanceId": victim_id,
+                "targetInstanceId": first_avatar_id,
+            })
+        );
+        let site_draw = receipt
+            .events
+            .iter()
+            .find(|event| {
+                event.event_type == "site-drawn" && event.payload["sourceInstanceId"] == victim_id
+            })
+            .expect("harmful Deathrite draws a Site");
+        assert_eq!(site_draw.payload["seat"], first_seat);
+        assert_eq!(
+            receipt
+                .events
+                .iter()
+                .filter(|event| event.event_type == "magic-damage-allocated"
+                    && event.payload["targetInstanceId"] == victim_id)
+                .count(),
+            1
+        );
+        assert_eq!(
+            receipt
+                .events
+                .iter()
+                .filter(|event| event.event_type == "minion-died"
+                    && event.payload["instanceId"] == victim_id)
+                .count(),
+            1
+        );
+        let kinds = event_types(&receipt);
+        for (earlier, later) in [
+            ("site-destroyed", "rubble-created"),
+            ("rubble-created", "deathrite-damage-allocated"),
+            ("deathrite-damage-allocated", "site-drawn"),
+            ("site-drawn", "minion-died"),
+            ("minion-died", "magic-resolved"),
+        ] {
+            assert!(
+                kinds.iter().position(|kind| *kind == earlier).unwrap()
+                    < kinds.iter().position(|kind| *kind == later).unwrap(),
+                "Crater and harmful Deathrite finish in order: {kinds:?}"
+            );
+        }
+        assert_eq!(
+            receipt
+                .events
+                .iter()
+                .filter(|event| event.event_type == "magic-resolved"
+                    && event.payload["instanceId"] == action.descriptor["cardInstanceId"])
+                .count(),
+            1
+        );
+        for avatar_id in [&north_avatar_id, &south_avatar_id] {
+            assert_eq!(
+                receipt
+                    .events
+                    .iter()
+                    .filter(|event| event.event_type == "magic-damage-allocated"
+                        && event.payload["targetInstanceId"] == *avatar_id)
+                    .count(),
+                1
+            );
+        }
+        assert!(
+            receipt
+                .events
+                .iter()
+                .any(|event| event.event_type == "rubble-created" && event.payload["cell"] == cell)
+        );
+        assert!(
+            after["players"][first_seat]["cemetery"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|card| card["instanceId"] == victim_id)
+        );
+        assert!(
+            after["players"][first_seat]["cemetery"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|card| card["instanceId"] == site_id)
+        );
+    }
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
     reason = "mirrored simultaneous defeat and same-turn Death's Door are one bounded comparison"
 )]
 fn simultaneous_area_double_death_blow_and_same_turn_control() {

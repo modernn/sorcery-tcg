@@ -8,6 +8,10 @@
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
+use sorcery_engine::checkpoint::{
+    create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+    serialize_game_checkpoint,
+};
 use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::session::{Session, StepResult};
 
@@ -117,6 +121,69 @@ fn movement_manifest(seed: u32) -> String {
     });
     value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
     sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn rubble_destroy_manifest(seed: u32, first: Seat) -> String {
+    let first_seat = match first {
+        Seat::North => "north",
+        Seat::South => "south",
+    };
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "landbound-rubble-destroy" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-landbound-rubble-destroy-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-water": site(&["water"]),
+            "north-landbound": landbound(),
+            "north-destroy": {
+                "cardType":"magic", "destroyTargetSite":true, "manaCost":0,
+                "thresholds":{"air":0,"earth":0,"fire":0,"water":0}
+            },
+            "north-dummy": dummy(),
+            "south-avatar": avatar(),
+            "south-water": site(&["water"]),
+            "south-landbound": landbound(),
+            "south-destroy": {
+                "cardType":"magic", "destroyTargetSite":true, "manaCost":0,
+                "thresholds":{"air":0,"earth":0,"fire":0,"water":0}
+            },
+            "south-dummy": dummy(),
+        },
+        "decks": {
+            "north": {
+                "atlas": ["north-water","north-water","north-water","north-water","north-water","north-water","north-water","north-water"],
+                "avatar":"north-avatar",
+                "spellbook":["north-landbound","north-destroy","north-landbound","north-destroy","north-landbound","north-destroy","north-dummy","north-dummy"],
+            },
+            "south": {
+                "atlas": ["south-water","south-water","south-water","south-water","south-water","south-water","south-water","south-water"],
+                "avatar":"south-avatar",
+                "spellbook":["south-landbound","south-destroy","south-landbound","south-destroy","south-landbound","south-destroy","south-dummy","south-dummy"],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": first_seat,
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical manifest")
+}
+
+fn rubble_land_ward_manifest(seed: u32, first: Seat) -> String {
+    let mut value: Value =
+        serde_json::from_str(&rubble_destroy_manifest(seed, first)).expect("base Rubble manifest");
+    value.as_object_mut().unwrap().remove("manifestId");
+    for seat in ["north", "south"] {
+        value["cards"][format!("{seat}-water")]["elements"] = json!(["earth"]);
+        value["cards"][format!("{seat}-landbound")]["ward"] = json!(true);
+    }
+    value["manifestId"] = json!(identity_hash(&value).expect("Land/Ward manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical Land/Ward manifest")
 }
 
 fn flood_manifest(seed: u32) -> String {
@@ -386,6 +453,16 @@ fn observed_unit(session: &Session, instance_id: &str) -> Value {
         .clone()
 }
 
+fn observed_unit_for(session: &Session, seat: Seat, instance_id: &str) -> Value {
+    session.public_view(seat).expect("seat observation")["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+        .expect("named unit")
+        .clone()
+}
+
 fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
     session
         .legal_actions()
@@ -407,6 +484,20 @@ fn assert_exact_replay(session: &Session) {
         session.replay_value().expect("session value")
     );
     assert!(session.verify_replay().expect("verified replay"));
+}
+
+fn full_session_fingerprint(session: &Session) -> Value {
+    let checkpoint = create_game_checkpoint(session).expect("complete Session checkpoint");
+    json!({
+        "checkpoint": serialize_game_checkpoint(&checkpoint).expect("checkpoint bytes"),
+        "stateHash": session.state_hash().expect("state hash"),
+        "sessionHash": session.session_hash().expect("session hash"),
+        "replay": session.replay_value().expect("replay envelope"),
+        "transcript": session.transcript(),
+        "northView": session.public_view(Seat::North).unwrap(),
+        "southView": session.public_view(Seat::South).unwrap(),
+        "legalActions": serde_json::to_value(session.legal_actions().unwrap()).unwrap(),
+    })
 }
 
 fn opening_atlas_ids(session: &Session) -> Vec<String> {
@@ -437,6 +528,68 @@ fn movement_opening() -> Session {
                 .then_some(session)
         })
         .expect("bounded seed opening with a land site")
+}
+
+fn rubble_destroy_opening(first: Seat) -> (u32, Session) {
+    let seat = match first {
+        Seat::North => "north",
+        Seat::South => "south",
+    };
+    (1..=4096)
+        .find_map(|seed| {
+            let session = Session::new(&rubble_destroy_manifest(seed, first))
+                .expect("Landbound Rubble candidate");
+            let view = state(&session);
+            let atlas = view["players"][seat]["hand"]["atlas"]
+                .as_array()
+                .expect("opening Atlas")
+                .iter()
+                .filter(|card| card["cardId"] == format!("{seat}-water"))
+                .count();
+            let spellbook: Vec<_> = view["players"][seat]["hand"]["spellbook"]
+                .as_array()
+                .expect("opening spellbook")
+                .iter()
+                .filter_map(|card| card["cardId"].as_str())
+                .collect();
+            let landbound = format!("{seat}-landbound");
+            let destroy = format!("{seat}-destroy");
+            (atlas >= 2
+                && spellbook.contains(&landbound.as_str())
+                && spellbook.contains(&destroy.as_str()))
+            .then_some((seed, session))
+        })
+        .expect("bounded seed opening with two Water sites, Landbound and destroy magic")
+}
+
+fn rubble_ward_opening(first: Seat) -> (u32, Session) {
+    let seat = match first {
+        Seat::North => "north",
+        Seat::South => "south",
+    };
+    (1..=4096)
+        .find_map(|seed| {
+            let session = Session::new(&rubble_land_ward_manifest(seed, first))
+                .expect("Land/Ward Rubble candidate");
+            let view = state(&session);
+            let atlas = view["players"][seat]["hand"]["atlas"]
+                .as_array()
+                .expect("opening Atlas")
+                .len();
+            let spellbook: Vec<_> = view["players"][seat]["hand"]["spellbook"]
+                .as_array()
+                .expect("opening spellbook")
+                .iter()
+                .filter_map(|card| card["cardId"].as_str())
+                .collect();
+            let landbound = format!("{seat}-landbound");
+            let destroy = format!("{seat}-destroy");
+            (atlas > 0
+                && spellbook.contains(&landbound.as_str())
+                && spellbook.contains(&destroy.as_str()))
+            .then_some((seed, session))
+        })
+        .expect("bounded seed opening with Landbound and destroy Magic")
 }
 
 fn flood_opening() -> Session {
@@ -899,4 +1052,364 @@ fn rule_catalog_1150_activate_mana_withheld_during_pending_deathrite_order() {
     assert!(resumed["pendingDeathrites"].is_null());
     assert!(offers(session, activates_mana(&mana_id)));
     assert_exact_replay(session);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "keeps both-seat old/new Site-to-Rubble action and checkpoint comparisons together"
+)]
+fn rubble_landbound_site_destruction_restores_enabled_actions_for_both_seats() {
+    for first in [Seat::North, Seat::South] {
+        let seat = match first {
+            Seat::North => "north",
+            Seat::South => "south",
+        };
+        let site_card = format!("{seat}-water");
+        let bound_card = format!("{seat}-landbound");
+        let destroy_card = format!("{seat}-destroy");
+        let (site_cell, move_cell, opponent_site_one, opponent_site_two) = match first {
+            Seat::North => ("C4", "C3", "C1", "C2"),
+            Seat::South => ("C1", "C2", "C4", "C3"),
+        };
+        let (seed, mut session) = rubble_destroy_opening(first);
+        keep(&mut session);
+        keep(&mut session);
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site"
+                && descriptor["cardId"] == site_card
+                && descriptor["cell"] == site_cell
+        });
+        let (summoned, _) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == bound_card
+                && descriptor["cell"] == site_cell
+        });
+        let bound_id = summoned["cardInstanceId"]
+            .as_str()
+            .expect("Landbound identity")
+            .to_owned();
+        assert_eq!(
+            observed_unit_for(&session, first, &bound_id)["disabled"],
+            true
+        );
+        end_then_draw(&mut session, "spellbook");
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site"
+                && descriptor["cardId"]
+                    == format!(
+                        "{}-water",
+                        if first == Seat::North {
+                            "south"
+                        } else {
+                            "north"
+                        }
+                    )
+                && descriptor["cell"] == opponent_site_one
+        });
+        end_then_draw(&mut session, "atlas");
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site"
+                && descriptor["cardId"] == site_card
+                && descriptor["cell"] == move_cell
+        });
+        end_then_draw(&mut session, "spellbook");
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site"
+                && descriptor["cardId"]
+                    == format!(
+                        "{}-water",
+                        if first == Seat::North {
+                            "south"
+                        } else {
+                            "north"
+                        }
+                    )
+                && descriptor["cell"] == opponent_site_two
+        });
+        end_then_draw(&mut session, "atlas");
+        assert_eq!(
+            observed_unit_for(&session, first, &bound_id)["disabled"],
+            true
+        );
+        assert!(!offers(&session, activates_mana(&bound_id)));
+        assert!(!offers(&session, |descriptor| {
+            descriptor["kind"] == "move-and-attack" && descriptor["unitInstanceId"] == bound_id
+        }));
+
+        let pre_parent = session.clone();
+        let pre_parent_fingerprint = full_session_fingerprint(&pre_parent);
+        let target_site_id = state(&session)["realm"]["sites"][site_cell]["instanceId"]
+            .as_str()
+            .expect("Water Site identity")
+            .to_owned();
+        let pre_checkpoint = create_game_checkpoint(&session).expect("pre-cast checkpoint");
+        let pre_serialized =
+            serialize_game_checkpoint(&pre_checkpoint).expect("serialize pre-cast");
+        let mut pre_resumed = resume_game_checkpoint(
+            &parse_game_checkpoint(&pre_serialized).expect("parse pre-cast"),
+        )
+        .expect("resume pre-cast");
+        assert_eq!(pre_resumed.transcript(), session.transcript());
+        assert_eq!(
+            pre_resumed.session_hash().unwrap(),
+            session.session_hash().unwrap()
+        );
+        assert_eq!(
+            pre_resumed.public_view(Seat::North).unwrap(),
+            session.public_view(Seat::North).unwrap()
+        );
+        assert_eq!(
+            pre_resumed.public_view(Seat::South).unwrap(),
+            session.public_view(Seat::South).unwrap()
+        );
+        assert_eq!(
+            pre_resumed.legal_actions().unwrap(),
+            session.legal_actions().unwrap()
+        );
+
+        let (cast_descriptor, cast_receipt) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic"
+                && descriptor["cardId"] == destroy_card
+                && descriptor["targetLocation"]["cell"] == site_cell
+        });
+        assert_eq!(cast_descriptor["targetSiteInstanceId"], target_site_id);
+        assert!(
+            cast_receipt
+                .events
+                .iter()
+                .any(|event| event.event_type == "site-destroyed")
+        );
+        assert!(
+            cast_receipt
+                .events
+                .iter()
+                .any(|event| event.event_type == "rubble-created")
+        );
+        let post = state(&session);
+        assert_eq!(post["realm"]["sites"][site_cell]["rubble"], true);
+        let after_unit = observed_unit_for(&session, first, &bound_id);
+        assert_eq!(after_unit["disabled"], false);
+        assert_eq!(after_unit["owner"], seat);
+        assert_eq!(after_unit["controller"], seat);
+        assert!(offers(&session, activates_mana(&bound_id)));
+        assert!(offers(&session, |descriptor| {
+            descriptor["kind"] == "move-and-attack"
+                && descriptor["unitInstanceId"] == bound_id
+                && descriptor["to"]["cell"] == move_cell
+        }));
+
+        let post_checkpoint = create_game_checkpoint(&session).expect("post-cast checkpoint");
+        let post_serialized =
+            serialize_game_checkpoint(&post_checkpoint).expect("serialize post-cast");
+        let post_resumed = resume_game_checkpoint(
+            &parse_game_checkpoint(&post_serialized).expect("parse post-cast"),
+        )
+        .expect("resume post-cast");
+        assert_eq!(
+            post_resumed.replay_value().unwrap(),
+            session.replay_value().unwrap()
+        );
+        assert_eq!(post_resumed.transcript(), session.transcript());
+        assert_eq!(
+            post_resumed.session_hash().unwrap(),
+            session.session_hash().unwrap()
+        );
+        assert_eq!(
+            post_resumed.public_view(Seat::North).unwrap(),
+            session.public_view(Seat::North).unwrap()
+        );
+        assert_eq!(
+            post_resumed.public_view(Seat::South).unwrap(),
+            session.public_view(Seat::South).unwrap()
+        );
+        assert_eq!(
+            post_resumed.legal_actions().unwrap(),
+            session.legal_actions().unwrap()
+        );
+
+        let branch_before = state(&pre_resumed);
+        let (branch_descriptor, branch_receipt) = accept_where(&mut pre_resumed, |descriptor| {
+            descriptor["kind"] == "cast-magic"
+                && descriptor["cardId"] == destroy_card
+                && descriptor["targetLocation"]["cell"] == site_cell
+        });
+        assert_eq!(branch_descriptor, cast_descriptor);
+        assert_eq!(branch_receipt, cast_receipt);
+        assert_eq!(state(&pre_resumed), post);
+        assert_eq!(pre_parent.replay_value().unwrap()["state"], branch_before);
+        assert_eq!(
+            pre_parent.transcript().len(),
+            session.transcript().len() - 1
+        );
+        assert_exact_replay(&session);
+
+        let (move_descriptor, _) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "move-and-attack"
+                && descriptor["unitInstanceId"] == bound_id
+                && descriptor["to"]["cell"] == move_cell
+        });
+        assert_eq!(move_descriptor["to"]["region"], "surface");
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "decline-attack"
+        });
+        assert_eq!(
+            observed_unit_for(&session, first, &bound_id)["location"],
+            move_cell
+        );
+        assert_eq!(
+            observed_unit_for(&session, first, &bound_id)["disabled"],
+            true
+        );
+        assert_eq!(state(&session)["decisionSeat"], seat);
+        assert_eq!(
+            full_session_fingerprint(&pre_parent),
+            pre_parent_fingerprint
+        );
+        assert_exact_replay(&session);
+        println!(
+            "RBL-P2 first={seat} seed={seed} manifest={} preRequests={} postRequests={}",
+            session.manifest_json(),
+            serde_json::to_string(&pre_checkpoint.requests).unwrap(),
+            serde_json::to_string(&post_checkpoint.requests).unwrap(),
+        );
+    }
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "keeps both-seat Landbound Ward preservation and replay assertions together"
+)]
+fn landbound_keeps_ward_when_its_land_site_becomes_rubble() {
+    for first in [Seat::North, Seat::South] {
+        let seat = match first {
+            Seat::North => "north",
+            Seat::South => "south",
+        };
+        let site_cell = if first == Seat::North { "C4" } else { "C1" };
+        let site_card = format!("{seat}-water");
+        let bound_card = format!("{seat}-landbound");
+        let destroy_card = format!("{seat}-destroy");
+        let (seed, mut session) = rubble_ward_opening(first);
+        keep(&mut session);
+        keep(&mut session);
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site"
+                && descriptor["cardId"] == site_card
+                && descriptor["cell"] == site_cell
+        });
+        let (summoned, _) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == bound_card
+                && descriptor["cell"] == site_cell
+        });
+        let bound_id = summoned["cardInstanceId"]
+            .as_str()
+            .expect("warded Landbound identity")
+            .to_owned();
+        let initial = observed_unit_for(&session, first, &bound_id);
+        assert_eq!(initial["disabled"], false);
+        assert_eq!(initial["warded"], true);
+
+        let pre_parent = session.clone();
+        let pre_parent_fingerprint = full_session_fingerprint(&pre_parent);
+        let target_site_id = state(&session)["realm"]["sites"][site_cell]["instanceId"]
+            .as_str()
+            .expect("Land Site identity")
+            .to_owned();
+        let pre_checkpoint = create_game_checkpoint(&session).expect("Land pre-cast checkpoint");
+        let pre_serialized =
+            serialize_game_checkpoint(&pre_checkpoint).expect("serialize Land pre-cast");
+        let mut branch = resume_game_checkpoint(
+            &parse_game_checkpoint(&pre_serialized).expect("parse Land pre-cast"),
+        )
+        .expect("resume Land pre-cast");
+        assert_eq!(
+            branch.replay_value().unwrap(),
+            session.replay_value().unwrap()
+        );
+        assert_eq!(
+            branch.legal_actions().unwrap(),
+            session.legal_actions().unwrap()
+        );
+        assert_eq!(
+            branch.public_view(Seat::North).unwrap(),
+            session.public_view(Seat::North).unwrap()
+        );
+        assert_eq!(
+            branch.public_view(Seat::South).unwrap(),
+            session.public_view(Seat::South).unwrap()
+        );
+
+        let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic"
+                && descriptor["cardId"] == destroy_card
+                && descriptor["targetLocation"]["cell"] == site_cell
+        });
+        assert_eq!(descriptor["targetSiteInstanceId"], target_site_id);
+        assert!(
+            receipt
+                .events
+                .iter()
+                .any(|event| event.event_type == "site-destroyed")
+        );
+        assert!(
+            receipt
+                .events
+                .iter()
+                .any(|event| event.event_type == "rubble-created")
+        );
+        assert!(
+            !receipt
+                .events
+                .iter()
+                .any(|event| event.event_type == "ward-lost")
+        );
+        let post = state(&session);
+        assert_eq!(post["realm"]["sites"][site_cell]["rubble"], true);
+        let after = observed_unit_for(&session, first, &bound_id);
+        assert_eq!(after["disabled"], false);
+        assert_eq!(after["warded"], true);
+
+        let (branch_descriptor, branch_receipt) = accept_where(&mut branch, |candidate| {
+            candidate["kind"] == "cast-magic"
+                && candidate["cardId"] == destroy_card
+                && candidate["targetLocation"]["cell"] == site_cell
+        });
+        assert_eq!(branch_descriptor, descriptor);
+        assert_eq!(branch_receipt, receipt);
+        assert_eq!(state(&branch), post);
+        assert_eq!(
+            pre_parent.transcript().len(),
+            session.transcript().len() - 1
+        );
+        assert_eq!(
+            full_session_fingerprint(&pre_parent),
+            pre_parent_fingerprint
+        );
+        assert_exact_replay(&session);
+        let post_checkpoint = create_game_checkpoint(&session).expect("Land post-cast checkpoint");
+        let post_serialized =
+            serialize_game_checkpoint(&post_checkpoint).expect("serialize Land post-cast");
+        let post_resume = resume_game_checkpoint(
+            &parse_game_checkpoint(&post_serialized).expect("parse Land post-cast"),
+        )
+        .expect("resume Land post-cast");
+        assert_eq!(
+            post_resume.replay_value().unwrap(),
+            session.replay_value().unwrap()
+        );
+        assert_eq!(post_resume.transcript(), session.transcript());
+        assert_eq!(
+            post_resume.legal_actions().unwrap(),
+            session.legal_actions().unwrap()
+        );
+        println!(
+            "RBL-P5 first={seat} seed={seed} manifest={} preRequests={} postRequests={}",
+            session.manifest_json(),
+            serde_json::to_string(&pre_checkpoint.requests).unwrap(),
+            serde_json::to_string(&post_checkpoint.requests).unwrap(),
+        );
+    }
 }

@@ -5545,8 +5545,8 @@
         "RULE-02",
         "RULE-04"
       ],
-      "plainLanguage": "A start-of-controller-turn Aura on an Ordinary or Exceptional site must destroy that site, the minions standing atop it, and itself, subject to applicable protection; Avatars are not minions. The composition with an unprotected minion is currently unsupported and the exercised action rolls back. Full mixed site, minion, and Aura departure remains required; a passing rejection proof does not establish that support.",
-      "implementationStatus": "unsupported",
+      "plainLanguage": "A start-of-controller-turn Aura on an Ordinary or Exceptional site destroys that site, minions standing atop it, and itself, subject to applicable protection; Avatars are not minions. Applicable direct, regional and static-power deaths share one batch. Deathrites and actual minion departure finish before the Aura trigger completes and the normal turn draw resumes; terminal outcomes keep remaining work inert.",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf"
       ],
@@ -5557,7 +5557,7 @@
       "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/start_turn_site_destroy_aura_rules.rs",
-        "testName": "rule_catalog_0258_start_turn_site_minion_destruction_is_unsupported_and_rolls_back"
+        "testName": "rule_catalog_0258_start_turn_site_minion_destruction_completes_before_turn_draw"
       }
     },
     {
@@ -6877,7 +6877,7 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "A Landbound minion is enabled on a land site and becomes Disabled when it occupies no land location. The minion stays in the realm. Mixed Water sites are not land.",
+      "plainLanguage": "A Landbound minion is enabled while its footprint occupies a land location and becomes Disabled otherwise; it remains in the realm. Rubble is land unless an applicable active terrain effect makes it Water. Mixed Water sites are not land; the current applicable terrain effect determines the location’s classification.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "landbound"
@@ -25068,8 +25068,8 @@
       "requirementIds": [
         "RULE-04"
       ],
-      "plainLanguage": "Site-destruction Magic whose damage kills a DrawSite Deathrite minion must resolve the draw for that minion’s controller and complete the applicable site, minion, and Magic work when the game remains active. This site-and-minion composition is currently unsupported and its issued cast rolls back. Full mixed-object departure and continuation ownership remain required.",
-      "implementationStatus": "unsupported",
+      "plainLanguage": "Site-destruction Magic pays its additional Site-discard cost and completes applicable grid damage, Site destruction and Rubble replacement before processing the combined minion Deathrite batch. DrawSite uses the source minion’s current controller. Nonterminal minion departures finish before the held Magic completes; terminal outcomes leave remaining Deathrites and Magic work inert.",
+      "implementationStatus": "rust-supported",
       "genericFactHints": [
         "destroyTargetSite",
         "discardSiteAsAdditionalCost",
@@ -25082,7 +25082,7 @@
       "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/protected_site_magic_rules.rs",
-        "testName": "rule_catalog_1082_craterize_site_minion_death_is_unsupported_and_rolls_back"
+        "testName": "rule_catalog_1082_craterize_site_minion_deathrite_completes_before_magic"
       }
     },
     {
@@ -48014,6 +48014,6 @@
       }
     }
   ],
-  "rustSupportedCount": 2073,
+  "rustSupportedCount": 2075,
   "typescriptSupportedCount": 0
 }

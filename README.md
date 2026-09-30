@@ -181,6 +181,14 @@ serialized `baseManifest` from an experiment request. `step` accepts only an iss
 `selectPolicyAction` supplies a deterministic baseline action. `resume` takes
 `{ "checkpoint": <checkpoint object> }`. Search does not mutate its root; unfinished
 branches are horizons, not wins. `exportGameRecord` requires a finished game.
+For reproducible checkpoint replay, preserve the exact manifest and frozen runtime
+identity alongside the checkpoint. The thin client can launch a preserved executable
+with `RustSessionClient.start({ executablePath, expectedSha256 })`; its default Cargo
+launch is for development. Raw checkpoint `resume` recomputes history under the
+selected runtime. A matching `expectedSessionHash` can coexist with changed derived
+views or legal actions after an engine correction, so it does not establish
+compatibility across builds. Preserve the originating runtime for historical replay;
+cross-build checkpoint migration requires a separately reviewed compatibility contract.
 Counterfactual search accepts an optional `workers` budget from 1 through 8 and
 defaults to serial execution. The counterfactual search owns that inner budget;
 callers already running an outer batch worker must pass `workers: 1` to avoid nested

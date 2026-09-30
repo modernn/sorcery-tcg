@@ -212,3 +212,81 @@ fn unmodifiable_sites_keep_printed_affinity_classification_and_abilities_under_a
         }
     }
 }
+
+#[test]
+fn rubble_land_classification_preserves_water_and_void_controls() {
+    let cell = Cell::parse("C4").unwrap();
+    for (elements, affinity, water) in [
+        (vec![], counts(0, 0, 0, 0), false),
+        (vec!["fire", "air"], counts(0, 2, 0, 2), false),
+        (vec!["water"], counts(0, 0, 2, 0), true),
+        (vec!["earth", "water"], counts(2, 0, 1, 0), true),
+    ] {
+        let game = fixture(&elements, Some(affinity));
+        assert_eq!(game.is_water_site(cell), water);
+        assert_eq!(game.is_land_site(cell), !water);
+    }
+
+    let mut rubble = fixture(&["earth"], None);
+    rubble.position.sites[cell.index()] = None;
+    rubble.position.rubble[cell.index()] =
+        Some(identity_hash(&json!({"fixture":"uncovered-rubble","cell":cell})).unwrap());
+    assert!(rubble.surface_location_exists(cell));
+    assert!(!rubble.is_water_site(cell));
+    assert!(rubble.is_land_site(cell));
+    assert_eq!(rubble.elemental_affinities(Seat::North), [0; 4]);
+    assert_eq!(rubble.elemental_affinities(Seat::South), [1, 0, 0, 0]);
+    rubble.position.sites[Cell::parse("C1").unwrap().index()] = None;
+    assert_eq!(rubble.elemental_affinities(Seat::South), [0; 4]);
+    assert!(!rubble.surface_location_exists(Cell::parse("A1").unwrap()));
+    assert!(!rubble.is_water_site(Cell::parse("A1").unwrap()));
+    assert!(!rubble.is_land_site(Cell::parse("A1").unwrap()));
+
+    overlay(&mut rubble, "flood");
+    assert!(rubble.is_water_site(cell));
+    assert!(!rubble.is_land_site(cell));
+    assert_eq!(rubble.effective_site_affinity(cell, [0; 4]), [0, 0, 1, 0]);
+    assert_eq!(rubble.elemental_affinities(Seat::North), [0; 4]);
+    overlay(&mut rubble, "drought");
+    assert!(!rubble.is_water_site(cell));
+    assert!(rubble.is_land_site(cell));
+    assert_eq!(rubble.effective_site_affinity(cell, [0; 4]), [0; 4]);
+
+    let mut flood_wins = fixture(&["earth"], None);
+    flood_wins.position.sites[cell.index()] = None;
+    flood_wins.position.rubble[cell.index()] =
+        Some(identity_hash(&json!({"fixture":"flood-wins-rubble","cell":cell})).unwrap());
+    overlay(&mut flood_wins, "drought");
+    overlay(&mut flood_wins, "flood");
+    assert!(flood_wins.is_water_site(cell), "later Flood wins Drought");
+
+    let mut fate_only = fixture(&["earth"], None);
+    fate_only.position.sites[cell.index()] = None;
+    fate_only.position.rubble[cell.index()] =
+        Some(identity_hash(&json!({"fixture":"fate-rubble","cell":cell})).unwrap());
+    overlay(&mut fate_only, "fate");
+    assert!(
+        fate_only.is_land_site(cell),
+        "Fate excludes Ordinary Rubble"
+    );
+
+    let mut protected = fixture(&["earth"], Some(counts(2, 0, 0, 0)));
+    let site_id = protected.position.sites[cell.index()]
+        .as_ref()
+        .unwrap()
+        .card
+        .card_id;
+    let CardFacts::Site(facts) =
+        &mut Arc::get_mut(&mut protected.rules).unwrap().cards[usize::from(site_id.0)].facts
+    else {
+        panic!("site")
+    };
+    facts.cannot_be_moved_destroyed_or_modified = true;
+    overlay(&mut protected, "flood");
+    assert!(!protected.is_water_site(cell));
+    assert!(protected.is_land_site(cell));
+    assert_eq!(
+        protected.effective_site_affinity(cell, [2, 0, 0, 0]),
+        [2, 0, 0, 0]
+    );
+}

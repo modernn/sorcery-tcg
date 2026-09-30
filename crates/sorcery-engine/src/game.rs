@@ -904,6 +904,9 @@ enum ResolutionContinuation {
     },
     SiteGenesis(SiteGenesisContinuation),
     SiteGenesisTail(SiteGenesisTail),
+    StartTurnTriggerComplete {
+        source_instance_id: IdentityHash,
+    },
     TokenEntries(Vec<TokenEntryContinuation>),
     EntryGenesis {
         sources: Vec<(Seat, effect::RealmReference, CardId)>,
@@ -5727,9 +5730,20 @@ impl Game {
         outcomes: &mut OutcomeLog<'_>,
         should_revert: impl Fn(&TemporaryControl, bool) -> bool,
     ) -> Result<(), GameError> {
+        if self.revert_matching_temporary_controls_without_settlement(outcomes, should_revert)? {
+            self.settle_static_power_deaths(outcomes)?;
+        }
+        Ok(())
+    }
+
+    fn revert_matching_temporary_controls_without_settlement(
+        &mut self,
+        outcomes: &mut OutcomeLog<'_>,
+        should_revert: impl Fn(&TemporaryControl, bool) -> bool,
+    ) -> Result<bool, GameError> {
         let pending = std::mem::take(&mut self.position.temporary_controls);
         if pending.is_empty() {
-            return Ok(());
+            return Ok(false);
         }
         let mut changed = false;
         let mut remaining = Vec::new();
@@ -5772,10 +5786,7 @@ impl Game {
             self.retarget_carried_minion_artifacts(&instance_id, from_seat, revert_to);
         }
         self.position.temporary_controls = remaining;
-        if changed {
-            self.settle_static_power_deaths(outcomes)?;
-        }
-        Ok(())
+        Ok(changed)
     }
 
     /// Keeps carried Artifact bearer seats aligned with a minion's new controller.
@@ -6547,10 +6558,23 @@ impl Game {
             .retain(|used| used != &reference);
     }
 
-    fn settle_nearby_enemy_stealth(&mut self, outcomes: &mut OutcomeLog<'_>) {
+    fn settle_nearby_enemy_stealth(
+        &mut self,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
         if self.position.terminal.is_some() {
-            return;
+            return Ok(());
         }
+        if self.settle_nearby_enemy_stealth_without_settlement(outcomes)? {
+            self.settle_static_power_deaths(outcomes)?;
+        }
+        Ok(())
+    }
+
+    fn settle_nearby_enemy_stealth_without_settlement(
+        &mut self,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<bool, GameError> {
         // ponytail: bounded O(units²) scan keeps speculative nodes allocation-free; index only
         // if profiling shows dense Scent Hound positions are a bottleneck.
         let mut previous_source: Option<usize> = None;
@@ -6617,8 +6641,9 @@ impl Game {
             }
             previous_source = Some(source_index);
         }
-        self.revert_stealth_bound_controls(outcomes)
-            .expect("stealth-bound control must revert after nearby stealth loss");
+        self.revert_matching_temporary_controls_without_settlement(outcomes, |effect, stealthed| {
+            effect.expiry == TemporaryControlExpiry::UntilStealthLost && !stealthed
+        })
     }
 
     fn avatar_current_stats(&self, seat: Seat) -> Result<(u16, u16), GameError> {
@@ -9383,25 +9408,28 @@ impl Game {
         }
     }
 
-    /// Official land sites provide zero Water affinity. Mixed Water sites are Water, not land.
-    /// Rubble is not a site, so it is not a land location.
+    /// Site or Rubble locations with no current Water affinity are Land; Void is not a location.
     fn is_land_site(&self, cell: Cell) -> bool {
-        self.position.sites[cell.index()].is_some() && !self.is_water_site(cell)
+        self.surface_location_exists(cell) && !self.is_water_site(cell)
     }
 
-    /// Later-timestamp terrain overlay on a played site, if any Aura covers the cell.
+    /// Later-timestamp terrain overlay on a Site or Rubble location, if any Aura covers it.
     fn site_water_overlay(&self, cell: Cell) -> SiteWaterOverlay {
-        let Some(site) = self.position.sites[cell.index()].as_ref() else {
-            return SiteWaterOverlay::None;
+        let (ordinary, protected) = match self.position.sites[cell.index()].as_ref() {
+            Some(site) => {
+                let CardFacts::Site(facts) =
+                    &self.rules.cards[usize::from(site.card.card_id.0)].facts
+                else {
+                    return SiteWaterOverlay::None;
+                };
+                (facts.ordinary, facts.cannot_be_moved_destroyed_or_modified)
+            }
+            None if self.position.rubble[cell.index()].is_some() => (true, false),
+            None => return SiteWaterOverlay::None,
         };
-        let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
-        else {
-            return SiteWaterOverlay::None;
-        };
-        if facts.cannot_be_moved_destroyed_or_modified {
+        if protected {
             return SiteWaterOverlay::Printed;
         }
-        let ordinary = facts.ordinary;
         let mut overlay = SiteWaterOverlay::Printed;
         for aura in &self.position.auras {
             if !aura.cells.contains(&cell) {
@@ -10807,7 +10835,7 @@ impl Game {
         }
         let settlement_start = outcomes.len();
         self.settle_region_occupancy(outcomes)?;
-        self.settle_nearby_enemy_stealth(outcomes);
+        self.settle_nearby_enemy_stealth(outcomes)?;
         self.settle_static_power_deaths(outcomes)?;
         self.resume_empty_ability_choice(outcomes)?;
         self.reconcile_attack_window();
@@ -11490,7 +11518,7 @@ impl Game {
             path_index += 1;
             walked.push(next);
             self.settle_region_occupancy(outcomes)?;
-            self.settle_nearby_enemy_stealth(outcomes);
+            self.settle_nearby_enemy_stealth(outcomes)?;
             self.settle_static_power_deaths(outcomes)?;
             if self.position.pending_deathrites.is_some()
                 || !self.ally_remains(&continuation.target)
@@ -11703,7 +11731,7 @@ impl Game {
             {
                 break;
             }
-            self.settle_nearby_enemy_stealth(outcomes);
+            self.settle_nearby_enemy_stealth(outcomes)?;
             if reached + 1 >= path.len() {
                 break;
             }
@@ -11807,7 +11835,7 @@ impl Game {
                 "to": next,
             })
         });
-        self.settle_nearby_enemy_stealth(outcomes);
+        self.settle_nearby_enemy_stealth(outcomes)?;
         Ok(())
     }
 
@@ -11973,7 +12001,7 @@ impl Game {
                 "to": to,
             })
         });
-        self.settle_nearby_enemy_stealth(outcomes);
+        self.settle_nearby_enemy_stealth(outcomes)?;
         Ok(())
     }
 
@@ -13875,7 +13903,20 @@ impl Game {
     }
 
     /// Disabled and silenced minions permanently lose Stealth and Ward marks.
-    fn settle_lost_ability_marks(&mut self, outcomes: &mut OutcomeLog<'_>) {
+    fn settle_lost_ability_marks(
+        &mut self,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        if self.settle_lost_ability_marks_without_settlement(outcomes)? {
+            self.settle_static_power_deaths(outcomes)?;
+        }
+        Ok(())
+    }
+
+    fn settle_lost_ability_marks_without_settlement(
+        &mut self,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<bool, GameError> {
         let mut affected: Vec<_> = self
             .position
             .units
@@ -13900,8 +13941,9 @@ impl Game {
                 }
             }
         }
-        self.revert_stealth_bound_controls(outcomes)
-            .expect("stealth-bound control must revert after ability loss");
+        self.revert_matching_temporary_controls_without_settlement(outcomes, |effect, stealthed| {
+            effect.expiry == TemporaryControlExpiry::UntilStealthLost && !stealthed
+        })
     }
 
     /// Settles every unit whose own region stopped holding it, killing or banishing it.
@@ -13912,15 +13954,18 @@ impl Game {
         if self.position.terminal.is_some() || self.position.pending_deathrites.is_some() {
             return Ok(());
         }
-        self.settle_lost_ability_marks(outcomes);
-        let (deaths, banishments) = self.region_settlement_removals();
-        if !deaths.is_empty()
-            && (!banishments.is_empty() || self.position.units.iter().any(|unit| unit.death_marked))
+        self.settle_lost_ability_marks(outcomes)?;
+        let raw = self.region_settlement_removals();
+        let (raw_deaths, raw_banishments) = &raw;
+        if !raw_deaths.is_empty()
+            && (!raw_banishments.is_empty()
+                || self.position.units.iter().any(|unit| unit.death_marked))
         {
             return Err(GameError::UnsupportedMechanic(
                 "mixed regional settlement during marked minion work".to_owned(),
             ));
         }
+        let (deaths, banishments) = self.collect_region_settlement_removals(outcomes, raw);
         if deaths.is_empty() && banishments.is_empty() {
             return Ok(());
         }
@@ -13949,6 +13994,50 @@ impl Game {
                 RegionDisposition::Survives => {}
                 RegionDisposition::Dies => deaths.push(unit.card.instance_id.clone()),
                 RegionDisposition::Banished => banishments.push(unit.card.instance_id.clone()),
+            }
+        }
+        (deaths, banishments)
+    }
+
+    fn collect_region_settlement_removals(
+        &mut self,
+        outcomes: &mut OutcomeLog<'_>,
+        raw: (Vec<IdentityHash>, Vec<IdentityHash>),
+    ) -> (Vec<IdentityHash>, Vec<IdentityHash>) {
+        let (mut deaths, banishments) = raw;
+        if deaths.is_empty() {
+            return (deaths, banishments);
+        }
+        let mut warded = deaths
+            .iter()
+            .filter_map(|instance_id| {
+                self.position
+                    .units
+                    .iter()
+                    .enumerate()
+                    .find(|(_, unit)| unit.card.instance_id == *instance_id)
+                    .filter(|(_, unit)| !unit.death_marked && unit.warded)
+                    .map(|(index, unit)| (instance_id.clone(), unit.controller, index))
+            })
+            .collect::<Vec<_>>();
+        warded.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        for (instance_id, controller, index) in warded {
+            let Some(unit) = self.position.units.get_mut(index) else {
+                continue;
+            };
+            if unit.card.instance_id != instance_id || !unit.warded || unit.death_marked {
+                continue;
+            }
+            unit.warded = false;
+            outcomes.push(
+                "ward-broken",
+                || json!({ "instanceId": instance_id, "seat": controller }),
+            );
+            if let Some(unit) = self.position.units.get(index)
+                && self.region_disposition(unit) == RegionDisposition::Dies
+                && !deaths.contains(&instance_id)
+            {
+                deaths.push(instance_id);
             }
         }
         (deaths, banishments)
@@ -14568,6 +14657,10 @@ impl Game {
     }
 
     /// Restores the interrupted phase and hands control back to whatever the deaths interrupted.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "keeps the explicit continuation dispatcher and return restoration together"
+    )]
     fn resume_resolution_continuation(
         &mut self,
         continuation: ResolutionContinuation,
@@ -14630,6 +14723,10 @@ impl Game {
                 restore();
                 self.finish_magic_resolution(&resolution, held_card, outcomes);
                 Ok(())
+            }
+            ResolutionContinuation::StartTurnTriggerComplete { source_instance_id } => {
+                restore();
+                self.finish_start_turn_trigger(&source_instance_id, outcomes)
             }
             ResolutionContinuation::Effect(frame) => {
                 restore();
@@ -16148,11 +16245,27 @@ impl Game {
         source_instance_id: &IdentityHash,
     ) -> Result<(Vec<CardInstance>, Vec<(Cell, IdentityHash)>), GameError> {
         destroyed.sort_unstable_by_key(|(cell, _)| *cell);
-        let flooded = destroyed
+        let mut flooded = destroyed
             .iter()
             .filter(|(cell, _)| self.is_water_site(*cell))
             .map(|(cell, _)| *cell)
             .collect::<BTreeSet<_>>();
+        let mut rubble = Vec::with_capacity(destroyed.len());
+        let mut destroyed_cards = Vec::with_capacity(destroyed.len());
+        for (cell, site) in destroyed {
+            self.forget_site_entry_usage(&site.card);
+            self.position.sites[cell.index()] = None;
+            let rubble_instance_id = identity_hash(&json!({
+                "cell": cell,
+                "destroyedSiteInstanceId": site.card.instance_id,
+                "kind": "rubble",
+                "sourceInstanceId": source_instance_id,
+            }))?;
+            self.position.rubble[cell.index()] = Some(rubble_instance_id.clone());
+            destroyed_cards.push(site.card);
+            rubble.push((cell, rubble_instance_id));
+        }
+        flooded.retain(|cell| !self.is_water_site(*cell));
         for unit in &mut self.position.units {
             if unit.region == Region::Underwater
                 && Self::unit_occupied_cells(unit)
@@ -16169,21 +16282,6 @@ impl Game {
             {
                 *region = Region::Underground;
             }
-        }
-        let mut rubble = Vec::with_capacity(destroyed.len());
-        let mut destroyed_cards = Vec::with_capacity(destroyed.len());
-        for (cell, site) in destroyed {
-            self.forget_site_entry_usage(&site.card);
-            self.position.sites[cell.index()] = None;
-            let rubble_instance_id = identity_hash(&json!({
-                "cell": cell,
-                "destroyedSiteInstanceId": site.card.instance_id,
-                "kind": "rubble",
-                "sourceInstanceId": source_instance_id,
-            }))?;
-            self.position.rubble[cell.index()] = Some(rubble_instance_id.clone());
-            destroyed_cards.push(site.card);
-            rubble.push((cell, rubble_instance_id));
         }
         Ok((destroyed_cards, rubble))
     }
@@ -18268,7 +18366,7 @@ impl Game {
             self.apply_atlantean_fate_genesis(cells, source_instance_id, outcomes);
         }
         self.settle_region_occupancy(outcomes)?;
-        self.settle_nearby_enemy_stealth(outcomes);
+        self.settle_nearby_enemy_stealth(outcomes)?;
         Ok(())
     }
 
@@ -18280,7 +18378,7 @@ impl Game {
     ) -> Result<(), GameError> {
         self.settle_overlay_layers(cells);
         self.settle_region_occupancy(outcomes)?;
-        self.settle_nearby_enemy_stealth(outcomes);
+        self.settle_nearby_enemy_stealth(outcomes)?;
         Ok(())
     }
 
@@ -19472,6 +19570,10 @@ impl Game {
         .then_some(aura)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "keeps the non-suspending Site/Aura custody transaction explicit"
+    )]
     fn apply_start_turn_destroy_occupied_site(
         &mut self,
         seat: Seat,
@@ -19499,16 +19601,7 @@ impl Game {
             })
             .map(|unit| unit.card.instance_id.clone())
             .collect::<Vec<_>>();
-        if self.position.units.iter().any(|unit| {
-            unit.region == Region::Surface
-                && Self::unit_occupied_cells(unit).contains(&cell)
-                && !unit.death_marked
-                && !unit.warded
-        }) {
-            return Err(GameError::UnsupportedMechanic(
-                "start-turn site and minion destruction overlap".to_owned(),
-            ));
-        }
+        let mut direct_deaths = Vec::new();
         for instance_id in &victims {
             let Some(unit) = self
                 .position
@@ -19526,6 +19619,8 @@ impl Game {
                     "ward-broken",
                     || json!({ "instanceId": instance_id, "seat": controller }),
                 );
+            } else if !unit.death_marked {
+                direct_deaths.push(instance_id.clone());
             }
         }
         let aura = self.position.auras.remove(aura_index);
@@ -19543,12 +19638,106 @@ impl Game {
                 "sourceInstanceId": instance_id,
             })
         });
-        self.finish_start_turn_trigger(source_instance_id, outcomes)?;
         if let Some(site) = self.position.sites[cell.index()].clone() {
-            self.apply_destroy_target_site(
-                cell,
-                &site.card.instance_id,
-                source_instance_id,
+            let warded = self.consume_site_ward(cell, &site.card.instance_id, outcomes)?;
+            if !warded {
+                let protected = matches!(
+                    &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                    CardFacts::Site(facts) if facts.cannot_be_moved_destroyed_or_modified
+                ) && !self.site_abilities_lost(cell);
+                outcomes.push(
+                    if protected {
+                        "site-destruction-prevented"
+                    } else {
+                        "site-destroyed"
+                    },
+                    || {
+                        json!({
+                            "cell": cell,
+                            "instanceId": site.card.instance_id,
+                            "owner": site.card.owner,
+                            "sourceInstanceId": source_instance_id,
+                        })
+                    },
+                );
+                if !protected {
+                    let (cards, rubble) =
+                        self.destroy_sites_into_rubble(vec![(cell, site)], source_instance_id)?;
+                    for card in cards {
+                        self.position.players[seat_index(card.owner)]
+                            .cemetery
+                            .push(card);
+                    }
+                    for (rubble_cell, instance_id) in rubble {
+                        outcomes.push("rubble-created", || {
+                            json!({
+                                "cell": rubble_cell,
+                                "instanceId": instance_id,
+                                "sourceInstanceId": source_instance_id,
+                            })
+                        });
+                    }
+                }
+            }
+        }
+        self.settle_lost_ability_marks_without_settlement(outcomes)?;
+        self.settle_nearby_enemy_stealth_without_settlement(outcomes)?;
+        let raw = self.region_settlement_removals();
+        let (raw_deaths, raw_banishments) = &raw;
+        if !raw_deaths.is_empty()
+            && (!raw_banishments.is_empty()
+                || self.position.units.iter().any(|unit| unit.death_marked))
+        {
+            return Err(GameError::UnsupportedMechanic(
+                "mixed regional settlement during marked minion work".to_owned(),
+            ));
+        }
+        if !direct_deaths.is_empty() && !raw_banishments.is_empty() {
+            return Err(GameError::UnsupportedMechanic(
+                "start-turn site destruction overlaps minion death and banishment".to_owned(),
+            ));
+        }
+        let (regional_deaths, banishments) = self.collect_region_settlement_removals(outcomes, raw);
+        if (!direct_deaths.is_empty() || !regional_deaths.is_empty()) && !banishments.is_empty() {
+            return Err(GameError::UnsupportedMechanic(
+                "start-turn site destruction overlaps minion death and banishment".to_owned(),
+            ));
+        }
+        let mut deaths = direct_deaths;
+        for instance_id in regional_deaths {
+            if !deaths.contains(&instance_id) {
+                deaths.push(instance_id);
+            }
+        }
+        for instance_id in self.static_power_death_ids()? {
+            if !deaths.contains(&instance_id) {
+                deaths.push(instance_id);
+            }
+        }
+        if !deaths.is_empty() && !banishments.is_empty() {
+            return Err(GameError::UnsupportedMechanic(
+                "start-turn site destruction overlaps minion death and banishment".to_owned(),
+            ));
+        }
+        self.banish_units(&banishments, outcomes)?;
+        if deaths.is_empty() {
+            let continuation = ResolutionContinuation::StartTurnTriggerComplete {
+                source_instance_id: source_instance_id.clone(),
+            };
+            if self.position.pending_deathrites.is_some() {
+                self.continue_resolution(continuation, outcomes)?;
+            } else {
+                self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+            }
+        } else {
+            self.begin_minion_deaths_with_continuation(
+                &deaths,
+                &[],
+                Phase::StartTurn,
+                seat,
+                Some(ResolutionContinuation::StartTurnTriggerComplete {
+                    source_instance_id: source_instance_id.clone(),
+                }),
                 outcomes,
             )?;
         }
@@ -19703,7 +19892,7 @@ impl Game {
             })
         });
         self.settle_region_occupancy(outcomes)?;
-        self.settle_nearby_enemy_stealth(outcomes);
+        self.settle_nearby_enemy_stealth(outcomes)?;
         self.settle_static_power_deaths(outcomes)?;
         self.finish_start_turn_trigger(source_instance_id, outcomes)?;
         self.position.state_version += 1;
@@ -20717,6 +20906,7 @@ impl Game {
         let holds_magic_for_destroy_cohort = matches!(
             effect,
             MagicEffect::DestroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps
+                | MagicEffect::DestroyTargetSiteWithDamageGrid(_)
         );
         let thresholds = facts.thresholds;
         let magic_origin = DamageOrigin::magic(thresholds);
@@ -21633,7 +21823,7 @@ impl Game {
                         })
                     });
                     self.settle_region_occupancy(outcomes)?;
-                    self.settle_nearby_enemy_stealth(outcomes);
+                    self.settle_nearby_enemy_stealth(outcomes)?;
                     self.settle_static_power_deaths(outcomes)?;
                 }
             }
@@ -22438,27 +22628,13 @@ impl Game {
                 {
                     return Err(GameError::IllegalAction);
                 }
-                // Rubble is already destroyed, and a protected site survives its own crater.
-                let target_protected = target_site.as_ref().is_some_and(|site| {
-                    matches!(
-                        &self.rules.cards[usize::from(site.card.card_id.0)].facts,
-                        CardFacts::Site(facts) if facts.cannot_be_moved_destroyed_or_modified
-                    ) && !self.site_abilities_lost(cell)
-                });
-                let targets = self.site_grid_damage_targets(cell, grid);
-                let statuses = targets
-                    .iter()
-                    .map(|(instance_id, kind, seat, _)| {
-                        self.unit_damage_status(*kind, *seat, instance_id)
-                    })
-                    .collect::<Result<Vec<_>, GameError>>()?;
-                outcomes.push(
-                    if target_protected {
-                        "site-destruction-prevented"
-                    } else {
-                        "site-destroyed"
-                    },
-                    || {
+                let site_warded = if target_site.is_some() {
+                    self.consume_site_ward(cell, target_site_instance_id, outcomes)?
+                } else {
+                    false
+                };
+                if site_warded {
+                    outcomes.push("site-destruction-prevented", || {
                         let mut payload = json!({
                             "cell": cell,
                             "instanceId": target_site_instance_id,
@@ -22468,46 +22644,82 @@ impl Game {
                             payload["owner"] = json!(site.card.owner);
                         }
                         payload
-                    },
-                );
-                for (instance_id, _, _, amount) in &targets {
-                    outcomes.push("magic-damage-allocated", || {
-                        json!({
-                            "amount": amount,
-                            "sourceInstanceId": card_instance_id,
-                            "targetInstanceId": instance_id,
-                        })
                     });
-                }
-                let mut dead_minions = Vec::new();
-                let mut defeated_avatars = Vec::new();
-                for ((instance_id, kind, target_seat, amount), status) in
-                    targets.into_iter().zip(statuses)
-                {
-                    let damage = self.apply_simple_damage_with_status(
-                        kind,
-                        target_seat,
-                        &instance_id,
-                        amount,
-                        UnitDamageSource {
-                            origin: magic_origin,
-                            current_power: 0,
-                            lethal: false,
+                } else {
+                    // Rubble is already destroyed, and a protected site survives its own crater.
+                    let target_protected = target_site.as_ref().is_some_and(|site| {
+                        matches!(
+                            &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                            CardFacts::Site(facts) if facts.cannot_be_moved_destroyed_or_modified
+                        ) && !self.site_abilities_lost(cell)
+                    });
+                    let targets = self.site_grid_damage_targets(cell, grid);
+                    let statuses = targets
+                        .iter()
+                        .map(|(instance_id, kind, seat, _)| {
+                            self.unit_damage_status(*kind, *seat, instance_id)
+                        })
+                        .collect::<Result<Vec<_>, GameError>>()?;
+                    outcomes.push(
+                        if target_protected {
+                            "site-destruction-prevented"
+                        } else {
+                            "site-destroyed"
                         },
-                        status,
-                        outcomes,
-                    )?;
-                    if damage.minion_died {
-                        dead_minions.push(instance_id);
+                        || {
+                            let mut payload = json!({
+                                "cell": cell,
+                                "instanceId": target_site_instance_id,
+                                "sourceInstanceId": card_instance_id,
+                            });
+                            if let Some(site) = &target_site {
+                                payload["owner"] = json!(site.card.owner);
+                            }
+                            payload
+                        },
+                    );
+                    for (instance_id, _, _, amount) in &targets {
+                        outcomes.push("magic-damage-allocated", || {
+                            json!({
+                                "amount": amount,
+                                "sourceInstanceId": card_instance_id,
+                                "targetInstanceId": instance_id,
+                            })
+                        });
                     }
-                    if damage.avatar_defeated && !defeated_avatars.contains(&target_seat) {
-                        defeated_avatars.push(target_seat);
+                    let mut dead_minions = Vec::new();
+                    let mut defeated_avatars = Vec::new();
+                    for ((instance_id, kind, target_seat, amount), status) in
+                        targets.into_iter().zip(statuses)
+                    {
+                        let damage = self.apply_simple_damage_with_status(
+                            kind,
+                            target_seat,
+                            &instance_id,
+                            amount,
+                            UnitDamageSource {
+                                origin: magic_origin,
+                                current_power: 0,
+                                lethal: false,
+                            },
+                            status,
+                            outcomes,
+                        )?;
+                        if damage.minion_died {
+                            dead_minions.push(instance_id);
+                        }
+                        if damage.avatar_defeated && !defeated_avatars.contains(&target_seat) {
+                            defeated_avatars.push(target_seat);
+                        }
                     }
-                }
-                let destroyed_cards = match target_site {
-                    Some(site) if !target_protected => {
+                    if let Some(site) = target_site.filter(|_| !target_protected) {
                         let (cards, rubble) =
                             self.destroy_sites_into_rubble(vec![(cell, site)], card_instance_id)?;
+                        for card in cards {
+                            self.position.players[seat_index(card.owner)]
+                                .cemetery
+                                .push(card);
+                        }
                         for (rubble_cell, instance_id) in rubble {
                             outcomes.push("rubble-created", || {
                                 json!({
@@ -22517,47 +22729,59 @@ impl Game {
                                 })
                             });
                         }
-                        cards
                     }
-                    _ => Vec::new(),
-                };
-                // The crater and its damage settle together, so drained minions die alongside
-                // the ones the grid killed outright.
-                let (region_deaths, banishments) = self.region_settlement_removals();
-                for instance_id in region_deaths {
-                    if !dead_minions.contains(&instance_id) {
-                        dead_minions.push(instance_id);
+                    self.settle_lost_ability_marks_without_settlement(outcomes)?;
+                    self.settle_nearby_enemy_stealth_without_settlement(outcomes)?;
+                    let raw = self.region_settlement_removals();
+                    let (raw_deaths, raw_banishments) = &raw;
+                    if !raw_deaths.is_empty()
+                        && (!raw_banishments.is_empty()
+                            || self.position.units.iter().any(|unit| unit.death_marked))
+                    {
+                        return Err(GameError::UnsupportedMechanic(
+                            "mixed regional settlement during marked minion work".to_owned(),
+                        ));
                     }
-                }
-                if !dead_minions.is_empty()
-                    || banishments.iter().any(|instance_id| {
-                        self.position
-                            .units
-                            .iter()
-                            .any(|unit| unit.card.instance_id == *instance_id && unit.death_marked)
-                    })
-                {
-                    return Err(GameError::UnsupportedMechanic(
-                        "site crater overlaps minion death or marked exit".to_owned(),
-                    ));
-                }
-                let mut banished = Vec::new();
-                self.banish_units(&banishments, &mut OutcomeLog::Record(&mut banished))?;
-                let deaths_start = outcomes.len();
-                if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
-                    self.begin_minion_deaths(
-                        &dead_minions,
-                        &defeated_avatars,
-                        Phase::Main,
-                        self.position.active_seat,
-                        outcomes,
-                    )?;
-                }
-                outcomes.splice_before_game_end(deaths_start, banished);
-                for card in destroyed_cards {
-                    self.position.players[seat_index(card.owner)]
-                        .cemetery
-                        .push(card);
+                    if (!dead_minions.is_empty() || !raw_deaths.is_empty())
+                        && !raw_banishments.is_empty()
+                    {
+                        return Err(GameError::UnsupportedMechanic(
+                            "site crater overlaps minion death or marked exit".to_owned(),
+                        ));
+                    }
+                    let (mut region_deaths, banishments) =
+                        self.collect_region_settlement_removals(outcomes, raw);
+                    for instance_id in self.static_power_death_ids()? {
+                        if !region_deaths.contains(&instance_id) {
+                            region_deaths.push(instance_id);
+                        }
+                    }
+                    for instance_id in dead_minions {
+                        if !region_deaths.contains(&instance_id) {
+                            region_deaths.push(instance_id);
+                        }
+                    }
+                    if !region_deaths.is_empty()
+                        && (!banishments.is_empty()
+                            || self.position.units.iter().any(|unit| unit.death_marked))
+                    {
+                        return Err(GameError::UnsupportedMechanic(
+                            "site crater overlaps minion death or marked exit".to_owned(),
+                        ));
+                    }
+                    let mut banished = Vec::new();
+                    self.banish_units(&banishments, &mut OutcomeLog::Record(&mut banished))?;
+                    let deaths_start = outcomes.len();
+                    if !region_deaths.is_empty() || !defeated_avatars.is_empty() {
+                        self.begin_minion_deaths(
+                            &region_deaths,
+                            &defeated_avatars,
+                            Phase::Main,
+                            self.position.active_seat,
+                            outcomes,
+                        )?;
+                    }
+                    outcomes.splice_before_game_end(deaths_start, banished);
                 }
             }
             // Compiled entries have already transferred ownership to the common runner.
@@ -22646,7 +22870,7 @@ impl Game {
             });
         }
         self.settle_region_occupancy(outcomes)?;
-        self.settle_nearby_enemy_stealth(outcomes);
+        self.settle_nearby_enemy_stealth(outcomes)?;
         self.settle_static_power_deaths(outcomes)?;
         Ok(())
     }
@@ -22683,7 +22907,7 @@ impl Game {
             });
         }
         self.settle_region_occupancy(outcomes)?;
-        self.settle_nearby_enemy_stealth(outcomes);
+        self.settle_nearby_enemy_stealth(outcomes)?;
         self.settle_static_power_deaths(outcomes)?;
         let continuation = LeapAttackContinuation {
             ally: ally.clone(),
@@ -23644,7 +23868,7 @@ impl Game {
                     "sourceInstanceId": source_instance_id,
                 })
             });
-            self.settle_lost_ability_marks(outcomes);
+            self.settle_lost_ability_marks(outcomes)?;
         }
         if genesis_draw_site {
             self.apply_genesis_draws(seat, source_instance_id, DeckZone::Atlas, 1, outcomes);
@@ -23943,7 +24167,7 @@ impl Game {
                 "sourceInstanceId": source_instance_id,
             })
         });
-        self.settle_lost_ability_marks(outcomes);
+        self.settle_lost_ability_marks(outcomes)?;
         Ok(())
     }
 
@@ -24912,7 +25136,7 @@ impl Game {
             }
         }
         let expired_modifiers = self.take_expired_modifiers(None);
-        self.settle_nearby_enemy_stealth(outcomes);
+        self.settle_nearby_enemy_stealth(outcomes)?;
         let counted_auras = self.count_controller_turn_on_auras(seat);
         let expired_aura_ids: BTreeSet<_> = counted_auras
             .iter()
@@ -25036,7 +25260,7 @@ impl Game {
         let next_player = &mut self.position.players[seat_index(next_seat)];
         next_player.avatar.tapped = false;
         next_player.mana = next_mana;
-        self.settle_nearby_enemy_stealth(outcomes);
+        self.settle_nearby_enemy_stealth(outcomes)?;
         let turn_number = self.position.turn_number;
         outcomes.push("turn-started", || {
             json!({
@@ -25483,6 +25707,10 @@ impl Game {
                 "originStateVersion": continuation.origin_state_version,
                 "seat": continuation.seat,
                 "abilitiesLost": continuation.abilities_lost,
+            }),
+            ResolutionContinuation::StartTurnTriggerComplete { source_instance_id } => json!({
+                "kind": "start-turn-trigger-complete",
+                "sourceInstanceId": source_instance_id,
             }),
             ResolutionContinuation::LegacyGenesisTail {
                 source,
@@ -27185,7 +27413,7 @@ pub mod catalog_proofs {
         let terminal_before = terminal_branch.position.clone();
         assert!(matches!(
             terminal_branch.apply_action_recorded(&water_action),
-            Err(GameError::UnsupportedMechanic(reason))
+            Err(GameError::UnsupportedMechanic(ref reason))
                 if reason == "terminal site destruction has an unowned local tail"
         ));
         assert_eq!(terminal_branch.position, terminal_before);
@@ -31143,6 +31371,58 @@ pub mod catalog_proofs {
 mod tests {
     use super::*;
 
+    fn swap_game_seats_for_mirrored_rule_proof(game: &mut Game) {
+        let swap = |seat| match seat {
+            Seat::North => Seat::South,
+            Seat::South => Seat::North,
+        };
+        game.position.players.swap(0, 1);
+        for player in &mut game.position.players {
+            player.avatar.card.owner = swap(player.avatar.card.owner);
+            for card in player
+                .atlas
+                .iter_mut()
+                .chain(&mut player.spellbook)
+                .chain(&mut player.hand_atlas)
+                .chain(&mut player.hand_spellbook)
+                .chain(&mut player.cemetery)
+            {
+                card.owner = swap(card.owner);
+            }
+        }
+        game.position.active_seat = swap(game.position.active_seat);
+        game.position.decision_seat = swap(game.position.decision_seat);
+        game.position.turn_controller = game.position.turn_controller.map(swap);
+        for site in game.position.sites.iter_mut().flatten() {
+            site.controller = swap(site.controller);
+            site.card.owner = swap(site.card.owner);
+        }
+        for unit in &mut game.position.units {
+            unit.controller = swap(unit.controller);
+            unit.card.owner = swap(unit.card.owner);
+            for effect in &mut unit.disable_effects {
+                effect.expires_at_seat = swap(effect.expires_at_seat);
+            }
+        }
+        for artifact in &mut game.position.artifacts {
+            artifact.card.owner = swap(artifact.card.owner);
+            if let ArtifactPlacement::Carried { bearer, .. } = &mut artifact.placement {
+                match bearer {
+                    UnitTarget::Avatar { seat, .. } | UnitTarget::Minion { seat, .. } => {
+                        *seat = swap(*seat);
+                    }
+                }
+            }
+        }
+        for aura in &mut game.position.auras {
+            aura.controller = swap(aura.controller);
+            aura.card.owner = swap(aura.card.owner);
+        }
+        for effect in &mut game.position.temporary_controls {
+            effect.revert_to = swap(effect.revert_to);
+        }
+    }
+
     #[test]
     fn location_ward_helper_only_consumes_opponents_ward() {
         let manifest = crate::synthetic::selfplay_manifest_with(31, |_| {});
@@ -33374,7 +33654,7 @@ mod tests {
         clippy::too_many_lines,
         reason = "keeps the accepted custody and source-control proof together"
     )]
-    fn marked_departure_keeps_custody_and_source_control_until_actual_exit() {
+    fn start_turn_aura_destruction_keeps_custody_and_source_control_until_actual_exit() {
         let (mut game, ids) = marked_lifecycle_fixture(false, true);
         let source_id = ids[0].clone();
         let companion_id = ids[1].clone();
@@ -33399,31 +33679,52 @@ mod tests {
             &mut OutcomeLog::Ignore,
         )
         .expect("North takes control of South-owned source");
-        let survivor_card = {
-            let player = &mut game.position.players[seat_index(Seat::South)];
-            player
-                .spellbook
-                .iter()
-                .position(|card| {
-                    game.rules.cards[usize::from(card.card_id.0)].id == "south-spell-3"
-                })
-                .map(|index| player.spellbook.remove(index))
-                .expect("South survivor card")
-        };
-        let mut survivor = SummonPlacement {
-            card: survivor_card,
-            controller: Seat::South,
-            lance_count: 0,
-            location: cell,
-            occupied_cells: None,
-            region: Region::Surface,
-            stealthed: false,
-            warded: false,
-        }
-        .into_unit();
+        let mut survivor = game
+            .create_token_unit(
+                Seat::South,
+                "north-token",
+                &source_id,
+                Location {
+                    cell: Cell::parse("A1").unwrap(),
+                    region: Region::Surface,
+                },
+                0,
+                game.position.state_version,
+            )
+            .expect("genuine non-Deathrite survivor token");
         survivor.card.enter_realm().expect("survivor enters realm");
         let survivor_id = survivor.card.instance_id.clone();
         game.position.units.push(survivor);
+        let survivor_cell = Cell::parse("A1").unwrap();
+        let mut survivor_site = game.position.players[seat_index(Seat::North)]
+            .atlas
+            .pop()
+            .expect("North survivor Site");
+        survivor_site
+            .enter_realm()
+            .expect("survivor Site enters realm");
+        game.position.sites[survivor_cell.index()] = Some(SitePosition {
+            card: survivor_site,
+            controller: Seat::North,
+            last_flight_turn: None,
+            warded: false,
+        });
+        let survivor_definition = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == survivor_id)
+            .unwrap()
+            .card
+            .card_id;
+        let CardFacts::Minion(facts) = &mut Arc::get_mut(&mut game.rules)
+            .expect("unshared fixture rules")
+            .cards[usize::from(survivor_definition.0)]
+        .facts
+        else {
+            panic!("surviving token remains a minion")
+        };
+        facts.at_start_of_controller_turn_controller_gains_life = Some(1);
         game.apply_minion_control_change(
             Some(&UnitTarget::Minion {
                 instance_id: survivor_id.clone(),
@@ -33460,25 +33761,139 @@ mod tests {
                 cell: Some(cell),
             },
         });
-        for id in &ids {
-            let defense = game
-                .position
-                .units
+        let aura_definition = game
+            .rules
+            .cards
+            .binary_search_by(|definition| definition.id.as_str().cmp("north-spell-50"))
+            .expect("synthetic Aura identity");
+        Arc::get_mut(&mut game.rules)
+            .expect("unshared fixture rules")
+            .cards[aura_definition]
+            .facts = CardFacts::Aura(AuraFacts {
+            effect: AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf,
+            mana_cost: 0,
+            thresholds: Thresholds::default(),
+        });
+        let aura_card_index = game.position.players[seat_index(Seat::North)]
+            .hand_spellbook
+            .iter()
+            .position(|card| usize::from(card.card_id.0) == aura_definition)
+            .expect("actual Aura card in North hand");
+        let mut aura_card = game.position.players[seat_index(Seat::North)]
+            .hand_spellbook
+            .remove(aura_card_index);
+        aura_card.enter_realm().expect("Aura enters realm");
+        let aura_id = aura_card.instance_id.clone();
+        game.position.auras.push(AuraPosition {
+            card: aura_card,
+            cells: vec![cell],
+            controller: Seat::North,
+            turn_counters: 0,
+            visited_cells: BTreeSet::new(),
+        });
+        game.position.phase = Phase::StartTurn;
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.turn_controller = Some(Seat::North);
+        game.position.pending_start_turn = Some(PendingStartTurn {
+            remaining_trigger_instance_ids: vec![aura_id.clone(), survivor_id.clone()],
+            seat: Seat::North,
+        });
+        let unprotected_position = game.position.clone();
+        let site_definition = game.position.sites[cell.index()]
+            .as_ref()
+            .expect("occupied protected Site")
+            .card
+            .card_id;
+        let CardFacts::Site(site_facts) = &mut Arc::get_mut(&mut game.rules)
+            .expect("unshared Site rules")
+            .cards[usize::from(site_definition.0)]
+        .facts
+        else {
+            panic!("occupied Site keeps Site facts")
+        };
+        site_facts.cannot_be_moved_destroyed_or_modified = true;
+        let protected_action = game
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::ResolveStartTurnTrigger { source_instance_id, .. }
+                        if source_instance_id == &aura_id
+                )
+            })
+            .expect("issued Aura trigger over protected Site");
+        let (protected_events, _) = game
+            .apply_action_recorded(&protected_action)
+            .expect("Aura clauses resolve independently of Site protection");
+        assert!(
+            protected_events
                 .iter()
-                .find(|unit| unit.card.instance_id == *id)
-                .and_then(|unit| game.minion_current_stats(unit).ok())
-                .map(|(_, defense, _)| defense)
-                .expect("custody source effective defense");
+                .any(|(kind, _)| kind == "aura-dispelled")
+        );
+        assert!(
+            !protected_events
+                .iter()
+                .any(|(kind, _)| kind == "site-destroyed" || kind == "rubble-created")
+        );
+        assert!(ids.iter().all(|id| {
             game.position
                 .units
-                .iter_mut()
-                .find(|unit| unit.card.instance_id == *id)
-                .unwrap()
-                .damage = defense;
+                .iter()
+                .any(|unit| unit.card.instance_id == *id && unit.death_marked)
+        }));
+        assert!(game.position.sites[cell.index()].is_some());
+        game.position = unprotected_position;
+        let CardFacts::Site(site_facts) = &mut Arc::get_mut(&mut game.rules)
+            .expect("unshared Site rules")
+            .cards[usize::from(site_definition.0)]
+        .facts
+        else {
+            panic!("occupied Site keeps Site facts")
+        };
+        site_facts.cannot_be_moved_destroyed_or_modified = false;
+        let aura_action = game
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::ResolveStartTurnTrigger { source_instance_id, .. }
+                        if source_instance_id == &aura_id
+                )
+            })
+            .expect("issued Aura start-turn trigger");
+        let (aura_events, _) = game
+            .apply_action_recorded(&aura_action)
+            .expect("Aura marks complete custody cohort");
+        assert!(aura_events.iter().any(|(kind, _)| kind == "site-destroyed"));
+        assert!(aura_events.iter().any(|(kind, _)| kind == "rubble-created"));
+        assert!(aura_events.iter().any(|(kind, _)| kind == "aura-dispelled"));
+        assert_eq!(game.position.phase, Phase::TriggerOrder);
+        let pause_actions = game.legal_actions().unwrap();
+        assert_eq!(pause_actions.len(), 2);
+        assert!(
+            pause_actions.iter().all(|action| {
+                matches!(action.descriptor, ActionDescriptor::OrderTriggers { .. })
+            })
+        );
+        for id in &ids {
+            assert!(
+                game.position
+                    .units
+                    .iter()
+                    .any(|unit| unit.card.instance_id == *id && unit.death_marked)
+            );
+            assert!(
+                game.position
+                    .players
+                    .iter()
+                    .all(|player| { player.cemetery.iter().all(|card| card.instance_id != *id) })
+            );
         }
-        game.begin_minion_deaths(&ids, &[], Phase::Main, Seat::North, &mut OutcomeLog::Ignore)
-            .expect("marked departure pause");
-        assert_eq!(game.legal_actions().unwrap().len(), 2);
         let source = game
             .position
             .units
@@ -33507,6 +33922,24 @@ mod tests {
             Seat::North
         );
         assert_eq!(game.position.temporary_controls.len(), 1);
+        assert!(matches!(
+            game.position
+                .pending_deathrites
+                .as_ref()
+                .unwrap()
+                .continuation,
+            Some(ResolutionContinuation::StartTurnTriggerComplete {
+                ref source_instance_id
+            }) if source_instance_id == &aura_id
+        ));
+        assert_eq!(
+            game.position
+                .pending_start_turn
+                .as_ref()
+                .unwrap()
+                .remaining_trigger_instance_ids,
+            [aura_id.clone(), survivor_id.clone()]
+        );
         let mut keep_live = Vec::new();
         game.revert_source_bound_controls(&mut OutcomeLog::Record(&mut keep_live))
             .unwrap();
@@ -33601,7 +34034,7 @@ mod tests {
                 .units
                 .iter()
                 .find(|unit| unit.card.instance_id == survivor_id)
-                .unwrap();
+                .unwrap_or_else(|| panic!("survivor departed unexpectedly; events={recorded:?}"));
             assert_eq!(survivor.controller, Seat::South);
             assert!(record.position.temporary_controls.is_empty());
             let exit_index = recorded
@@ -33647,6 +34080,23 @@ mod tests {
             );
             assert_eq!(record.position.pending_deathrites, None);
             assert!(record.position.units.iter().all(|unit| !unit.death_marked));
+            assert_eq!(record.position.pending_start_turn, None);
+            assert_eq!(record.position.phase, Phase::Draw);
+            assert!(record.legal_actions().unwrap().iter().any(|action| {
+                matches!(
+                    action.descriptor,
+                    ActionDescriptor::Draw {
+                        zone: DeckZone::Atlas,
+                        ..
+                    }
+                )
+            }));
+            assert!(
+                !recorded.iter().any(|(kind, payload)| {
+                    kind == "avatar-life-gained" && payload["seat"] == "north"
+                }),
+                "surviving source changes controller before the continuation refilters it"
+            );
         }
     }
 
@@ -34146,5 +34596,4024 @@ mod tests {
                 .iter()
                 .any(|unit| unit.card.instance_id == control_id)
         );
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "proves nested Site/Aura terminal failure rollback in all execution modes"
+    )]
+    #[expect(
+        clippy::items_after_statements,
+        reason = "keeps private fixture builders scoped to the terminal rollback proof"
+    )]
+    fn site_aura_terminal_mixed_deathrite_rolls_back_all_execution_modes() {
+        use crate::synthetic::selfplay_manifest_with;
+
+        let encoded = selfplay_manifest_with(9402, |manifest| {
+            let zero = json!({"air":0,"earth":0,"fire":0,"water":0});
+            manifest["cards"] = json!({
+                "avatar": {"attack":1,"cardType":"avatar","defense":1,"drawSpell":false,"life":20},
+                "site": {"cardType":"site","elements":["earth"]},
+                "aura": {
+                    "atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf": true,
+                    "cardType":"aura","manaCost":0,"thresholds":zero,
+                },
+                "deathrite": {
+                    "attack":1,"cardType":"minion","deathriteDamageEachUnitHere":1,
+                    "deathriteHeal":1,"defense":2,"manaCost":0,"thresholds":zero,
+                },
+            });
+            manifest["decks"] = json!({
+                "north":{"avatar":"avatar","atlas":vec!["site";6],"spellbook":vec!["aura";6]},
+                "south":{"avatar":"avatar","atlas":vec!["site";6],"spellbook":vec!["deathrite";6]},
+            });
+        });
+        fn take_card(game: &mut Game, seat: Seat, card_id: &str, atlas: bool) -> CardInstance {
+            let player = &mut game.position.players[seat_index(seat)];
+            let (hand, deck) = if atlas {
+                (&mut player.hand_atlas, &mut player.atlas)
+            } else {
+                (&mut player.hand_spellbook, &mut player.spellbook)
+            };
+            let take = |cards: &mut Vec<CardInstance>| {
+                cards
+                    .iter()
+                    .position(|card| game.rules.cards[usize::from(card.card_id.0)].id == card_id)
+                    .map(|index| cards.remove(index))
+            };
+            take(hand).or_else(|| take(deck)).expect("fixture card")
+        }
+        fn fixture(life: u16, encoded: &str) -> Game {
+            let mut game = Game::from_manifest_json(encoded).expect("nested Site/Aura fixture");
+            let cell = Cell::parse("C3").expect("fixture cell");
+            let mut site = take_card(&mut game, Seat::North, "site", true);
+            site.enter_realm().expect("Site enters realm");
+            game.position.sites[cell.index()] = Some(SitePosition {
+                card: site,
+                controller: Seat::North,
+                last_flight_turn: None,
+                warded: false,
+            });
+            let mut aura = take_card(&mut game, Seat::North, "aura", false);
+            aura.enter_realm().expect("Aura enters realm");
+            let aura_id = aura.instance_id.clone();
+            game.position.auras.push(AuraPosition {
+                card: aura,
+                cells: vec![cell],
+                controller: Seat::North,
+                turn_counters: 0,
+                visited_cells: BTreeSet::new(),
+            });
+            let mut minion = take_card(&mut game, Seat::South, "deathrite", false);
+            minion.enter_realm().expect("Deathrite enters realm");
+            game.position.units.push(
+                SummonPlacement {
+                    card: minion,
+                    controller: Seat::South,
+                    lance_count: 0,
+                    location: cell,
+                    occupied_cells: None,
+                    region: Region::Surface,
+                    stealthed: false,
+                    warded: false,
+                }
+                .into_unit(),
+            );
+            for seat in [Seat::North, Seat::South] {
+                let avatar = &mut game.position.players[seat_index(seat)].avatar;
+                avatar.location = cell;
+                avatar.life = life;
+                avatar.death_door_turn = (life == 0).then_some(0);
+            }
+            game.position.turn_number = 1;
+            game.position.phase = Phase::StartTurn;
+            game.position.active_seat = Seat::North;
+            game.position.decision_seat = Seat::North;
+            game.position.turn_controller = Some(Seat::North);
+            game.position.pending_start_turn = Some(PendingStartTurn {
+                remaining_trigger_instance_ids: vec![aura_id],
+                seat: Seat::North,
+            });
+            game
+        }
+
+        let game = fixture(0, &encoded);
+        let before_position = game.position.clone();
+        let before_hash = game.state_hash().expect("before hash");
+        let before_actions = game.legal_actions().expect("issued start-turn action");
+        let trigger = before_actions
+            .iter()
+            .find(|action| {
+                matches!(
+                    action.descriptor,
+                    ActionDescriptor::ResolveStartTurnTrigger { .. }
+                )
+            })
+            .expect("issued Aura start-turn trigger")
+            .clone();
+        let expected = "mixed Deathrite clause at terminal damage";
+        let mut diagnostic = game.clone();
+        let mut diagnostic_events = Vec::new();
+        let mut diagnostic_draws = Vec::new();
+        assert!(matches!(
+            diagnostic.apply_action_with_log(
+                &trigger,
+                &mut OutcomeLog::Record(&mut diagnostic_events),
+                Some(&mut diagnostic_draws),
+                None,
+            ),
+            Err(GameError::UnsupportedMechanic(ref reason)) if reason == expected
+        ));
+        let destroyed_at = diagnostic_events
+            .iter()
+            .position(|(kind, _)| kind == "site-destroyed")
+            .expect("Site mutation precedes nested unsupported effect");
+        let rubble_at = diagnostic_events
+            .iter()
+            .position(|(kind, _)| kind == "rubble-created")
+            .expect("Rubble is created before nested unsupported effect");
+        let allocation_at = diagnostic_events
+            .iter()
+            .position(|(kind, _)| kind == "deathrite-damage-allocated")
+            .expect("Deathrite damage begins after Site/Aura mutation");
+        assert!(destroyed_at < rubble_at && rubble_at < allocation_at);
+        assert!(!diagnostic_events.iter().any(|(kind, _)| {
+            matches!(
+                kind.as_str(),
+                "avatar-healed" | "game-ended" | "minion-died"
+            )
+        }));
+        assert!(diagnostic.position.auras.is_empty());
+        assert!(diagnostic.position.sites[Cell::parse("C3").unwrap().index()].is_none());
+        assert!(
+            diagnostic
+                .position
+                .units
+                .iter()
+                .any(|unit| unit.death_marked)
+        );
+        assert!(diagnostic_draws.is_empty());
+
+        let mut record = game.clone();
+        let mut ignore = game.clone();
+        let owned_root = game.clone();
+        let record_action = record
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == trigger.descriptor)
+            .unwrap();
+        let ignore_action = ignore
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == trigger.descriptor)
+            .unwrap();
+        let owned_action = owned_root
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == trigger.descriptor)
+            .unwrap();
+        let record_result = record.apply_action_recorded(&record_action);
+        assert!(
+            matches!(record_result, Err(GameError::UnsupportedMechanic(ref reason)) if reason == expected),
+            "unexpected nested result: {record_result:?}"
+        );
+        assert!(matches!(ignore.apply_action(&ignore_action),
+            Err(GameError::UnsupportedMechanic(reason)) if reason == expected));
+        assert!(
+            matches!(owned_root.clone().apply_action_owned(&owned_action),
+            Err(GameError::UnsupportedMechanic(reason)) if reason == expected)
+        );
+        assert_eq!(record.position, before_position);
+        assert_eq!(ignore.position, before_position);
+        assert_eq!(owned_root.position, before_position);
+        assert_eq!(record.state_hash().unwrap(), before_hash);
+        assert_eq!(ignore.state_hash().unwrap(), before_hash);
+        assert_eq!(record.legal_actions().unwrap(), before_actions);
+        assert_eq!(ignore.legal_actions().unwrap(), before_actions);
+
+        let nonterminal = fixture(20, &encoded);
+        let mut nonterminal_record = nonterminal.clone();
+        let action = nonterminal_record
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    action.descriptor,
+                    ActionDescriptor::ResolveStartTurnTrigger { .. }
+                )
+            })
+            .expect("nonterminal issued Aura trigger");
+        nonterminal_record
+            .apply_action_recorded(&action)
+            .expect("nonterminal nested effect");
+        let mut nonterminal_ignore = nonterminal.clone();
+        let ignore_action = nonterminal_ignore
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.descriptor == action.descriptor)
+            .unwrap();
+        nonterminal_ignore
+            .apply_action(&ignore_action)
+            .expect("nonterminal ignored effect");
+        let owned_action = nonterminal
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.descriptor == action.descriptor)
+            .unwrap();
+        let nonterminal_owned = nonterminal
+            .clone()
+            .apply_action_owned(&owned_action)
+            .expect("nonterminal owned effect");
+        assert_eq!(nonterminal_record.position, nonterminal_ignore.position);
+        assert_eq!(nonterminal_record.position, nonterminal_owned.position);
+        assert_eq!(
+            nonterminal_record.legal_actions().unwrap(),
+            nonterminal_ignore.legal_actions().unwrap()
+        );
+        assert_eq!(
+            nonterminal_record.legal_actions().unwrap(),
+            nonterminal_owned.legal_actions().unwrap()
+        );
+        assert!(nonterminal_record.position.pending_deathrites.is_none());
+        assert!(nonterminal_record.position.auras.is_empty());
+        assert!(nonterminal_record.position.sites[Cell::parse("C3").unwrap().index()].is_none());
+        assert!(
+            nonterminal_record.position.players[seat_index(Seat::South)]
+                .cemetery
+                .iter()
+                .any(|card| game.rules.cards[usize::from(card.card_id.0)].id == "deathrite")
+        );
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "proves Crater finishes its entire same-event grid before terminal Deathrites"
+    )]
+    fn crater_double_avatar_terminal_completes_grid_before_deathrite() {
+        use crate::synthetic::selfplay_manifest_with;
+
+        let encoded = selfplay_manifest_with(9403, |manifest| {
+            let zero = json!({"air":0,"earth":0,"fire":0,"water":0});
+            manifest["cards"] = json!({
+                "avatar":{"attack":1,"cardType":"avatar","defense":1,"drawSpell":false,"life":20},
+                "site":{"cardType":"site","elements":["earth"]},
+                "crater":{
+                    "cardType":"magic","damageUnitsAboveAndBelowTargetSiteByManhattanDistance":[1,1,1,1,1],
+                    "destroyTargetSite":true,"discardSiteAsAdditionalCost":true,"manaCost":0,"thresholds":zero,
+                },
+                "deathrite":{
+                    "attack":1,"cardType":"minion","deathriteDamageEachUnitHere":1,
+                    "deathriteDrawSite":true,"defense":1,
+                    "manaCost":0,"thresholds":zero,
+                },
+            });
+            manifest["decks"] = json!({
+                "north":{"avatar":"avatar","atlas":vec!["site";6],"spellbook":vec!["crater";6]},
+                "south":{"avatar":"avatar","atlas":vec!["site";6],"spellbook":vec!["deathrite";6]},
+            });
+        });
+        let mut game = Game::from_manifest_json(&encoded).expect("terminal Crater fixture");
+        let cell = Cell::parse("C3").expect("target Site");
+        let take = |game: &mut Game, seat: Seat, card_id: &str, atlas: bool| {
+            let player = &mut game.position.players[seat_index(seat)];
+            let (hand, deck) = if atlas {
+                (&mut player.hand_atlas, &mut player.atlas)
+            } else {
+                (&mut player.hand_spellbook, &mut player.spellbook)
+            };
+            let take_from = |cards: &mut Vec<CardInstance>| {
+                cards
+                    .iter()
+                    .position(|card| game.rules.cards[usize::from(card.card_id.0)].id == card_id)
+                    .map(|index| cards.remove(index))
+            };
+            take_from(hand)
+                .or_else(|| take_from(deck))
+                .expect("fixture card")
+        };
+        let mut site = take(&mut game, Seat::South, "site", true);
+        site.enter_realm().expect("Site enters realm");
+        game.position.sites[cell.index()] = Some(SitePosition {
+            card: site,
+            controller: Seat::South,
+            last_flight_turn: None,
+            warded: false,
+        });
+        let mut deathrite = take(&mut game, Seat::South, "deathrite", false);
+        deathrite.enter_realm().expect("Deathrite enters realm");
+        let deathrite_id = deathrite.instance_id.clone();
+        game.position.units.push(
+            SummonPlacement {
+                card: deathrite,
+                controller: Seat::South,
+                lance_count: 0,
+                location: cell,
+                occupied_cells: None,
+                region: Region::Surface,
+                stealthed: false,
+                warded: false,
+            }
+            .into_unit(),
+        );
+        for seat in [Seat::North, Seat::South] {
+            let player = &mut game.position.players[seat_index(seat)];
+            player.avatar.location = cell;
+            player.avatar.life = 0;
+            player.avatar.death_door_turn = Some(0);
+            player.domain_established = true;
+            player.mana = 20;
+        }
+        game.position.turn_number = 1;
+        game.position.phase = Phase::Main;
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.turn_controller = Some(Seat::North);
+        let action = game
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| {
+                matches!(&action.descriptor, ActionDescriptor::CastMagic {
+                card_id, target_location: Some(location), ..
+            } if card_id == "crater" && location.cell == cell)
+            })
+            .expect("issued Crater at the occupied Site");
+        let (events, _) = game
+            .apply_action_recorded(&action)
+            .expect("terminal Crater resolves");
+        assert!(game.position.terminal.is_some());
+        assert_eq!(
+            game.position
+                .players
+                .iter()
+                .map(|player| player.avatar.life)
+                .collect::<Vec<_>>(),
+            [0, 0]
+        );
+        for avatar in [Seat::North, Seat::South] {
+            assert!(
+                events.iter().any(|(kind, payload)| {
+                    kind == "death-blow" && payload["seat"] == json!(avatar)
+                }),
+                "both terminal avatars are hit: {events:?}"
+            );
+        }
+        let damage_allocations = events
+            .iter()
+            .filter(|(kind, _)| kind == "magic-damage-allocated")
+            .count();
+        assert_eq!(
+            damage_allocations, 3,
+            "grid includes both avatars and the Deathrite: {events:?}"
+        );
+        let terminal_at = events
+            .iter()
+            .position(|(kind, _)| kind == "game-ended")
+            .unwrap();
+        assert!(
+            events
+                .iter()
+                .enumerate()
+                .filter(|(_, (kind, _))| kind == "magic-damage-allocated")
+                .all(|(index, _)| index < terminal_at)
+        );
+        assert!(events.iter().any(|(kind, _)| kind == "rubble-created"));
+        assert!(!events.iter().any(|(kind, payload)| {
+            kind == "site-drawn" && payload["sourceInstanceId"] == json!(deathrite_id)
+        }));
+        assert!(
+            !events
+                .iter()
+                .any(|(kind, _)| kind == "deathrite-damage-allocated")
+        );
+        assert!(
+            game.position
+                .units
+                .iter()
+                .any(|unit| { unit.card.instance_id == deathrite_id && unit.death_marked }),
+            "the actual harmful Damage 1 Deathrite remains marked but inert after terminal grid resolution"
+        );
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "proves terminal Site/Aura draw failure stops all remaining owned work"
+    )]
+    fn site_aura_failed_draw_stops_remaining_deathrite_and_parent_work() {
+        let (mut game, sources) = marked_lifecycle_fixture(false, false);
+        let aura_definition = game
+            .rules
+            .cards
+            .binary_search_by(|definition| definition.id.as_str().cmp("north-spell-50"))
+            .expect("reserved synthetic Aura definition");
+        Arc::get_mut(&mut game.rules)
+            .expect("unshared fixture rules")
+            .cards[aura_definition]
+            .facts = CardFacts::Aura(AuraFacts {
+            effect: AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf,
+            mana_cost: 0,
+            thresholds: Thresholds::default(),
+        });
+        let aura_card_index = game.position.players[seat_index(Seat::North)]
+            .hand_spellbook
+            .iter()
+            .position(|card| {
+                card.card_id.0
+                    == u16::try_from(aura_definition).expect("fixture definition fits CardId")
+            })
+            .expect("actual Aura card in North hand");
+        let mut aura_card = game.position.players[seat_index(Seat::North)]
+            .hand_spellbook
+            .remove(aura_card_index);
+        aura_card.enter_realm().expect("Aura enters realm");
+        let aura_id = aura_card.instance_id.clone();
+        let cell = Cell::parse("C3").unwrap();
+        game.position.auras.push(AuraPosition {
+            card: aura_card,
+            cells: vec![cell],
+            controller: Seat::North,
+            turn_counters: 0,
+            visited_cells: BTreeSet::new(),
+        });
+        game.position.players[seat_index(Seat::North)].atlas.clear();
+        game.position.phase = Phase::StartTurn;
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.turn_controller = Some(Seat::North);
+        game.position.pending_start_turn = Some(PendingStartTurn {
+            remaining_trigger_instance_ids: vec![aura_id.clone()],
+            seat: Seat::North,
+        });
+        let trigger = game.legal_actions().unwrap().into_iter().find(|action| {
+            matches!(&action.descriptor, ActionDescriptor::ResolveStartTurnTrigger { source_instance_id, .. }
+                if source_instance_id == &aura_id)
+        }).expect("issued Aura start-turn trigger");
+        let (trigger_events, _) = game
+            .apply_action_recorded(&trigger)
+            .expect("Aura makes full destination before pause");
+        assert!(
+            trigger_events
+                .iter()
+                .any(|(kind, _)| kind == "aura-dispelled")
+        );
+        assert!(
+            trigger_events
+                .iter()
+                .any(|(kind, _)| kind == "site-destroyed")
+        );
+        assert!(
+            trigger_events
+                .iter()
+                .any(|(kind, _)| kind == "rubble-created")
+        );
+        for id in &sources {
+            assert!(
+                game.position
+                    .units
+                    .iter()
+                    .any(|unit| unit.card.instance_id == *id && unit.death_marked)
+            );
+        }
+        let pending = game
+            .position
+            .pending_deathrites
+            .as_ref()
+            .expect("ordered DrawSite cohort");
+        let initial_sources = pending.batches[0]
+            .active_remaining
+            .iter()
+            .map(|source| source.instance_id.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(initial_sources.len(), 2);
+        let first_action = game.legal_actions().unwrap().into_iter().find(|action| {
+            matches!(&action.descriptor, ActionDescriptor::OrderTriggers { source_instance_id, .. }
+                if source_instance_id == &initial_sources[0])
+        }).expect("first actual source-order choice");
+        let (events, _) = game
+            .apply_action_recorded(&first_action)
+            .expect("first failed Atlas draw terminates");
+        assert!(game.position.terminal.is_some());
+        assert_eq!(
+            events
+                .iter()
+                .filter(|(kind, _)| kind == "site-drawn")
+                .count(),
+            0
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|(kind, _)| kind == "deathrite-draw-site")
+                .count(),
+            0
+        );
+        assert_eq!(game.position.auras.len(), 0);
+        assert!(game.position.sites[cell.index()].is_none());
+        assert!(
+            game.position.pending_deathrites.is_some(),
+            "remaining marked work stays inert after terminal draw failure"
+        );
+        let pending = game.position.pending_deathrites.as_ref().unwrap();
+        assert!(matches!(pending.continuation,
+            Some(ResolutionContinuation::StartTurnTriggerComplete { ref source_instance_id })
+                if source_instance_id == &aura_id));
+        assert_eq!(
+            pending.batches[0].resolving.len(),
+            1,
+            "the second source does not run after terminal draw failure"
+        );
+        assert!(sources.iter().all(|id| {
+            game.position
+                .units
+                .iter()
+                .any(|unit| unit.card.instance_id == *id && unit.death_marked)
+        }));
+        assert!(
+            game.position.players[seat_index(Seat::North)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == aura_id)
+        );
+        assert!(
+            sources
+                .iter()
+                .all(|id| !game.position.players[seat_index(Seat::North)]
+                    .cemetery
+                    .iter()
+                    .any(|card| card.instance_id == *id)),
+            "neither source departs after the terminal draw interruption"
+        );
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "keeps the full terminal Crater continuation proof together"
+    )]
+    fn crater_terminal_draw_failure_keeps_the_held_magic_and_remaining_source_inert() {
+        let (mut game, sources) = marked_lifecycle_fixture(false, false);
+        let cell = Cell::parse("C3").unwrap();
+        let magic_definition = game
+            .rules
+            .cards
+            .binary_search_by(|definition| definition.id.as_str().cmp("north-spell-50"))
+            .expect("reserved synthetic Crater definition");
+        Arc::get_mut(&mut game.rules)
+            .expect("unshared fixture rules")
+            .cards[magic_definition]
+            .facts = CardFacts::Magic(MagicFacts {
+            discard_card_as_additional_cost: true,
+            effect: MagicEffect::DestroyTargetSiteWithDamageGrid([0; 5]),
+            mana_cost: 0,
+            pay_life_as_additional_cost: None,
+            thresholds: Thresholds::default(),
+        });
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.atlas.clear();
+        north.hand_atlas.truncate(1);
+        let magic_id = north
+            .hand_spellbook
+            .iter()
+            .find(|card| game.rules.cards[usize::from(card.card_id.0)].id == "north-spell-50")
+            .expect("actual held Crater")
+            .instance_id
+            .clone();
+        let atlas_cost_id = north.hand_atlas[0].instance_id.clone();
+        let site_id = game.position.sites[cell.index()]
+            .as_ref()
+            .unwrap()
+            .card
+            .instance_id
+            .clone();
+        let cast = game
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| {
+                matches!(&action.descriptor, ActionDescriptor::CastMagic {
+                card_instance_id, card_id, target_site_instance_id: Some(target),
+                discard_site_instance_id: Some(discard), ..
+            } if card_instance_id == &magic_id && card_id == "north-spell-50"
+                && target == &site_id && discard == &atlas_cost_id)
+            })
+            .expect("issued Crater with an actual Atlas discard cost");
+        let (cast_events, _) = game
+            .apply_action_recorded(&cast)
+            .expect("Crater casts and pauses");
+        assert!(
+            cast_events
+                .iter()
+                .any(|(kind, payload)| kind == "card-discarded"
+                    && payload["instanceId"] == json!(atlas_cost_id))
+        );
+        assert!(cast_events.iter().any(|(kind, _)| kind == "site-destroyed"));
+        assert!(cast_events.iter().any(|(kind, _)| kind == "rubble-created"));
+        assert_eq!(game.position.sites[cell.index()], None);
+        assert_eq!(
+            game.position.players[seat_index(Seat::North)].atlas.len(),
+            0
+        );
+        assert!(sources.iter().all(|id| {
+            game.position
+                .units
+                .iter()
+                .any(|unit| unit.card.instance_id == *id && unit.death_marked)
+        }));
+        assert!(
+            matches!(game.position.pending_deathrites.as_ref().unwrap().continuation,
+            Some(ResolutionContinuation::MagicResolved { ref resolution, .. })
+                if resolution.instance_id == magic_id)
+        );
+        let first_source = game.position.pending_deathrites.as_ref().unwrap().batches[0]
+            .active_remaining[0]
+            .instance_id
+            .clone();
+        let order = game.legal_actions().unwrap().into_iter().find(|action| {
+            matches!(&action.descriptor, ActionDescriptor::OrderTriggers { source_instance_id, .. }
+                if source_instance_id == &first_source)
+        }).expect("issued first Crater cohort order");
+        let (draw_events, _) = game
+            .apply_action_recorded(&order)
+            .expect("empty actual Atlas draw reaches the terminal rule");
+        assert!(game.position.terminal.is_some());
+        assert!(!draw_events.iter().any(|(kind, _)| kind == "site-drawn"));
+        assert!(!draw_events.iter().any(|(kind, _)| kind == "magic-resolved"));
+        assert_eq!(game.position.auras.len(), 0);
+        assert!(sources.iter().all(|id| {
+            game.position
+                .units
+                .iter()
+                .any(|unit| unit.card.instance_id == *id && unit.death_marked)
+        }));
+        let pending = game.position.pending_deathrites.as_ref().unwrap();
+        assert!(matches!(pending.continuation,
+            Some(ResolutionContinuation::MagicResolved { ref resolution, .. })
+                if resolution.instance_id == magic_id));
+        assert_eq!(
+            pending.batches[0].resolving.len(),
+            1,
+            "the second Crater-created Deathrite remains unexecuted"
+        );
+        assert!(
+            !game.position.players[seat_index(Seat::North)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == magic_id),
+            "the held Crater is not finalized after nested terminal failure"
+        );
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "proves Crater's nested Damage 1 plus Heal 1 terminal rollback"
+    )]
+    fn crater_terminal_mixed_deathrite_rolls_back_all_execution_modes() {
+        fn fixture(terminal: bool) -> (Game, [IdentityHash; 2]) {
+            let (mut game, sources) = marked_lifecycle_fixture(false, false);
+            let cell = Cell::parse("C3").unwrap();
+            let site_id = game.position.sites[cell.index()]
+                .as_ref()
+                .unwrap()
+                .card
+                .card_id;
+            let CardFacts::Site(site) =
+                &mut Arc::get_mut(&mut game.rules).unwrap().cards[usize::from(site_id.0)].facts
+            else {
+                panic!("target Site")
+            };
+            site.elements = ElementSet::empty().with(Element::Earth);
+            for source_id in &sources {
+                let card_id = game
+                    .position
+                    .units
+                    .iter()
+                    .find(|unit| unit.card.instance_id == *source_id)
+                    .unwrap()
+                    .card
+                    .card_id;
+                let CardFacts::Minion(facts) =
+                    &mut Arc::get_mut(&mut game.rules).unwrap().cards[usize::from(card_id.0)].facts
+                else {
+                    panic!("Deathrite")
+                };
+                facts.attack = 1;
+                facts.defense = 1;
+                facts.waterbound = false;
+                facts.submerge = false;
+                facts.deathrite_damage_each_unit_here = Some(1);
+                facts.deathrite_draw_site = false;
+                facts.deathrite_heal = Some(1);
+                let unit = game
+                    .position
+                    .units
+                    .iter_mut()
+                    .find(|unit| unit.card.instance_id == *source_id)
+                    .unwrap();
+                unit.damage = 1;
+                unit.region = Region::Surface;
+            }
+            let north = &mut game.position.players[seat_index(Seat::North)];
+            north.atlas.clear();
+            north.hand_atlas.truncate(1);
+            for player in &mut game.position.players {
+                player.domain_established = true;
+                player.mana = 20;
+                player.avatar.location = cell;
+                player.avatar.life = if terminal { 0 } else { 20 };
+                player.avatar.death_door_turn = terminal.then_some(1);
+            }
+            let crater_index = game
+                .rules
+                .cards
+                .binary_search_by(|definition| definition.id.as_str().cmp("north-spell-50"))
+                .unwrap();
+            Arc::get_mut(&mut game.rules).unwrap().cards[crater_index].facts =
+                CardFacts::Magic(MagicFacts {
+                    discard_card_as_additional_cost: true,
+                    effect: MagicEffect::DestroyTargetSiteWithDamageGrid([0; 5]),
+                    mana_cost: 0,
+                    pay_life_as_additional_cost: None,
+                    thresholds: Thresholds::default(),
+                });
+            game.position.turn_number = 2;
+            game.position.phase = Phase::Main;
+            game.position.active_seat = Seat::North;
+            game.position.decision_seat = Seat::North;
+            game.position.turn_controller = Some(Seat::North);
+            let _ = game.legal_actions().unwrap();
+            (game, sources)
+        }
+        fn cast_and_pause(game: &Game) -> (Game, IdentityHash, Vec<(String, Value)>) {
+            let mut pause = game.clone();
+            let cast = pause
+                .legal_actions()
+                .unwrap()
+                .into_iter()
+                .find(|action| {
+                    matches!(
+                        &action.descriptor,
+                        ActionDescriptor::CastMagic { card_id, target_site_instance_id: Some(_),
+                            discard_site_instance_id: Some(_), .. } if card_id == "north-spell-50"
+                    )
+                })
+                .expect("issued Crater after the Site, sources and Atlas are ready");
+            let (events, _) = pause
+                .apply_action_recorded(&cast)
+                .expect("Crater creates Rubble and death order");
+            let source = pause.position.pending_deathrites.as_ref().unwrap().batches[0]
+                .active_remaining[0]
+                .instance_id
+                .clone();
+            (pause, source, events)
+        }
+        fn complete(pause: &Game, first_source: &IdentityHash) -> Game {
+            let mut branch = pause.clone();
+            while branch.position.phase == Phase::TriggerOrder {
+                let action = branch.legal_actions().unwrap().into_iter().find(|action| matches!(
+                    &action.descriptor, ActionDescriptor::OrderTriggers { source_instance_id, .. }
+                        if branch.position.pending_deathrites.as_ref().unwrap().batches[0].resolving.is_empty()
+                            && source_instance_id == first_source
+                        || !branch.position.pending_deathrites.as_ref().unwrap().batches[0].resolving.is_empty()
+                )).unwrap();
+                branch
+                    .apply_action(&action)
+                    .expect("nonterminal Crater cohort completes");
+            }
+            branch
+        }
+        fn complete_recorded(
+            pause: &Game,
+            first_source: &IdentityHash,
+        ) -> (Game, Vec<(String, Value)>) {
+            let mut branch = pause.clone();
+            let mut first = true;
+            let mut events = Vec::new();
+            while branch.position.phase == Phase::TriggerOrder {
+                let action = branch.legal_actions().unwrap().into_iter().find(|action| matches!(
+                    &action.descriptor, ActionDescriptor::OrderTriggers { source_instance_id, .. }
+                        if !first || source_instance_id == first_source
+                )).unwrap();
+                events.extend(
+                    branch
+                        .apply_action_recorded(&action)
+                        .expect("recorded Crater source completes")
+                        .0,
+                );
+                first = false;
+            }
+            (branch, events)
+        }
+        fn complete_owned(pause: &Game, first_source: &IdentityHash) -> Game {
+            let mut branch = pause.clone();
+            let mut first = true;
+            while branch.position.phase == Phase::TriggerOrder {
+                let action = branch.legal_actions().unwrap().into_iter().find(|action| matches!(
+                    &action.descriptor, ActionDescriptor::OrderTriggers { source_instance_id, .. }
+                        if !first || source_instance_id == first_source
+                )).unwrap();
+                branch = branch
+                    .apply_action_owned(&action)
+                    .expect("owned Crater source completes");
+                first = false;
+            }
+            branch
+        }
+
+        // A single mixed Deathrite resolves inside the issued Crater action itself;
+        // the two-source ordering rollback below remains a separate compatibility proof.
+        let (mut same_cast_terminal, same_cast_sources) = fixture(true);
+        let source_id = same_cast_sources[0].clone();
+        let quiet_id = same_cast_sources[1].clone();
+        let quiet_definition = same_cast_terminal
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == quiet_id)
+            .expect("second marked body")
+            .card
+            .card_id;
+        let CardFacts::Minion(quiet_facts) = &mut Arc::get_mut(&mut same_cast_terminal.rules)
+            .expect("unshared rules")
+            .cards[usize::from(quiet_definition.0)]
+        .facts
+        else {
+            panic!("second marked body is a Minion")
+        };
+        quiet_facts.deathrite_damage_each_unit_here = None;
+        quiet_facts.deathrite_heal = None;
+        let quiet = same_cast_terminal
+            .position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == quiet_id)
+            .unwrap();
+        quiet.damage = 0;
+        quiet.location = Cell::parse("D4").unwrap();
+        let cast = same_cast_terminal
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| matches!(
+                &action.descriptor,
+                ActionDescriptor::CastMagic {
+                    card_id,
+                    target_site_instance_id: Some(target),
+                    discard_site_instance_id: Some(_),
+                    ..
+                } if card_id == "north-spell-50"
+                    && target == &same_cast_terminal.position.sites[Cell::parse("C3").unwrap().index()]
+                        .as_ref().unwrap().card.instance_id
+            ))
+            .expect("issued cost-bearing Crater for one mixed Deathrite");
+        let ActionDescriptor::CastMagic {
+            card_instance_id: cast_id,
+            discard_site_instance_id: Some(cost_site_id),
+            ..
+        } = &cast.descriptor
+        else {
+            unreachable!("selected descriptor is a paid Crater cast")
+        };
+        let parent_position = same_cast_terminal.position.clone();
+        let parent_hash = same_cast_terminal.state_hash().unwrap();
+        let parent_actions = same_cast_terminal.legal_actions().unwrap();
+        let mut diagnostic = same_cast_terminal.clone();
+        let mut diagnostic_events = Vec::new();
+        let diagnostic_result = diagnostic.apply_action_with_log(
+            &cast,
+            &mut OutcomeLog::Record(&mut diagnostic_events),
+            None,
+            None,
+        );
+        let expected = "mixed Deathrite clause at terminal damage";
+        assert!(
+            matches!(diagnostic_result,
+            Err(GameError::UnsupportedMechanic(ref reason)) if reason == expected),
+            "same-action Crater result={diagnostic_result:?}; events={diagnostic_events:?}"
+        );
+        let cost_discarded_at = diagnostic_events
+            .iter()
+            .position(|(kind, payload)| {
+                kind == "card-discarded" && payload["instanceId"] == json!(cost_site_id)
+            })
+            .expect("the real additional cost was paid before nested failure");
+        let site_destroyed_at = diagnostic_events
+            .iter()
+            .position(|(kind, payload)| {
+                kind == "site-destroyed"
+                    && payload["instanceId"]
+                        == json!(
+                            same_cast_terminal.position.sites[Cell::parse("C3").unwrap().index()]
+                                .as_ref()
+                                .unwrap()
+                                .card
+                                .instance_id
+                        )
+            })
+            .expect("the target Site was destroyed before nested failure");
+        let rubble_created_at = diagnostic_events
+            .iter()
+            .position(|(kind, _)| kind == "rubble-created")
+            .expect("the target was replaced by Rubble before nested failure");
+        let damage_at = diagnostic_events
+            .iter()
+            .position(|(kind, payload)| {
+                kind == "deathrite-damage-allocated"
+                    && payload["sourceInstanceId"] == json!(source_id)
+            })
+            .expect("the one mixed Deathrite reached its damage clause");
+        assert!(cost_discarded_at < site_destroyed_at);
+        assert!(site_destroyed_at < rubble_created_at && rubble_created_at < damage_at);
+        let damage_sources: Vec<_> = diagnostic_events
+            .iter()
+            .filter(|(kind, _)| kind == "deathrite-damage-allocated")
+            .map(|(_, payload)| payload["sourceInstanceId"].as_str().unwrap())
+            .collect();
+        assert!(!damage_sources.is_empty());
+        assert!(
+            damage_sources
+                .iter()
+                .all(|actual| *actual == source_id.to_string()),
+            "only the selected mixed source executes in this transaction: {diagnostic_events:?}"
+        );
+        assert!(
+            !diagnostic_events
+                .iter()
+                .any(|(kind, _)| kind == "avatar-healed")
+        );
+        assert!(diagnostic.position.sites[Cell::parse("C3").unwrap().index()].is_none());
+        assert!(diagnostic.position.rubble[Cell::parse("C3").unwrap().index()].is_some());
+        assert!(
+            diagnostic.position.players[seat_index(Seat::North)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == *cost_site_id)
+        );
+        for (name, mut failed) in [
+            ("Record", same_cast_terminal.clone()),
+            ("Ignore", same_cast_terminal.clone()),
+            ("owned", same_cast_terminal.clone()),
+        ] {
+            let action = failed
+                .legal_actions()
+                .unwrap()
+                .into_iter()
+                .find(|candidate| candidate.descriptor == cast.descriptor)
+                .expect("the same issued Crater remains available");
+            let result = match name {
+                "Record" => failed.apply_action_recorded(&action).map(|_| ()),
+                "Ignore" => failed.apply_action(&action),
+                _ => failed.clone().apply_action_owned(&action).map(|_| ()),
+            };
+            assert!(
+                matches!(result,
+                Err(GameError::UnsupportedMechanic(ref reason)) if reason == expected),
+                "{name} Crater result={result:?}"
+            );
+            assert_eq!(failed.position, parent_position, "{name} restores Position");
+            assert_eq!(
+                failed.state_hash().unwrap(),
+                parent_hash,
+                "{name} restores hash"
+            );
+            assert_eq!(
+                failed.legal_actions().unwrap(),
+                parent_actions,
+                "{name} restores frontier"
+            );
+        }
+        let mut same_facts_control = same_cast_terminal.clone();
+        for player in &mut same_facts_control.position.players {
+            player.avatar.life = 20;
+            player.avatar.death_door_turn = None;
+        }
+        let control_cast = same_facts_control
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == cast.descriptor)
+            .expect("same-facts life-20 Crater control");
+        let control_parent = same_facts_control.clone();
+        let control_parent_position = control_parent.position.clone();
+        let control_parent_hash = control_parent.state_hash().unwrap();
+        let control_parent_actions = control_parent.legal_actions().unwrap();
+        let (control_events, _) = same_facts_control
+            .apply_action_recorded(&control_cast)
+            .expect("same facts complete when neither Avatar is at Death's Door");
+        assert!(control_events.iter().any(|(kind, payload)| {
+            kind == "deathrite-damage-allocated" && payload["sourceInstanceId"] == json!(source_id)
+        }));
+        assert!(control_events.iter().any(|(kind, payload)| {
+            kind == "avatar-healed" && payload["sourceInstanceId"] == json!(source_id)
+        }));
+        assert_eq!(
+            control_events
+                .iter()
+                .filter(|(kind, payload)| {
+                    kind == "magic-resolved" && payload["instanceId"] == json!(cast_id)
+                })
+                .count(),
+            1
+        );
+        assert!(same_facts_control.position.rubble[Cell::parse("C3").unwrap().index()].is_some());
+        assert!(same_facts_control.position.pending_deathrites.is_none());
+        assert!(
+            same_facts_control.position.players[seat_index(Seat::North)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == *cast_id)
+        );
+        assert!(
+            same_facts_control.position.players[seat_index(Seat::North)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == *cost_site_id)
+        );
+        assert!(
+            !same_facts_control
+                .position
+                .units
+                .iter()
+                .any(|unit| unit.card.instance_id == quiet_id)
+        );
+        assert!(
+            same_facts_control.position.players[seat_index(Seat::North)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == quiet_id)
+        );
+        assert!(
+            !same_facts_control
+                .position
+                .units
+                .iter()
+                .any(|unit| unit.card.instance_id == source_id)
+        );
+        assert_ne!(same_facts_control.position, control_parent.position);
+        let control_result_position = same_facts_control.position.clone();
+        let control_result_hash = same_facts_control.state_hash().unwrap();
+        let control_result_actions = same_facts_control.legal_actions().unwrap();
+
+        let mut ignored_control = control_parent.clone();
+        let ignored_cast = ignored_control
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == cast.descriptor)
+            .expect("same-facts Ignore Crater control");
+        ignored_control
+            .apply_action(&ignored_cast)
+            .expect("same-facts Ignore Crater completes");
+        let owned_control_parent = control_parent.clone();
+        let owned_cast = owned_control_parent
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == cast.descriptor)
+            .expect("same-facts owned Crater control");
+        let owned_control = owned_control_parent
+            .apply_action_owned(&owned_cast)
+            .expect("same-facts owned Crater completes");
+        for (name, result) in [("Ignore", &ignored_control), ("owned", &owned_control)] {
+            assert_eq!(
+                result.position, control_result_position,
+                "same-facts {name} Position matches Record, including PRNG"
+            );
+            assert_eq!(
+                result.state_hash().unwrap(),
+                control_result_hash,
+                "same-facts {name} hash matches Record"
+            );
+            assert_eq!(
+                result.legal_actions().unwrap(),
+                control_result_actions,
+                "same-facts {name} frontier matches Record"
+            );
+        }
+        assert_eq!(control_parent.position, control_parent_position);
+        assert_eq!(control_parent.state_hash().unwrap(), control_parent_hash);
+        assert_eq!(
+            control_parent.legal_actions().unwrap(),
+            control_parent_actions
+        );
+
+        let (terminal, sources) = fixture(true);
+        let (pause, first_source, cast_events) = cast_and_pause(&terminal);
+        assert!(sources.iter().all(|id| {
+            pause
+                .position
+                .units
+                .iter()
+                .any(|unit| unit.card.instance_id == *id && unit.death_marked)
+        }));
+        assert!(pause.position.rubble[Cell::parse("C3").unwrap().index()].is_some());
+        let site_destroyed = cast_events
+            .iter()
+            .position(|(kind, _)| kind == "site-destroyed")
+            .unwrap();
+        let rubble_created = cast_events
+            .iter()
+            .position(|(kind, _)| kind == "rubble-created")
+            .unwrap();
+        assert!(site_destroyed < rubble_created);
+        assert!(
+            !cast_events
+                .iter()
+                .any(|(kind, _)| kind == "magic-damage-allocated"),
+            "the zero grid leaves terminal damage for the actual Deathrite"
+        );
+        let order = pause
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor, ActionDescriptor::OrderTriggers { source_instance_id, .. }
+                        if source_instance_id == &first_source
+                )
+            })
+            .unwrap();
+        let expected = "mixed Deathrite clause at terminal damage";
+        let mut diagnostic = pause.clone();
+        let mut diagnostic_events = Vec::new();
+        let diagnostic_result = diagnostic.apply_action_with_log(
+            &order,
+            &mut OutcomeLog::Record(&mut diagnostic_events),
+            None,
+            None,
+        );
+        assert!(
+            matches!(diagnostic_result,
+            Err(GameError::UnsupportedMechanic(ref reason)) if reason == expected),
+            "Crater nested terminal result={diagnostic_result:?}; events={diagnostic_events:?}"
+        );
+        assert!(
+            pause.position.rubble[Cell::parse("C3").unwrap().index()].is_some(),
+            "the issued Crater completed Site replacement before nested resolution"
+        );
+        assert!(
+            diagnostic_events
+                .iter()
+                .any(|(kind, _)| kind == "deathrite-damage-allocated")
+        );
+        assert!(
+            !diagnostic_events
+                .iter()
+                .any(|(kind, _)| kind == "avatar-healed")
+        );
+        let parent_position = pause.position.clone();
+        let parent_hash = pause.state_hash().unwrap();
+        let parent_actions = pause.legal_actions().unwrap();
+        let mut record = pause.clone();
+        let mut ignore = pause.clone();
+        let owned = pause.clone();
+        let record_action = record
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == order.descriptor)
+            .unwrap();
+        let ignore_action = ignore
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == order.descriptor)
+            .unwrap();
+        let owned_action = owned
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == order.descriptor)
+            .unwrap();
+        assert!(matches!(record.apply_action_recorded(&record_action),
+            Err(GameError::UnsupportedMechanic(ref reason)) if reason == expected));
+        assert!(matches!(ignore.apply_action(&ignore_action),
+            Err(GameError::UnsupportedMechanic(reason)) if reason == expected));
+        assert!(matches!(owned.clone().apply_action_owned(&owned_action),
+            Err(GameError::UnsupportedMechanic(reason)) if reason == expected));
+        for failed in [&record, &ignore, &owned] {
+            assert_eq!(failed.position, parent_position);
+            assert_eq!(failed.state_hash().unwrap(), parent_hash);
+            assert_eq!(failed.legal_actions().unwrap(), parent_actions);
+        }
+
+        let (nonterminal, sources) = fixture(false);
+        let (pause, first_source, _) = cast_and_pause(&nonterminal);
+        let (record, recorded_events) = complete_recorded(&pause, &first_source);
+        let ignore = complete(&pause, &first_source);
+        let owned = complete_owned(&pause, &first_source);
+        assert_eq!(record.position, ignore.position);
+        assert_eq!(record.position, owned.position);
+        assert!(record.position.rubble[Cell::parse("C3").unwrap().index()].is_some());
+        assert!(record.position.pending_deathrites.is_none());
+        assert!(record.position.terminal.is_none());
+        assert!(record.position.players[seat_index(Seat::North)].avatar.life > 0);
+        assert!(sources.iter().all(|id| {
+            record.position.players[seat_index(Seat::North)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == *id)
+        }));
+        assert!(
+            recorded_events
+                .iter()
+                .any(|(kind, _)| kind == "deathrite-damage-allocated")
+        );
+        assert!(
+            recorded_events
+                .iter()
+                .any(|(kind, _)| kind == "avatar-healed")
+        );
+        assert_eq!(
+            recorded_events
+                .iter()
+                .filter(|(kind, _)| kind == "magic-resolved")
+                .count(),
+            1
+        );
+        assert_eq!(record.state_hash().unwrap(), ignore.state_hash().unwrap());
+        assert_eq!(record.state_hash().unwrap(), owned.state_hash().unwrap());
+        assert_eq!(
+            record.legal_actions().unwrap(),
+            ignore.legal_actions().unwrap()
+        );
+        assert_eq!(
+            record.legal_actions().unwrap(),
+            owned.legal_actions().unwrap()
+        );
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "proves nested terminal rollback after Disable removes a stolen power source"
+    )]
+    fn disable_control_power_loss_propagates_nested_unsupported() {
+        let (mut game, ids) = marked_lifecycle_fixture(true, false);
+        let source_id = ids[0].clone();
+        let provider_id = game
+            .position
+            .units
+            .iter()
+            .find(|unit| !ids.contains(&unit.card.instance_id))
+            .expect("separate control provider")
+            .card
+            .instance_id
+            .clone();
+        for id in ids.iter().skip(1) {
+            game.position
+                .units
+                .iter_mut()
+                .find(|unit| unit.card.instance_id == *id)
+                .unwrap()
+                .damage = 0;
+        }
+        let provider_definition = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == provider_id)
+            .unwrap()
+            .card
+            .card_id;
+        let CardFacts::Minion(provider_facts) = &mut Arc::get_mut(&mut game.rules)
+            .expect("unshared rules")
+            .cards[usize::from(provider_definition.0)]
+        .facts
+        else {
+            panic!("provider is a Minion")
+        };
+        provider_facts.other_nearby_allies_power_bonus = true;
+        game.position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == provider_id)
+            .unwrap()
+            .stealthed = true;
+        game.apply_minion_control_change(
+            Some(&UnitTarget::Minion {
+                instance_id: provider_id.clone(),
+                seat: Seat::South,
+            }),
+            Seat::North,
+            &ids[1],
+            Some(TemporaryControlExpiry::UntilStealthLost),
+            false,
+            &mut OutcomeLog::Ignore,
+        )
+        .expect("source-bound provider control");
+        game.position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == source_id)
+            .unwrap()
+            .damage = 1;
+        let source_definition = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == source_id)
+            .unwrap()
+            .card
+            .card_id;
+        let CardFacts::Minion(source_facts) = &mut Arc::get_mut(&mut game.rules)
+            .expect("unshared rules")
+            .cards[usize::from(source_definition.0)]
+        .facts
+        else {
+            panic!("Deathrite is a Minion")
+        };
+        source_facts.attack = 1;
+        source_facts.defense = 1;
+        source_facts.deathrite_damage_each_unit_here = Some(1);
+        source_facts.deathrite_heal = Some(1);
+        assert_eq!(
+            game.position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == source_id)
+                .unwrap()
+                .damage,
+            1,
+            "wounded Deathrite before issued Disable"
+        );
+
+        let disable_definition = game
+            .rules
+            .cards
+            .binary_search_by(|definition| definition.id.as_str().cmp("north-spell-50"))
+            .unwrap();
+        Arc::get_mut(&mut game.rules).expect("unshared rules").cards[disable_definition].facts =
+            CardFacts::Magic(MagicFacts {
+                discard_card_as_additional_cost: false,
+                effect: MagicEffect::DisableTargetMinionWithinTwoStepsUntilDamaged,
+                mana_cost: 0,
+                pay_life_as_additional_cost: None,
+                thresholds: Thresholds::default(),
+            });
+        let artifact_card = {
+            let player = &mut game.position.players[seat_index(Seat::South)];
+            player
+                .spellbook
+                .iter()
+                .position(|card| {
+                    game.rules.cards[usize::from(card.card_id.0)].id == "south-spell-50"
+                })
+                .map(|index| player.spellbook.remove(index))
+                .expect("South passive Artifact")
+        };
+        let mut artifact = artifact_card;
+        artifact.enter_realm().expect("Artifact enters realm");
+        let artifact_id = artifact.instance_id.clone();
+        let provider_cell = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == provider_id)
+            .unwrap()
+            .location;
+        let source = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == source_id)
+            .unwrap();
+        let provider = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == provider_id)
+            .unwrap();
+        assert_eq!(source.location, provider.location);
+        assert_eq!(source.region, provider.region);
+        assert_eq!(source.controller, Seat::North);
+        assert_eq!(source.damage, 1);
+        assert!(source.temporary_modifiers.is_empty());
+        assert!(!game.minion_atop_tower(source));
+        assert!(!game.position.artifacts.iter().any(|artifact| matches!(
+            &artifact.placement,
+            ArtifactPlacement::Carried { bearer: UnitTarget::Minion { instance_id, .. }, .. }
+                if instance_id == &source_id
+        )));
+        assert_eq!(game.minion_current_stats(source).unwrap(), (2, 2, false));
+        let CardFacts::Minion(source_facts) =
+            &game.rules.cards[usize::from(source.card.card_id.0)].facts
+        else {
+            panic!("Deathrite is a Minion")
+        };
+        assert_eq!(source_facts.defense, 1);
+        assert_eq!(source_facts.deathrite_damage_each_unit_here, Some(1));
+        assert!(game.static_power_death_ids().unwrap().is_empty());
+        game.position.artifacts.push(ArtifactPosition {
+            card: artifact,
+            placement: ArtifactPlacement::Carried {
+                bearer: UnitTarget::Minion {
+                    instance_id: provider_id.clone(),
+                    seat: Seat::North,
+                },
+                cell: Some(provider_cell),
+            },
+        });
+        let previous_turn = game.position.turn_number;
+        game.position.turn_number += 1;
+        for seat in [Seat::North, Seat::South] {
+            let avatar = &mut game.position.players[seat_index(seat)].avatar;
+            avatar.location = provider_cell;
+            avatar.life = 0;
+            avatar.death_door_turn = Some(previous_turn);
+        }
+        let disable = game
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| {
+                matches!(&action.descriptor, ActionDescriptor::CastMagic {
+                card_id, target: Some(UnitTarget::Minion { instance_id, .. }), ..
+            } if card_id == "north-spell-50" && instance_id == &provider_id)
+            })
+            .expect("issued Disable against the stolen power source");
+        let before = game.position.clone();
+        let before_hash = game.state_hash().unwrap();
+        let before_actions = game.legal_actions().unwrap();
+        let mut diagnostic = game.clone();
+        let mut events = Vec::new();
+        let result = diagnostic.apply_action_with_log(
+            &disable,
+            &mut OutcomeLog::Record(&mut events),
+            None,
+            None,
+        );
+        assert!(
+            matches!(result,
+            Err(GameError::UnsupportedMechanic(ref reason))
+                if reason == "mixed Deathrite clause at terminal damage"),
+            "nested Disable outcome: {result:?}; events={events:?}"
+        );
+        let source_after_reversion = diagnostic
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == source_id)
+            .expect("nested error retains diagnostic intermediate state");
+        assert_eq!(source_after_reversion.damage, 1);
+        assert_eq!(
+            diagnostic
+                .minion_current_stats(source_after_reversion)
+                .unwrap(),
+            (1, 1, false)
+        );
+        let control_at = events
+            .iter()
+            .position(|(kind, _)| kind == "minion-control-changed")
+            .unwrap();
+        let damage_at = events
+            .iter()
+            .position(|(kind, _)| kind == "deathrite-damage-allocated")
+            .unwrap();
+        assert!(control_at < damage_at);
+        assert!(events.iter().any(|(kind, payload)| {
+            kind == "stealth-lost" && payload["instanceId"] == json!(provider_id)
+        }));
+        assert!(matches!(
+            &diagnostic.position.artifacts[0].placement,
+            ArtifactPlacement::Carried {
+                bearer: UnitTarget::Minion { instance_id, seat: Seat::South }, ..
+            } if *instance_id == provider_id
+        ));
+        for execution in 0..3 {
+            let mut branch = game.clone();
+            let action = branch
+                .legal_actions()
+                .unwrap()
+                .into_iter()
+                .find(|candidate| candidate.descriptor == disable.descriptor)
+                .unwrap();
+            let error = match execution {
+                0 => branch.apply_action_recorded(&action).unwrap_err(),
+                1 => branch.apply_action(&action).unwrap_err(),
+                _ => branch.clone().apply_action_owned(&action).unwrap_err(),
+            };
+            assert!(matches!(error, GameError::UnsupportedMechanic(reason)
+                if reason == "mixed Deathrite clause at terminal damage"));
+            assert_eq!(branch.position, before);
+            assert_eq!(branch.state_hash().unwrap(), before_hash);
+            assert_eq!(branch.legal_actions().unwrap(), before_actions);
+        }
+
+        let mut nonterminal = game.clone();
+        for player in &mut nonterminal.position.players {
+            player.avatar.life = 20;
+            player.avatar.death_door_turn = None;
+        }
+        let action = nonterminal
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.descriptor == disable.descriptor)
+            .unwrap();
+        let mut nonterminal_recorded = nonterminal.clone();
+        let mut nonterminal_ignored = nonterminal.clone();
+        let nonterminal_owned = nonterminal.clone();
+        let recorded_action = nonterminal_recorded
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.descriptor == action.descriptor)
+            .unwrap();
+        let ignored_action = nonterminal_ignored
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.descriptor == action.descriptor)
+            .unwrap();
+        let owned_action = nonterminal_owned
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.descriptor == action.descriptor)
+            .unwrap();
+        let (recorded_events, _) = nonterminal_recorded
+            .apply_action_recorded(&recorded_action)
+            .expect("nonterminal recorded Disable power-loss route succeeds");
+        nonterminal_ignored
+            .apply_action(&ignored_action)
+            .expect("nonterminal ignored Disable power-loss route succeeds");
+        let nonterminal_owned = nonterminal_owned
+            .apply_action_owned(&owned_action)
+            .expect("nonterminal owned Disable power-loss route succeeds");
+        assert_eq!(nonterminal_recorded.position, nonterminal_ignored.position);
+        assert_eq!(nonterminal_recorded.position, nonterminal_owned.position);
+        assert_eq!(
+            nonterminal_recorded.state_hash().unwrap(),
+            nonterminal_ignored.state_hash().unwrap()
+        );
+        assert_eq!(
+            nonterminal_recorded.state_hash().unwrap(),
+            nonterminal_owned.state_hash().unwrap()
+        );
+        assert_eq!(
+            nonterminal_recorded.legal_actions().unwrap(),
+            nonterminal_ignored.legal_actions().unwrap()
+        );
+        assert_eq!(
+            nonterminal_recorded.legal_actions().unwrap(),
+            nonterminal_owned.legal_actions().unwrap()
+        );
+        assert!(recorded_events.iter().any(|(kind, payload)| {
+            kind == "deathrite-damage-allocated" && payload["sourceInstanceId"] == json!(source_id)
+        }));
+        assert!(recorded_events.iter().any(|(kind, payload)| {
+            kind == "avatar-healed" && payload["sourceInstanceId"] == json!(source_id)
+        }));
+        assert!(
+            nonterminal_recorded.position.players[seat_index(Seat::North)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == source_id)
+        );
+        assert!(
+            !nonterminal_recorded
+                .position
+                .units
+                .iter()
+                .any(|unit| unit.card.instance_id == source_id)
+        );
+        assert_eq!(
+            nonterminal_recorded.position.players[seat_index(Seat::North)]
+                .avatar
+                .life,
+            20
+        );
+        assert_eq!(
+            nonterminal_recorded.position.players[seat_index(Seat::South)]
+                .avatar
+                .life,
+            19
+        );
+        assert_eq!(
+            nonterminal_recorded
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == provider_id)
+                .unwrap()
+                .damage,
+            1,
+            "Deathrite Damage1 reaches the returned provider"
+        );
+        let provider = nonterminal_recorded
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == provider_id)
+            .unwrap();
+        assert_eq!(provider.controller, Seat::South);
+        assert!(!provider.stealthed);
+        assert_eq!(
+            nonterminal_recorded.position.artifacts[0].card.instance_id,
+            artifact_id
+        );
+        assert!(matches!(
+            &nonterminal_recorded.position.artifacts[0].placement,
+            ArtifactPlacement::Carried {
+                bearer: UnitTarget::Minion { instance_id, seat: Seat::South }, ..
+            } if *instance_id == provider_id
+        ));
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "proves issued Hound movement propagates nearby stealth-loss control deaths"
+    )]
+    fn nearby_stealth_loss_control_power_loss_propagates_nested_unsupported() {
+        let (mut game, ids) = marked_lifecycle_fixture(true, false);
+        let source_id = ids[0].clone();
+        let control_source_id = ids[1].clone();
+        let provider_index = game
+            .position
+            .units
+            .iter()
+            .position(|unit| !ids.contains(&unit.card.instance_id))
+            .expect("provider minion");
+        let provider_id = game.position.units[provider_index].card.instance_id.clone();
+        let provider_definition = game.position.units[provider_index].card.card_id;
+        let CardFacts::Minion(provider_facts) = &mut Arc::get_mut(&mut game.rules)
+            .expect("unshared rules")
+            .cards[usize::from(provider_definition.0)]
+        .facts
+        else {
+            panic!("provider is a Minion")
+        };
+        provider_facts.other_nearby_allies_power_bonus = true;
+        let source_definition = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == source_id)
+            .unwrap()
+            .card
+            .card_id;
+        let CardFacts::Minion(source_facts) = &mut Arc::get_mut(&mut game.rules)
+            .expect("unshared rules")
+            .cards[usize::from(source_definition.0)]
+        .facts
+        else {
+            panic!("Deathrite is a Minion")
+        };
+        source_facts.attack = 1;
+        source_facts.defense = 1;
+        source_facts.deathrite_damage_each_unit_here = Some(1);
+        source_facts.deathrite_heal = Some(1);
+        game.position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == source_id)
+            .unwrap()
+            .damage = 0;
+
+        let target_cell = Cell::parse("C2").unwrap();
+        let hound_cell = Cell::parse("A2").unwrap();
+        let hound_destination = Cell::parse("B2").unwrap();
+        {
+            let provider = &mut game.position.units[provider_index];
+            provider.location = target_cell;
+            provider.stealthed = true;
+        }
+        game.position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == source_id)
+            .unwrap()
+            .location = target_cell;
+        game.position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == control_source_id)
+            .unwrap()
+            .damage = 0;
+        game.apply_minion_control_change(
+            Some(&UnitTarget::Minion {
+                instance_id: provider_id.clone(),
+                seat: Seat::South,
+            }),
+            Seat::North,
+            &control_source_id,
+            Some(TemporaryControlExpiry::UntilStealthLost),
+            false,
+            &mut OutcomeLog::Ignore,
+        )
+        .expect("provider is stolen before the Hound approaches");
+        game.position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == source_id)
+            .unwrap()
+            .damage = 1;
+
+        let hound_card = {
+            let south = &mut game.position.players[seat_index(Seat::South)];
+            let index = south
+                .spellbook
+                .iter()
+                .position(|card| {
+                    game.rules.cards[usize::from(card.card_id.0)].id == "south-spell-4"
+                })
+                .expect("South Hound card");
+            south.spellbook.remove(index)
+        };
+        let hound_definition = hound_card.card_id;
+        let CardFacts::Minion(hound_facts) = &mut Arc::get_mut(&mut game.rules)
+            .expect("unshared rules")
+            .cards[usize::from(hound_definition.0)]
+        .facts
+        else {
+            panic!("Hound is a Minion")
+        };
+        hound_facts.attack = 1;
+        hound_facts.defense = 10;
+        hound_facts.nearby_enemies_permanently_lose_stealth = true;
+        let mut hound = SummonPlacement {
+            card: hound_card,
+            controller: Seat::South,
+            lance_count: 0,
+            location: hound_cell,
+            occupied_cells: None,
+            region: Region::Surface,
+            stealthed: false,
+            warded: false,
+        }
+        .into_unit();
+        hound.card.enter_realm().unwrap();
+        hound.summoning_sickness = false;
+        let hound_id = hound.card.instance_id.clone();
+        game.position.units.push(hound);
+
+        let attack_target_card = {
+            let north = &mut game.position.players[seat_index(Seat::North)];
+            let index = north
+                .spellbook
+                .iter()
+                .position(|card| {
+                    game.rules.cards[usize::from(card.card_id.0)].id == "north-spell-3"
+                })
+                .expect("North ordinary attack target");
+            north.spellbook.remove(index)
+        };
+        let mut attack_target = SummonPlacement {
+            card: attack_target_card,
+            controller: Seat::North,
+            lance_count: 0,
+            location: Cell::parse("B3").unwrap(),
+            occupied_cells: None,
+            region: Region::Surface,
+            stealthed: false,
+            warded: false,
+        }
+        .into_unit();
+        attack_target.card.enter_realm().unwrap();
+        attack_target.summoning_sickness = false;
+        game.position.units.push(attack_target);
+
+        let artifact_card = {
+            let south = &mut game.position.players[seat_index(Seat::South)];
+            let index = south
+                .spellbook
+                .iter()
+                .position(|card| {
+                    game.rules.cards[usize::from(card.card_id.0)].id == "south-spell-50"
+                })
+                .expect("South passive Artifact");
+            south.spellbook.remove(index)
+        };
+        let mut artifact = artifact_card;
+        artifact.enter_realm().unwrap();
+        let artifact_id = artifact.instance_id.clone();
+        game.position.artifacts.push(ArtifactPosition {
+            card: artifact,
+            placement: ArtifactPlacement::Carried {
+                bearer: UnitTarget::Minion {
+                    instance_id: provider_id.clone(),
+                    seat: Seat::North,
+                },
+                cell: Some(target_cell),
+            },
+        });
+
+        for cell in ["A2", "B2", "C2", "B3"].map(|value| Cell::parse(value).unwrap()) {
+            let card = game.position.players[seat_index(Seat::North)]
+                .atlas
+                .pop()
+                .expect("site for issued movement path");
+            let mut card = card;
+            card.enter_realm().unwrap();
+            game.position.sites[cell.index()] = Some(SitePosition {
+                card,
+                controller: Seat::North,
+                last_flight_turn: None,
+                warded: false,
+            });
+        }
+
+        game.position.phase = Phase::Main;
+        game.position.active_seat = Seat::South;
+        game.position.decision_seat = Seat::South;
+        game.position.turn_controller = Some(Seat::South);
+        let previous_turn = game.position.turn_number;
+        game.position.turn_number += 1;
+        for player in &mut game.position.players {
+            player.avatar.location = target_cell;
+            player.avatar.life = 0;
+            player.avatar.death_door_turn = Some(previous_turn);
+        }
+        let source = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == source_id)
+            .unwrap();
+        let provider = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == provider_id)
+            .unwrap();
+        assert_eq!(source.controller, Seat::North);
+        assert_eq!(source.location, target_cell);
+        assert_eq!(source.damage, 1);
+        assert_eq!(provider.location, target_cell);
+        assert_eq!(game.minion_current_stats(source).unwrap(), (2, 2, false));
+        assert!(game.static_power_death_ids().unwrap().is_empty());
+        assert_eq!(
+            game.position.artifacts[0].card.instance_id, artifact_id,
+            "the provider carries the ordinary Artifact before stealth loss"
+        );
+        assert!(matches!(
+            &game.position.artifacts[0].placement,
+            ArtifactPlacement::Carried {
+                bearer: UnitTarget::Minion { instance_id, seat: Seat::North }, ..
+            } if *instance_id == provider_id
+        ));
+        let move_action = game
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::MoveAndAttack { unit_instance_id, from, path, to }
+                        if unit_instance_id == &hound_id
+                            && from.cell == hound_cell
+                            && to.cell == hound_destination
+                            && path.iter().any(|location| location.cell == hound_destination)
+                )
+            })
+            .unwrap_or_else(|| panic!("issued Hound MoveAndAttack into provider Nearby range; hound actions: {:?}", game.legal_actions().unwrap().into_iter().filter(|action| matches!(&action.descriptor, ActionDescriptor::MoveAndAttack { unit_instance_id, .. } if unit_instance_id == &hound_id)).map(|action| action.descriptor).collect::<Vec<_>>()));
+        let mut diagnostic = game.clone();
+        let mut events = Vec::new();
+        let result = diagnostic.apply_action_with_log(
+            &move_action,
+            &mut OutcomeLog::Record(&mut events),
+            None,
+            None,
+        );
+        assert!(
+            matches!(result, Err(GameError::UnsupportedMechanic(ref reason))
+                if reason == "mixed Deathrite clause at terminal damage"),
+            "Hound approach nested outcome: {result:?}; events={events:?}"
+        );
+        assert!(events.iter().any(|(kind, payload)| {
+            kind == "stealth-lost" && payload["instanceId"] == json!(provider_id)
+        }));
+        assert!(events.iter().any(|(kind, payload)| {
+            kind == "minion-control-changed"
+                && payload["instanceId"] == json!(provider_id)
+                && payload["fromSeat"] == json!(Seat::North)
+                && payload["seat"] == json!(Seat::South)
+        }));
+        let reverted_source = diagnostic
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == source_id)
+            .unwrap();
+        assert_eq!(
+            diagnostic.minion_current_stats(reverted_source).unwrap(),
+            (1, 1, false)
+        );
+        assert!(matches!(
+            &diagnostic.position.artifacts[0].placement,
+            ArtifactPlacement::Carried {
+                bearer: UnitTarget::Minion { instance_id, seat: Seat::South }, ..
+            } if *instance_id == provider_id
+        ));
+
+        let parent_position = game.position.clone();
+        let parent_hash = game.state_hash().unwrap();
+        let parent_actions = game.legal_actions().unwrap();
+        let mut terminal_record = game.clone();
+        let mut terminal_ignore = game.clone();
+        let terminal_owned = game.clone();
+        let record_action = terminal_record
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == move_action.descriptor)
+            .unwrap();
+        let ignore_action = terminal_ignore
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == move_action.descriptor)
+            .unwrap();
+        let owned_action = terminal_owned
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == move_action.descriptor)
+            .unwrap();
+        assert!(
+            matches!(terminal_record.apply_action_recorded(&record_action),
+            Err(GameError::UnsupportedMechanic(ref reason))
+                if reason == "mixed Deathrite clause at terminal damage")
+        );
+        assert!(matches!(terminal_ignore.apply_action(&ignore_action),
+            Err(GameError::UnsupportedMechanic(reason))
+                if reason == "mixed Deathrite clause at terminal damage"));
+        assert!(
+            matches!(terminal_owned.clone().apply_action_owned(&owned_action),
+            Err(GameError::UnsupportedMechanic(reason))
+                if reason == "mixed Deathrite clause at terminal damage")
+        );
+        for failed in [&terminal_record, &terminal_ignore, &terminal_owned] {
+            assert_eq!(failed.position, parent_position);
+            assert_eq!(failed.state_hash().unwrap(), parent_hash);
+            assert_eq!(failed.legal_actions().unwrap(), parent_actions);
+        }
+        assert_eq!(game.position, parent_position);
+        assert_eq!(game.state_hash().unwrap(), parent_hash);
+        assert_eq!(game.legal_actions().unwrap(), parent_actions);
+
+        let mut nonterminal = game.clone();
+        for player in &mut nonterminal.position.players {
+            player.avatar.life = 20;
+            player.avatar.death_door_turn = None;
+        }
+        let mut record = nonterminal.clone();
+        let mut ignore = nonterminal.clone();
+        let owned = nonterminal.clone();
+        let record_action = record
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == move_action.descriptor)
+            .unwrap();
+        let ignore_action = ignore
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == move_action.descriptor)
+            .unwrap();
+        let owned_action = owned
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == move_action.descriptor)
+            .unwrap();
+        let (recorded_events, _) = record
+            .apply_action_recorded(&record_action)
+            .expect("recorded nearby-loss route");
+        ignore
+            .apply_action(&ignore_action)
+            .expect("ignored nearby-loss route");
+        let owned = owned
+            .apply_action_owned(&owned_action)
+            .expect("owned nearby-loss route");
+        assert_eq!(record.position, ignore.position);
+        assert_eq!(record.position, owned.position);
+        assert_eq!(record.state_hash().unwrap(), ignore.state_hash().unwrap());
+        assert_eq!(record.state_hash().unwrap(), owned.state_hash().unwrap());
+        assert_eq!(
+            record.legal_actions().unwrap(),
+            ignore.legal_actions().unwrap()
+        );
+        assert_eq!(
+            record.legal_actions().unwrap(),
+            owned.legal_actions().unwrap()
+        );
+        assert!(recorded_events.iter().any(|(kind, payload)| {
+            kind == "deathrite-damage-allocated" && payload["sourceInstanceId"] == json!(source_id)
+        }));
+        assert!(recorded_events.iter().any(|(kind, payload)| {
+            kind == "avatar-healed" && payload["sourceInstanceId"] == json!(source_id)
+        }));
+        assert!(
+            record.position.players[seat_index(Seat::North)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == source_id)
+        );
+        assert_eq!(
+            record.position.players[seat_index(Seat::North)].avatar.life,
+            20
+        );
+        assert_eq!(
+            record.position.players[seat_index(Seat::South)].avatar.life,
+            19
+        );
+        let provider = record
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == provider_id)
+            .unwrap();
+        assert_eq!(provider.controller, Seat::South);
+        assert!(!provider.stealthed);
+        assert_eq!(record.position.artifacts[0].card.instance_id, artifact_id);
+        assert!(matches!(
+            &record.position.artifacts[0].placement,
+            ArtifactPlacement::Carried {
+                bearer: UnitTarget::Minion { instance_id, seat: Seat::South }, ..
+            } if *instance_id == provider_id
+        ));
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "proves Crater completion waits for site-loss control and power deaths"
+    )]
+    fn crater_site_power_loss_reversion_precedes_combined_deathrite_capture() {
+        fn complete_order_ignore(pause: &Game, first_source: &IdentityHash) -> Game {
+            let mut branch = pause.clone();
+            let mut first = true;
+            while branch.position.phase == Phase::TriggerOrder {
+                let action = branch
+                    .legal_actions()
+                    .unwrap()
+                    .into_iter()
+                    .find(|action| {
+                        matches!(
+                            &action.descriptor,
+                            ActionDescriptor::OrderTriggers { source_instance_id, .. }
+                                if !first || source_instance_id == first_source
+                        )
+                    })
+                    .expect("issued ordered source action");
+                branch
+                    .apply_action(&action)
+                    .expect("Ignore path completes held Crater");
+                first = false;
+            }
+            branch
+        }
+
+        fn complete_order_owned(pause: &Game, first_source: &IdentityHash) -> Game {
+            let mut branch = pause.clone();
+            let mut first = true;
+            while branch.position.phase == Phase::TriggerOrder {
+                let action = branch
+                    .legal_actions()
+                    .unwrap()
+                    .into_iter()
+                    .find(|action| {
+                        matches!(
+                            &action.descriptor,
+                            ActionDescriptor::OrderTriggers { source_instance_id, .. }
+                                if !first || source_instance_id == first_source
+                        )
+                    })
+                    .expect("issued owned ordered source action");
+                branch = branch
+                    .apply_action_owned(&action)
+                    .expect("owned path completes held Crater");
+                first = false;
+            }
+            branch
+        }
+
+        let assert_draw_source_seats = |events: &[(String, Value)],
+                                        sources: &[IdentityHash],
+                                        first_source: &IdentityHash,
+                                        seat: Seat| {
+            let first = first_source.to_string();
+            let second = sources
+                .iter()
+                .find(|source| **source != *first_source)
+                .expect("the other retained DrawSite source")
+                .to_string();
+            let seat = match seat {
+                Seat::North => "north",
+                Seat::South => "south",
+            };
+            let actual: Vec<_> = events
+                .iter()
+                .filter(|(kind, _)| kind == "site-drawn")
+                .map(|(_, payload)| {
+                    (
+                        payload["sourceInstanceId"].as_str().unwrap().to_owned(),
+                        payload["seat"].as_str().unwrap().to_owned(),
+                    )
+                })
+                .collect();
+            assert_eq!(
+                actual,
+                [(first, seat.to_owned()), (second, seat.to_owned())]
+            );
+        };
+
+        let (mut game, sources) = marked_lifecycle_fixture(true, false);
+        let provider_id = game
+            .position
+            .units
+            .iter()
+            .find(|unit| !sources.contains(&unit.card.instance_id))
+            .expect("provider Minion")
+            .card
+            .instance_id
+            .clone();
+        let provider_definition = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == provider_id)
+            .unwrap()
+            .card
+            .card_id;
+        let CardFacts::Minion(provider_facts) = &mut Arc::get_mut(&mut game.rules)
+            .expect("unshared rules")
+            .cards[usize::from(provider_definition.0)]
+        .facts
+        else {
+            panic!("provider is a Minion")
+        };
+        provider_facts.attack = 1;
+        provider_facts.waterbound = true;
+        provider_facts.other_nearby_allies_power_bonus = true;
+        provider_facts.damage_prevention = Some(DamagePrevention::TakesLessDamage(1));
+
+        for (index, source_id) in sources.iter().enumerate() {
+            let definition = game
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == *source_id)
+                .unwrap()
+                .card
+                .card_id;
+            let CardFacts::Minion(facts) = &mut Arc::get_mut(&mut game.rules)
+                .expect("unshared rules")
+                .cards[usize::from(definition.0)]
+            .facts
+            else {
+                panic!("DrawSite source is a Minion")
+            };
+            facts.attack = 1;
+            facts.defense = 1;
+            facts.deathrite_damage_each_unit_here = None;
+            facts.deathrite_draw_site = true;
+            facts.deathrite_heal = None;
+            facts.damage_prevention = Some(DamagePrevention::TakesLessDamage(1));
+            let source = game
+                .position
+                .units
+                .iter_mut()
+                .find(|unit| unit.card.instance_id == *source_id)
+                .unwrap();
+            source.damage = 0;
+            source.location = if index == 0 {
+                Cell::parse("C3").unwrap()
+            } else {
+                Cell::parse("D4").unwrap()
+            };
+        }
+
+        let provider_cell = Cell::parse("C4").unwrap();
+        let provider = game
+            .position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == provider_id)
+            .unwrap();
+        provider.location = provider_cell;
+        provider.stealthed = true;
+        let source_control_id = sources[0].clone();
+        game.apply_minion_control_change(
+            Some(&UnitTarget::Minion {
+                instance_id: provider_id.clone(),
+                seat: Seat::South,
+            }),
+            Seat::North,
+            &source_control_id,
+            Some(TemporaryControlExpiry::UntilStealthLost),
+            false,
+            &mut OutcomeLog::Ignore,
+        )
+        .expect("stolen Waterbound provider control");
+        for source_id in &sources {
+            game.position
+                .units
+                .iter_mut()
+                .find(|unit| unit.card.instance_id == *source_id)
+                .unwrap()
+                .damage = 1;
+        }
+
+        let site_card = game.position.players[seat_index(Seat::North)]
+            .atlas
+            .pop()
+            .expect("Water site for Crater");
+        let site_id = site_card.instance_id.clone();
+        let site_definition = site_card.card_id;
+        let CardFacts::Site(site_facts) = &mut Arc::get_mut(&mut game.rules)
+            .expect("unshared rules")
+            .cards[usize::from(site_definition.0)]
+        .facts
+        else {
+            panic!("Crater target is a Site")
+        };
+        site_facts.elements = ElementSet::empty().with(Element::Water);
+        let mut site_card = site_card;
+        site_card.enter_realm().unwrap();
+        game.position.sites[provider_cell.index()] = Some(SitePosition {
+            card: site_card,
+            controller: Seat::North,
+            last_flight_turn: None,
+            warded: false,
+        });
+        let draw_cell = Cell::parse("D4").unwrap();
+        let draw_site = game.position.players[seat_index(Seat::North)]
+            .atlas
+            .pop()
+            .expect("site under second recipient");
+        let mut draw_site = draw_site;
+        draw_site.enter_realm().unwrap();
+        game.position.sites[draw_cell.index()] = Some(SitePosition {
+            card: draw_site,
+            controller: Seat::North,
+            last_flight_turn: None,
+            warded: false,
+        });
+
+        let artifact_card = {
+            let south = &mut game.position.players[seat_index(Seat::South)];
+            let index = south
+                .spellbook
+                .iter()
+                .position(|card| {
+                    game.rules.cards[usize::from(card.card_id.0)].id == "south-spell-50"
+                })
+                .unwrap();
+            south.spellbook.remove(index)
+        };
+        let mut artifact = artifact_card;
+        artifact.enter_realm().unwrap();
+        let artifact_id = artifact.instance_id.clone();
+        game.position.artifacts.push(ArtifactPosition {
+            card: artifact,
+            placement: ArtifactPlacement::Carried {
+                bearer: UnitTarget::Minion {
+                    instance_id: provider_id.clone(),
+                    seat: Seat::North,
+                },
+                cell: Some(provider_cell),
+            },
+        });
+
+        let crater_definition = game
+            .rules
+            .cards
+            .binary_search_by(|definition| definition.id.as_str().cmp("north-spell-50"))
+            .unwrap();
+        Arc::get_mut(&mut game.rules).expect("unshared rules").cards[crater_definition].facts =
+            CardFacts::Magic(MagicFacts {
+                discard_card_as_additional_cost: false,
+                effect: MagicEffect::DestroyTargetSiteWithDamageGrid([1; 5]),
+                mana_cost: 0,
+                pay_life_as_additional_cost: None,
+                thresholds: Thresholds::default(),
+            });
+        game.position.players[seat_index(Seat::North)].domain_established = true;
+        game.position.players[seat_index(Seat::North)].mana = 20;
+        game.position.players[seat_index(Seat::South)].domain_established = true;
+        game.position.players[seat_index(Seat::South)].mana = 20;
+        game.position.players[seat_index(Seat::North)]
+            .avatar
+            .location = Cell::parse("C3").unwrap();
+        game.position.phase = Phase::Main;
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.turn_controller = Some(Seat::North);
+
+        let mut source_order = sources.to_vec();
+        source_order.sort_unstable();
+        let provider = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == provider_id)
+            .unwrap();
+        assert_eq!(provider.controller, Seat::North);
+        assert_eq!(
+            game.minion_current_stats(
+                game.position
+                    .units
+                    .iter()
+                    .find(|unit| unit.card.instance_id == sources[0])
+                    .unwrap()
+            )
+            .unwrap(),
+            (2, 2, false)
+        );
+        assert_eq!(
+            game.minion_current_stats(
+                game.position
+                    .units
+                    .iter()
+                    .find(|unit| unit.card.instance_id == sources[1])
+                    .unwrap()
+            )
+            .unwrap(),
+            (2, 2, false)
+        );
+        assert!(game.static_power_death_ids().unwrap().is_empty());
+
+        let cast = game
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| matches!(
+                &action.descriptor,
+                ActionDescriptor::CastMagic { card_id, target_site_instance_id: Some(target), discard_site_instance_id: Some(_), .. }
+                    if card_id == "north-spell-50" && target == &site_id
+            ))
+            .expect("actual issued Crater with grid 1 and Atlas discard");
+        let mut paused = game.clone();
+        let mut events = Vec::new();
+        paused
+            .apply_action_with_log(&cast, &mut OutcomeLog::Record(&mut events), None, None)
+            .expect("Crater site loss and ordered Deathrites pause");
+        assert_eq!(paused.position.phase, Phase::TriggerOrder);
+        let rubble_id = paused.position.rubble[provider_cell.index()]
+            .as_ref()
+            .expect("Crater creates rubble")
+            .clone();
+        assert_ne!(rubble_id, site_id, "Rubble owns its own identity");
+        assert!(paused.position.sites[provider_cell.index()].is_none());
+        assert!(
+            paused.position.players[seat_index(Seat::North)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == site_id)
+        );
+        assert!(sources.iter().all(|id| {
+            paused
+                .position
+                .units
+                .iter()
+                .any(|unit| unit.card.instance_id == *id && unit.death_marked)
+        }));
+        assert!(sources.iter().all(|id| {
+            !paused.position.players[seat_index(Seat::North)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == *id)
+        }));
+        assert!(
+            paused.position.players[seat_index(Seat::South)]
+                .cemetery
+                .iter()
+                .all(|card| card.instance_id != site_id)
+        );
+        let provider = paused
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == provider_id)
+            .unwrap();
+        assert_eq!(provider.controller, Seat::South);
+        assert!(!provider.stealthed);
+        assert_eq!(paused.position.artifacts[0].card.instance_id, artifact_id);
+        assert!(matches!(
+            &paused.position.artifacts[0].placement,
+            ArtifactPlacement::Carried {
+                bearer: UnitTarget::Minion { instance_id, seat: Seat::South }, ..
+            } if *instance_id == provider_id
+        ));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|(kind, _)| kind == "magic-damage-allocated")
+                .count(),
+            4
+        );
+        let site_destroyed_at = events
+            .iter()
+            .position(|(kind, payload)| {
+                kind == "site-destroyed" && payload["instanceId"] == json!(site_id)
+            })
+            .unwrap();
+        let damage_allocation_positions: Vec<_> = events
+            .iter()
+            .enumerate()
+            .filter_map(|(index, (kind, _))| (kind == "magic-damage-allocated").then_some(index))
+            .collect();
+        let rubble_created_at = events
+            .iter()
+            .position(|(kind, payload)| {
+                kind == "rubble-created" && payload["instanceId"] == json!(rubble_id)
+            })
+            .unwrap();
+        let stealth_lost_at = events
+            .iter()
+            .position(|(kind, payload)| {
+                kind == "stealth-lost" && payload["instanceId"] == json!(provider_id)
+            })
+            .unwrap();
+        let control_reverted_at = events
+            .iter()
+            .position(|(kind, payload)| {
+                kind == "minion-control-changed"
+                    && payload["instanceId"] == json!(provider_id)
+                    && payload["fromSeat"] == json!(Seat::North)
+                    && payload["seat"] == json!(Seat::South)
+            })
+            .unwrap();
+        assert!(site_destroyed_at < damage_allocation_positions[0]);
+        assert!(
+            damage_allocation_positions
+                .iter()
+                .all(|index| *index < rubble_created_at)
+        );
+        assert!(rubble_created_at < stealth_lost_at && stealth_lost_at < control_reverted_at);
+        assert!(
+            events
+                .iter()
+                .filter(|(kind, _)| kind == "damage-dealt")
+                .count()
+                >= 3
+        );
+        let pending = paused.position.pending_deathrites.as_ref().unwrap();
+        let Some(ResolutionContinuation::MagicResolved {
+            resolution,
+            held_card: Some(held),
+        }) = &pending.continuation
+        else {
+            panic!("actual Crater remains held once in MagicResolved continuation")
+        };
+        let ActionDescriptor::CastMagic {
+            card_instance_id, ..
+        } = &cast.descriptor
+        else {
+            unreachable!("Crater fixture selected a cast")
+        };
+        assert_eq!(resolution.instance_id, *card_instance_id);
+        assert_eq!(held.instance_id, resolution.instance_id);
+        let order_sources: Vec<_> = paused
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .filter_map(|action| match action.descriptor {
+                ActionDescriptor::OrderTriggers {
+                    source_instance_id, ..
+                } => Some(source_instance_id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(order_sources.len(), 2);
+        assert_eq!(order_sources, source_order);
+        let original_parent_position = game.position.clone();
+        let original_parent_hash = game.state_hash().unwrap();
+        let original_parent_actions = game.legal_actions().unwrap();
+        let mut ignored = game.clone();
+        let ignored_cast = ignored
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == cast.descriptor)
+            .unwrap();
+        ignored
+            .apply_action(&ignored_cast)
+            .expect("Crater Ignore path reaches ordered pause");
+        let owned_cast = game
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == cast.descriptor)
+            .unwrap();
+        let owned_pause = game
+            .clone()
+            .apply_action_owned(&owned_cast)
+            .expect("Crater owned path reaches ordered pause");
+        assert_eq!(ignored.position, paused.position);
+        assert_eq!(owned_pause.position, paused.position);
+        assert_eq!(ignored.state_hash().unwrap(), paused.state_hash().unwrap());
+        assert_eq!(
+            owned_pause.state_hash().unwrap(),
+            paused.state_hash().unwrap()
+        );
+        assert_eq!(
+            ignored.legal_actions().unwrap(),
+            paused.legal_actions().unwrap()
+        );
+        assert_eq!(
+            owned_pause.legal_actions().unwrap(),
+            paused.legal_actions().unwrap()
+        );
+        assert_eq!(game.position, original_parent_position);
+        assert_eq!(game.state_hash().unwrap(), original_parent_hash);
+        assert_eq!(game.legal_actions().unwrap(), original_parent_actions);
+        for first_source in source_order {
+            let mut branch = paused.clone();
+            let first = branch.legal_actions().unwrap().into_iter().find(|action| matches!(
+                &action.descriptor,
+                ActionDescriptor::OrderTriggers { source_instance_id, .. } if source_instance_id == &first_source
+            )).unwrap();
+            let (ordered_events, _) = branch
+                .apply_action_recorded(&first)
+                .expect("chosen source order completes Crater chain");
+            let drawn_sources: Vec<_> = ordered_events
+                .iter()
+                .filter(|(kind, _)| kind == "site-drawn")
+                .map(|(_, payload)| payload["sourceInstanceId"].as_str().unwrap().to_owned())
+                .collect();
+            let expected_draw_order = [
+                first_source.to_string(),
+                sources
+                    .iter()
+                    .find(|source| **source != first_source)
+                    .unwrap()
+                    .to_string(),
+            ];
+            assert_eq!(drawn_sources, expected_draw_order);
+            assert_draw_source_seats(&ordered_events, &sources, &first_source, Seat::North);
+            assert!(branch.position.pending_deathrites.is_none());
+            assert_eq!(branch.position.phase, Phase::Main);
+            assert!(sources.iter().all(|id| {
+                branch.position.players[seat_index(Seat::North)]
+                    .cemetery
+                    .iter()
+                    .any(|card| card.instance_id == *id)
+            }));
+            assert!(
+                branch.position.players[seat_index(Seat::North)]
+                    .cemetery
+                    .iter()
+                    .any(|card| card.instance_id == resolution.instance_id)
+            );
+            assert_eq!(
+                ordered_events
+                    .iter()
+                    .filter(|(kind, _)| kind == "magic-resolved")
+                    .count(),
+                1
+            );
+            assert!(
+                branch
+                    .position
+                    .units
+                    .iter()
+                    .all(|unit| !sources.contains(&unit.card.instance_id))
+            );
+            assert_eq!(
+                branch.position.players[seat_index(Seat::South)].avatar.life,
+                20
+            );
+            let retained_parent_position = paused.position.clone();
+            let parent_hash = paused.state_hash().unwrap();
+            let parent_actions = paused.legal_actions().unwrap();
+            let ignored_complete = complete_order_ignore(&paused, &first_source);
+            let owned_complete = complete_order_owned(&paused, &first_source);
+            assert_eq!(ignored_complete.position, branch.position);
+            assert_eq!(owned_complete.position, branch.position);
+            assert_eq!(
+                ignored_complete.state_hash().unwrap(),
+                branch.state_hash().unwrap()
+            );
+            assert_eq!(
+                owned_complete.state_hash().unwrap(),
+                branch.state_hash().unwrap()
+            );
+            assert_eq!(
+                ignored_complete.legal_actions().unwrap(),
+                branch.legal_actions().unwrap()
+            );
+            assert_eq!(
+                owned_complete.legal_actions().unwrap(),
+                branch.legal_actions().unwrap()
+            );
+            assert_eq!(paused.position, retained_parent_position);
+            assert_eq!(paused.state_hash().unwrap(), parent_hash);
+            assert_eq!(paused.legal_actions().unwrap(), parent_actions);
+        }
+
+        let mut mirrored = game.clone();
+        swap_game_seats_for_mirrored_rule_proof(&mut mirrored);
+        assert_eq!(mirrored.position.active_seat, Seat::South);
+        let mirrored_cast = mirrored
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| matches!(
+                &action.descriptor,
+                ActionDescriptor::CastMagic { card_id, target_site_instance_id: Some(target), discard_site_instance_id: Some(_), .. }
+                    if card_id == "north-spell-50" && target == &site_id
+            ))
+            .expect("mirrored South issued Crater");
+        let ActionDescriptor::CastMagic {
+            card_instance_id: mirrored_crater_id,
+            ..
+        } = &mirrored_cast.descriptor
+        else {
+            unreachable!("mirrored Crater selection returns a cast")
+        };
+        let mut mirrored_pause = mirrored.clone();
+        let mut mirrored_events = Vec::new();
+        mirrored_pause
+            .apply_action_with_log(
+                &mirrored_cast,
+                &mut OutcomeLog::Record(&mut mirrored_events),
+                None,
+                None,
+            )
+            .expect("mirrored Crater pauses after all transitions");
+        assert_eq!(mirrored_pause.position.phase, Phase::TriggerOrder);
+        let mirrored_provider = mirrored_pause
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == provider_id)
+            .unwrap();
+        assert_eq!(mirrored_provider.controller, Seat::North);
+        assert!(!mirrored_provider.stealthed);
+        assert!(matches!(
+            &mirrored_pause.position.artifacts[0].placement,
+            ArtifactPlacement::Carried {
+                bearer: UnitTarget::Minion { instance_id, seat: Seat::North }, ..
+            } if *instance_id == provider_id
+        ));
+        assert!(sources.iter().all(|id| {
+            mirrored_pause
+                .position
+                .units
+                .iter()
+                .any(|unit| unit.card.instance_id == *id && unit.death_marked)
+        }));
+        let mut mirrored_source_order: Vec<_> = mirrored_pause
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .filter_map(|action| match action.descriptor {
+                ActionDescriptor::OrderTriggers {
+                    source_instance_id, ..
+                } => Some(source_instance_id),
+                _ => None,
+            })
+            .collect();
+        mirrored_source_order.sort_unstable();
+        let mut expected_mirrored_source_order = sources.to_vec();
+        expected_mirrored_source_order.sort_unstable();
+        assert_eq!(mirrored_source_order, expected_mirrored_source_order);
+        let mirrored_parent_position = mirrored.position.clone();
+        let mirrored_parent_hash = mirrored.state_hash().unwrap();
+        let mirrored_parent_actions = mirrored.legal_actions().unwrap();
+        let mut mirrored_ignore = mirrored.clone();
+        let mirrored_ignore_cast = mirrored_ignore
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == mirrored_cast.descriptor)
+            .unwrap();
+        mirrored_ignore
+            .apply_action(&mirrored_ignore_cast)
+            .expect("mirrored Crater Ignore path reaches ordered pause");
+        let mirrored_owned_cast = mirrored
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == mirrored_cast.descriptor)
+            .unwrap();
+        let mirrored_owned_pause = mirrored
+            .clone()
+            .apply_action_owned(&mirrored_owned_cast)
+            .expect("mirrored Crater owned path reaches ordered pause");
+        assert_eq!(mirrored_ignore.position, mirrored_pause.position);
+        assert_eq!(mirrored_owned_pause.position, mirrored_pause.position);
+        assert_eq!(
+            mirrored_ignore.state_hash().unwrap(),
+            mirrored_pause.state_hash().unwrap()
+        );
+        assert_eq!(
+            mirrored_owned_pause.state_hash().unwrap(),
+            mirrored_pause.state_hash().unwrap()
+        );
+        assert_eq!(
+            mirrored_ignore.legal_actions().unwrap(),
+            mirrored_pause.legal_actions().unwrap()
+        );
+        assert_eq!(
+            mirrored_owned_pause.legal_actions().unwrap(),
+            mirrored_pause.legal_actions().unwrap()
+        );
+        assert_eq!(mirrored.position, mirrored_parent_position);
+        assert_eq!(mirrored.state_hash().unwrap(), mirrored_parent_hash);
+        assert_eq!(mirrored.legal_actions().unwrap(), mirrored_parent_actions);
+        for first_source in mirrored_source_order {
+            let mut branch = mirrored_pause.clone();
+            let first = branch
+                .legal_actions()
+                .unwrap()
+                .into_iter()
+                .find(|action| matches!(
+                    &action.descriptor,
+                    ActionDescriptor::OrderTriggers { source_instance_id, .. } if source_instance_id == &first_source
+                ))
+                .unwrap();
+            let (ordered_events, _) = branch
+                .apply_action_recorded(&first)
+                .expect("mirrored chosen source order completes Crater chain");
+            let drawn_seats: Vec<_> = ordered_events
+                .iter()
+                .filter(|(kind, _)| kind == "site-drawn")
+                .map(|(_, payload)| payload["seat"].as_str().unwrap().to_owned())
+                .collect();
+            assert_eq!(drawn_seats, ["south", "south"]);
+            assert_draw_source_seats(&ordered_events, &sources, &first_source, Seat::South);
+            assert!(sources.iter().all(|id| {
+                branch.position.players[seat_index(Seat::South)]
+                    .cemetery
+                    .iter()
+                    .any(|card| card.instance_id == *id)
+            }));
+            assert!(
+                branch.position.players[seat_index(Seat::South)]
+                    .cemetery
+                    .iter()
+                    .any(|card| card.instance_id == *mirrored_crater_id)
+            );
+            assert_eq!(branch.position.phase, Phase::Main);
+            assert!(branch.position.pending_deathrites.is_none());
+            let retained_parent_position = mirrored_pause.position.clone();
+            let parent_hash = mirrored_pause.state_hash().unwrap();
+            let parent_actions = mirrored_pause.legal_actions().unwrap();
+            let ignored_complete = complete_order_ignore(&mirrored_pause, &first_source);
+            let owned_complete = complete_order_owned(&mirrored_pause, &first_source);
+            assert_eq!(ignored_complete.position, branch.position);
+            assert_eq!(owned_complete.position, branch.position);
+            assert_eq!(
+                ignored_complete.state_hash().unwrap(),
+                branch.state_hash().unwrap()
+            );
+            assert_eq!(
+                owned_complete.state_hash().unwrap(),
+                branch.state_hash().unwrap()
+            );
+            assert_eq!(
+                ignored_complete.legal_actions().unwrap(),
+                branch.legal_actions().unwrap()
+            );
+            assert_eq!(
+                owned_complete.legal_actions().unwrap(),
+                branch.legal_actions().unwrap()
+            );
+            assert_eq!(mirrored_pause.position, retained_parent_position);
+            assert_eq!(mirrored_pause.state_hash().unwrap(), parent_hash);
+            assert_eq!(mirrored_pause.legal_actions().unwrap(), parent_actions);
+        }
+
+        drop(ignored);
+        drop(owned_pause);
+        drop(paused);
+        drop(mirrored_ignore);
+        drop(mirrored_owned_pause);
+        drop(mirrored_pause);
+        drop(mirrored);
+        let mut rubble_land_variant = game;
+        let provider_definition = rubble_land_variant
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == provider_id)
+            .unwrap()
+            .card
+            .card_id;
+        let CardFacts::Minion(provider_facts) = &mut Arc::get_mut(&mut rubble_land_variant.rules)
+            .expect("unshared Rubble-variant rules")
+            .cards[usize::from(provider_definition.0)]
+        .facts
+        else {
+            panic!("provider is a Minion")
+        };
+        provider_facts.waterbound = false;
+        let ordinary_provider_cell = Cell::parse("C3").unwrap();
+        let provider = rubble_land_variant
+            .position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == provider_id)
+            .unwrap();
+        provider.location = ordinary_provider_cell;
+        for artifact in &mut rubble_land_variant.position.artifacts {
+            if let ArtifactPlacement::Carried { cell, .. } = &mut artifact.placement {
+                *cell = Some(ordinary_provider_cell);
+            }
+        }
+        let hound_card = {
+            let south = &mut rubble_land_variant.position.players[seat_index(Seat::South)];
+            let index = south
+                .spellbook
+                .iter()
+                .position(|card| {
+                    rubble_land_variant.rules.cards[usize::from(card.card_id.0)].id
+                        == "south-spell-4"
+                })
+                .expect("Landbound nearby-Stealth-loss source");
+            south.spellbook.remove(index)
+        };
+        let hound_definition = hound_card.card_id;
+        let CardFacts::Minion(hound_facts) = &mut Arc::get_mut(&mut rubble_land_variant.rules)
+            .expect("unshared Rubble-variant rules")
+            .cards[usize::from(hound_definition.0)]
+        .facts
+        else {
+            panic!("Landbound source is a Minion")
+        };
+        hound_facts.defense = 2;
+        hound_facts.landbound = true;
+        hound_facts.nearby_enemies_permanently_lose_stealth = true;
+        let mut hound = SummonPlacement {
+            card: hound_card,
+            controller: Seat::South,
+            lance_count: 0,
+            location: provider_cell,
+            occupied_cells: None,
+            region: Region::Surface,
+            stealthed: false,
+            warded: false,
+        }
+        .into_unit();
+        hound.card.enter_realm().unwrap();
+        let hound_id = hound.card.instance_id.clone();
+        rubble_land_variant.position.units.push(hound);
+        assert!(
+            rubble_land_variant.minion_is_disabled(
+                rubble_land_variant
+                    .position
+                    .units
+                    .iter()
+                    .find(|unit| unit.card.instance_id == hound_id)
+                    .unwrap()
+            )
+        );
+        assert_eq!(
+            rubble_land_variant
+                .minion_current_stats(
+                    rubble_land_variant
+                        .position
+                        .units
+                        .iter()
+                        .find(|unit| unit.card.instance_id == sources[0])
+                        .unwrap()
+                )
+                .unwrap(),
+            (2, 2, false)
+        );
+        assert!(
+            rubble_land_variant
+                .static_power_death_ids()
+                .unwrap()
+                .is_empty()
+        );
+        let rubble_variant_cast = rubble_land_variant
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| matches!(
+                &action.descriptor,
+                ActionDescriptor::CastMagic { card_id, target_site_instance_id: Some(target), discard_site_instance_id: Some(_), .. }
+                    if card_id == "north-spell-50" && target == &site_id
+            ))
+            .expect("Rubble-land variant issued Crater");
+        let variant_parent_position = rubble_land_variant.position.clone();
+        let mut rubble_variant_result = rubble_land_variant.clone();
+        let mut rubble_variant_events = Vec::new();
+        rubble_variant_result
+            .apply_action_with_log(
+                &rubble_variant_cast,
+                &mut OutcomeLog::Record(&mut rubble_variant_events),
+                None,
+                None,
+            )
+            .expect("Rubble-land variant Crater executes");
+        let variant_parent_hash = rubble_land_variant.state_hash().unwrap();
+        let variant_parent_actions = rubble_land_variant.legal_actions().unwrap();
+        let variant_result_hash = rubble_variant_result.state_hash().unwrap();
+        let variant_result_actions = rubble_variant_result.legal_actions().unwrap();
+        let mut rubble_variant_ignore = rubble_land_variant.clone();
+        let ignored_cast = rubble_variant_ignore
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == rubble_variant_cast.descriptor)
+            .unwrap();
+        rubble_variant_ignore
+            .apply_action(&ignored_cast)
+            .expect("Rubble-land Ignore variant Crater executes");
+        let owned_cast = rubble_land_variant
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == rubble_variant_cast.descriptor)
+            .unwrap();
+        let rubble_variant_owned = rubble_land_variant
+            .clone()
+            .apply_action_owned(&owned_cast)
+            .expect("Rubble-land owned variant Crater executes");
+        assert_eq!(
+            rubble_variant_ignore.position,
+            rubble_variant_result.position
+        );
+        assert_eq!(
+            rubble_variant_owned.position,
+            rubble_variant_result.position
+        );
+        assert_eq!(
+            rubble_variant_ignore.state_hash().unwrap(),
+            variant_result_hash
+        );
+        assert_eq!(
+            rubble_variant_owned.state_hash().unwrap(),
+            variant_result_hash
+        );
+        assert_eq!(
+            rubble_variant_ignore.legal_actions().unwrap(),
+            variant_result_actions
+        );
+        assert_eq!(
+            rubble_variant_owned.legal_actions().unwrap(),
+            variant_result_actions
+        );
+        assert_eq!(
+            rubble_land_variant.state_hash().unwrap(),
+            variant_parent_hash
+        );
+        assert_eq!(rubble_land_variant.position, variant_parent_position);
+        assert_eq!(
+            rubble_land_variant.legal_actions().unwrap(),
+            variant_parent_actions
+        );
+        assert_eq!(
+            rubble_variant_result.position.phase,
+            Phase::TriggerOrder,
+            "Rubble becomes Land, enabling the Landbound stealth-loss source; events={rubble_variant_events:?}"
+        );
+        assert!(sources.iter().all(|id| {
+            rubble_variant_result
+                .position
+                .units
+                .iter()
+                .any(|unit| unit.card.instance_id == *id && unit.death_marked)
+        }));
+        let reverted_provider = rubble_variant_result
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == provider_id)
+            .unwrap();
+        assert_eq!(reverted_provider.controller, Seat::South);
+        assert!(!reverted_provider.stealthed);
+        assert!(matches!(
+            &rubble_variant_result.position.artifacts[0].placement,
+            ArtifactPlacement::Carried {
+                bearer: UnitTarget::Minion { instance_id, seat: Seat::South }, ..
+            } if *instance_id == provider_id
+        ));
+        let mut north_rubble_orders: Vec<_> = rubble_variant_result
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .filter_map(|action| match action.descriptor {
+                ActionDescriptor::OrderTriggers {
+                    source_instance_id, ..
+                } => Some(source_instance_id),
+                _ => None,
+            })
+            .collect();
+        north_rubble_orders.sort_unstable();
+        let mut expected_north_orders = sources.to_vec();
+        expected_north_orders.sort_unstable();
+        assert_eq!(north_rubble_orders, expected_north_orders);
+        for first_source in north_rubble_orders {
+            let mut branch = rubble_variant_result.clone();
+            let first = branch
+                .legal_actions()
+                .unwrap()
+                .into_iter()
+                .find(|action| {
+                    matches!(
+                        &action.descriptor,
+                        ActionDescriptor::OrderTriggers { source_instance_id, .. }
+                            if source_instance_id == &first_source
+                    )
+                })
+                .unwrap();
+            let (ordered_events, _) = branch
+                .apply_action_recorded(&first)
+                .expect("North Rubble branch completes both DrawSites");
+            let drawn_sources: Vec<_> = ordered_events
+                .iter()
+                .filter(|(kind, _)| kind == "site-drawn")
+                .map(|(_, payload)| payload["sourceInstanceId"].as_str().unwrap().to_owned())
+                .collect();
+            let expected_draw_order = [
+                first_source.to_string(),
+                sources
+                    .iter()
+                    .find(|source| **source != first_source)
+                    .unwrap()
+                    .to_string(),
+            ];
+            assert_eq!(drawn_sources, expected_draw_order);
+            assert_draw_source_seats(&ordered_events, &sources, &first_source, Seat::North);
+            assert!(branch.position.pending_deathrites.is_none());
+            assert_eq!(branch.position.phase, Phase::Main);
+            assert!(sources.iter().all(|id| {
+                branch.position.players[seat_index(Seat::North)]
+                    .cemetery
+                    .iter()
+                    .any(|card| card.instance_id == *id)
+            }));
+            assert!(
+                branch.position.players[seat_index(Seat::North)]
+                    .cemetery
+                    .iter()
+                    .any(|card| card.instance_id == site_id)
+            );
+            assert_eq!(
+                ordered_events
+                    .iter()
+                    .filter(|(kind, _)| kind == "magic-resolved")
+                    .count(),
+                1
+            );
+            let retained_parent_position = rubble_variant_result.position.clone();
+            let parent_hash = rubble_variant_result.state_hash().unwrap();
+            let parent_actions = rubble_variant_result.legal_actions().unwrap();
+            let ignored_complete = complete_order_ignore(&rubble_variant_result, &first_source);
+            let owned_complete = complete_order_owned(&rubble_variant_result, &first_source);
+            assert_eq!(ignored_complete.position, branch.position);
+            assert_eq!(owned_complete.position, branch.position);
+            assert_eq!(
+                ignored_complete.state_hash().unwrap(),
+                branch.state_hash().unwrap()
+            );
+            assert_eq!(
+                owned_complete.state_hash().unwrap(),
+                branch.state_hash().unwrap()
+            );
+            assert_eq!(
+                ignored_complete.legal_actions().unwrap(),
+                branch.legal_actions().unwrap()
+            );
+            assert_eq!(
+                owned_complete.legal_actions().unwrap(),
+                branch.legal_actions().unwrap()
+            );
+            assert_eq!(rubble_variant_result.position, retained_parent_position);
+            assert_eq!(rubble_variant_result.state_hash().unwrap(), parent_hash);
+            assert_eq!(
+                rubble_variant_result.legal_actions().unwrap(),
+                parent_actions
+            );
+        }
+
+        let mut mirrored_rubble_variant = rubble_land_variant.clone();
+        swap_game_seats_for_mirrored_rule_proof(&mut mirrored_rubble_variant);
+        let mirrored_source = mirrored_rubble_variant
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == hound_id)
+            .unwrap();
+        assert!(mirrored_rubble_variant.minion_is_disabled(mirrored_source));
+        let mirrored_rubble_cast = mirrored_rubble_variant
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| matches!(
+                &action.descriptor,
+                ActionDescriptor::CastMagic { card_id, target_site_instance_id: Some(target), discard_site_instance_id: Some(_), .. }
+                    if card_id == "north-spell-50" && target == &site_id
+            ))
+            .expect("mirrored Rubble-land variant issued Crater");
+        let mirrored_variant_parent_position = mirrored_rubble_variant.position.clone();
+        let mut mirrored_rubble_result = mirrored_rubble_variant.clone();
+        let mut mirrored_rubble_events = Vec::new();
+        mirrored_rubble_result
+            .apply_action_with_log(
+                &mirrored_rubble_cast,
+                &mut OutcomeLog::Record(&mut mirrored_rubble_events),
+                None,
+                None,
+            )
+            .expect("mirrored Rubble-land variant Crater executes");
+        let mirrored_variant_parent_hash = mirrored_rubble_variant.state_hash().unwrap();
+        let mirrored_variant_parent_actions = mirrored_rubble_variant.legal_actions().unwrap();
+        let mirrored_variant_result_hash = mirrored_rubble_result.state_hash().unwrap();
+        let mirrored_variant_result_actions = mirrored_rubble_result.legal_actions().unwrap();
+        let mut mirrored_variant_ignore = mirrored_rubble_variant.clone();
+        let mirrored_variant_ignore_cast = mirrored_variant_ignore
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == mirrored_rubble_cast.descriptor)
+            .unwrap();
+        mirrored_variant_ignore
+            .apply_action(&mirrored_variant_ignore_cast)
+            .expect("mirrored Rubble-land Ignore path executes Crater");
+        let mirrored_variant_owned_cast = mirrored_rubble_variant
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor == mirrored_rubble_cast.descriptor)
+            .unwrap();
+        let mirrored_variant_owned = mirrored_rubble_variant
+            .clone()
+            .apply_action_owned(&mirrored_variant_owned_cast)
+            .expect("mirrored Rubble-land owned path executes Crater");
+        assert_eq!(
+            mirrored_variant_ignore.position,
+            mirrored_rubble_result.position
+        );
+        assert_eq!(
+            mirrored_variant_owned.position,
+            mirrored_rubble_result.position
+        );
+        assert_eq!(
+            mirrored_variant_ignore.state_hash().unwrap(),
+            mirrored_variant_result_hash
+        );
+        assert_eq!(
+            mirrored_variant_owned.state_hash().unwrap(),
+            mirrored_variant_result_hash
+        );
+        assert_eq!(
+            mirrored_variant_ignore.legal_actions().unwrap(),
+            mirrored_variant_result_actions
+        );
+        assert_eq!(
+            mirrored_variant_owned.legal_actions().unwrap(),
+            mirrored_variant_result_actions
+        );
+        assert_eq!(
+            mirrored_rubble_variant.state_hash().unwrap(),
+            mirrored_variant_parent_hash
+        );
+        assert_eq!(
+            mirrored_rubble_variant.position,
+            mirrored_variant_parent_position
+        );
+        assert_eq!(
+            mirrored_rubble_variant.legal_actions().unwrap(),
+            mirrored_variant_parent_actions
+        );
+        assert_eq!(mirrored_rubble_result.position.phase, Phase::TriggerOrder);
+        assert!(sources.iter().all(|id| {
+            mirrored_rubble_result
+                .position
+                .units
+                .iter()
+                .any(|unit| unit.card.instance_id == *id && unit.death_marked)
+        }));
+        let mirrored_provider = mirrored_rubble_result
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == provider_id)
+            .unwrap();
+        assert_eq!(mirrored_provider.controller, Seat::North);
+        assert!(!mirrored_provider.stealthed);
+        assert!(matches!(
+            &mirrored_rubble_result.position.artifacts[0].placement,
+            ArtifactPlacement::Carried {
+                bearer: UnitTarget::Minion { instance_id, seat: Seat::North }, ..
+            } if *instance_id == provider_id
+        ));
+        let mut mirrored_orders: Vec<_> = mirrored_rubble_result
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .filter_map(|action| match action.descriptor {
+                ActionDescriptor::OrderTriggers {
+                    source_instance_id, ..
+                } => Some(source_instance_id),
+                _ => None,
+            })
+            .collect();
+        mirrored_orders.sort_unstable();
+        let mut expected_orders = sources.to_vec();
+        expected_orders.sort_unstable();
+        assert_eq!(mirrored_orders, expected_orders);
+        for first_source in mirrored_orders {
+            let mut branch = mirrored_rubble_result.clone();
+            let first = branch
+                .legal_actions()
+                .unwrap()
+                .into_iter()
+                .find(|action| {
+                    matches!(
+                        &action.descriptor,
+                        ActionDescriptor::OrderTriggers { source_instance_id, .. }
+                            if source_instance_id == &first_source
+                    )
+                })
+                .unwrap();
+            let (ordered_events, _) = branch
+                .apply_action_recorded(&first)
+                .expect("mirrored Rubble branch completes both Deathrites");
+            let drawn_sources: Vec<_> = ordered_events
+                .iter()
+                .filter(|(kind, _)| kind == "site-drawn")
+                .map(|(_, payload)| payload["sourceInstanceId"].as_str().unwrap().to_owned())
+                .collect();
+            let expected_draw_order = [
+                first_source.to_string(),
+                sources
+                    .iter()
+                    .find(|source| **source != first_source)
+                    .unwrap()
+                    .to_string(),
+            ];
+            assert_eq!(drawn_sources, expected_draw_order);
+            assert_draw_source_seats(&ordered_events, &sources, &first_source, Seat::South);
+            assert!(branch.position.pending_deathrites.is_none());
+            assert_eq!(branch.position.phase, Phase::Main);
+            assert!(sources.iter().all(|id| {
+                branch.position.players[seat_index(Seat::South)]
+                    .cemetery
+                    .iter()
+                    .any(|card| card.instance_id == *id)
+            }));
+            assert_eq!(
+                ordered_events
+                    .iter()
+                    .filter(|(kind, _)| kind == "magic-resolved")
+                    .count(),
+                1
+            );
+            let retained_parent_position = mirrored_rubble_result.position.clone();
+            let parent_hash = mirrored_rubble_result.state_hash().unwrap();
+            let parent_actions = mirrored_rubble_result.legal_actions().unwrap();
+            let ignored_complete = complete_order_ignore(&mirrored_rubble_result, &first_source);
+            let owned_complete = complete_order_owned(&mirrored_rubble_result, &first_source);
+            assert_eq!(ignored_complete.position, branch.position);
+            assert_eq!(owned_complete.position, branch.position);
+            assert_eq!(
+                ignored_complete.state_hash().unwrap(),
+                branch.state_hash().unwrap()
+            );
+            assert_eq!(
+                owned_complete.state_hash().unwrap(),
+                branch.state_hash().unwrap()
+            );
+            assert_eq!(
+                ignored_complete.legal_actions().unwrap(),
+                branch.legal_actions().unwrap()
+            );
+            assert_eq!(
+                owned_complete.legal_actions().unwrap(),
+                branch.legal_actions().unwrap()
+            );
+            assert_eq!(mirrored_rubble_result.position, retained_parent_position);
+            assert_eq!(mirrored_rubble_result.state_hash().unwrap(), parent_hash);
+            assert_eq!(
+                mirrored_rubble_result.legal_actions().unwrap(),
+                parent_actions
+            );
+        }
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "keeps the approved Rubble footprint and region control matrix in one proof"
+    )]
+    fn landbound_rubble_footprint_and_region_classification_controls() {
+        let cells = [
+            Cell::parse("B3").unwrap(),
+            Cell::parse("C3").unwrap(),
+            Cell::parse("B4").unwrap(),
+            Cell::parse("C4").unwrap(),
+        ];
+        let (mut game, _) = marked_lifecycle_fixture(false, false);
+        let template_cell = Cell::parse("C3").unwrap();
+        let template = game.position.sites[template_cell.index()]
+            .as_ref()
+            .expect("template Site")
+            .clone();
+        let site_definition = template.card.card_id;
+        let CardFacts::Site(site_facts) = &mut Arc::get_mut(&mut game.rules)
+            .expect("unshared rules")
+            .cards[usize::from(site_definition.0)]
+        .facts
+        else {
+            panic!("template is a Site")
+        };
+        site_facts.elements = ElementSet::empty().with(Element::Water);
+        for cell in cells {
+            game.position.sites[cell.index()] = Some(template.clone());
+            game.position.rubble[cell.index()] = None;
+        }
+        game.position.sites[cells[1].index()] = None;
+        game.position.rubble[cells[1].index()] =
+            Some(identity_hash(&json!({"fixture":"footprint-rubble"})).unwrap());
+
+        let landbound_card = game.position.players[seat_index(Seat::South)]
+            .spellbook
+            .pop()
+            .expect("Landbound card");
+        let landbound_definition = landbound_card.card_id;
+        let CardFacts::Minion(landbound_facts) = &mut Arc::get_mut(&mut game.rules)
+            .expect("unshared rules")
+            .cards[usize::from(landbound_definition.0)]
+        .facts
+        else {
+            panic!("Landbound is a Minion")
+        };
+        landbound_facts.landbound = true;
+        landbound_facts.burrowing = true;
+        landbound_facts.submerge = true;
+        let landbound_id = landbound_card.instance_id.clone();
+        let mut unit = SummonPlacement {
+            card: landbound_card,
+            controller: Seat::South,
+            lance_count: 0,
+            location: cells[0],
+            occupied_cells: Some(cells),
+            region: Region::Surface,
+            stealthed: false,
+            warded: false,
+        }
+        .into_unit();
+        unit.damage = 2;
+        assert!(!game.minion_is_disabled(&unit));
+        game.position.sites[cells[1].index()] = Some(template.clone());
+        game.position.rubble[cells[1].index()] = None;
+        assert!(
+            game.minion_is_disabled(&unit),
+            "all-Water footprint is disabled"
+        );
+        game.position.sites[cells[1].index()] = None;
+        game.position.rubble[cells[1].index()] =
+            Some(identity_hash(&json!({"fixture":"footprint-rubble-again"})).unwrap());
+        assert!(
+            !game.minion_is_disabled(&unit),
+            "any Land cell enables the footprint"
+        );
+        unit.disabled_until_damaged = true;
+        assert!(game.minion_is_disabled(&unit));
+        unit.disabled_until_damaged = false;
+        unit.disable_effects.push(DisableEffect {
+            expires_at_seat: Seat::North,
+            source_instance_id: landbound_id.clone(),
+        });
+        assert!(game.minion_is_disabled(&unit));
+        unit.disable_effects.clear();
+        unit.temporary_modifiers
+            .grant(TemporaryModifierKind::Silence, 1, landbound_id.clone());
+        assert!(game.minion_abilities_lost(&unit));
+        unit.temporary_modifiers
+            .take(TemporaryModifierKind::Silence);
+        assert!(!game.minion_abilities_lost(&unit));
+
+        let artifact_card = game.position.players[seat_index(Seat::South)]
+            .spellbook
+            .iter()
+            .position(|card| {
+                matches!(
+                    game.rules.cards[usize::from(card.card_id.0)].facts,
+                    CardFacts::Artifact(_)
+                )
+            })
+            .map(|index| {
+                game.position.players[seat_index(Seat::South)]
+                    .spellbook
+                    .remove(index)
+            })
+            .expect("loose Artifact card");
+        let mut artifact_card = artifact_card;
+        artifact_card.enter_realm().unwrap();
+        let artifact_id = artifact_card.instance_id.clone();
+        unit.region = Region::Underwater;
+        game.position.units.push(unit);
+        game.position.artifacts.push(ArtifactPosition {
+            card: artifact_card,
+            placement: ArtifactPlacement::Loose {
+                location: cells[1],
+                region: Region::Underwater,
+            },
+        });
+        game.settle_overlay_layers(&cells);
+        let settled_unit = game
+            .position
+            .units
+            .iter()
+            .find(|candidate| candidate.card.instance_id == landbound_id)
+            .unwrap();
+        assert_eq!(settled_unit.region, Region::Underground);
+        assert_eq!(settled_unit.damage, 2);
+        assert_eq!(settled_unit.controller, Seat::South);
+        assert_eq!(game.position.artifacts[0].card.instance_id, artifact_id);
+        assert!(matches!(
+            game.position.artifacts[0].placement,
+            ArtifactPlacement::Loose {
+                location,
+                region: Region::Underground
+            } if location == cells[1]
+        ));
+
+        game.position.sites[cells[1].index()] = Some(template);
+        game.position.rubble[cells[1].index()] = None;
+        let all_water_unit = game
+            .position
+            .units
+            .iter_mut()
+            .find(|candidate| candidate.card.instance_id == landbound_id)
+            .expect("same footprint Landbound occurrence");
+        all_water_unit.region = Region::Underwater;
+        all_water_unit.damage = 2;
+        all_water_unit.controller = Seat::South;
+        game.position.artifacts[0].placement = ArtifactPlacement::Loose {
+            location: cells[1],
+            region: Region::Underwater,
+        };
+        game.settle_overlay_layers(&cells);
+        let all_water_unit = game
+            .position
+            .units
+            .iter()
+            .find(|candidate| candidate.card.instance_id == landbound_id)
+            .expect("same footprint Landbound occurrence survives all-Water relayer");
+        assert_eq!(all_water_unit.region, Region::Underwater);
+        assert_eq!(all_water_unit.damage, 2);
+        assert_eq!(all_water_unit.controller, Seat::South);
+        assert!(matches!(
+            game.position.artifacts[0].placement,
+            ArtifactPlacement::Loose {
+                region: Region::Underwater,
+                ..
+            }
+        ));
+
+        game.position.rubble[cells[1].index()] =
+            Some(identity_hash(&json!({"fixture":"mixed-rubble"})).unwrap());
+        let mut straddling_void = game
+            .position
+            .units
+            .iter()
+            .find(|candidate| candidate.card.instance_id == landbound_id)
+            .expect("same footprint Landbound occurrence")
+            .clone();
+        straddling_void.region = Region::Surface;
+        straddling_void.occupied_cells =
+            Some([cells[1], Cell::parse("A1").unwrap(), cells[2], cells[3]]);
+        assert!(matches!(
+            game.region_disposition(&straddling_void),
+            RegionDisposition::Dies
+        ));
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "builds both approved real-terrain Rubble layer scenarios without new abstractions"
+    )]
+    fn rubble_layer_fixture(
+        water_site: bool,
+        submerge_only: bool,
+    ) -> (Game, Cell, IdentityHash, IdentityHash, IdentityHash) {
+        let (mut game, _) = marked_lifecycle_fixture(false, false);
+        game.position.units.clear();
+        game.position.artifacts.clear();
+        game.position.auras.clear();
+        let cell = Cell::parse("C3").unwrap();
+        let site_id = game.position.sites[cell.index()]
+            .as_ref()
+            .expect("test Site")
+            .card
+            .card_id;
+        let CardFacts::Site(site_facts) = &mut Arc::get_mut(&mut game.rules)
+            .expect("unshared rules")
+            .cards[usize::from(site_id.0)]
+        .facts
+        else {
+            panic!("test location is a Site")
+        };
+        site_facts.elements = if water_site {
+            ElementSet::empty().with(Element::Water)
+        } else {
+            ElementSet::empty().with(Element::Earth)
+        };
+
+        let facts = |id: &str, value: Value| {
+            crate::facts::parse_card_definition(id, &value).expect("test card facts")
+        };
+        let replacements = [
+            (
+                "north-spell-44",
+                json!({"cardType":"magic","destroyTargetSite":true,"manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0}}),
+            ),
+            (
+                "north-spell-45",
+                json!({"cardType":"aura","affectedSitesAreFlooded":true,"manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0}}),
+            ),
+            (
+                "north-spell-46",
+                json!({"cardType":"aura","affectedSitesAreFlooded":true,"manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0}}),
+            ),
+            (
+                "north-spell-47",
+                json!({"cardType":"aura","affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold":true,"manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0}}),
+            ),
+            (
+                "north-spell-48",
+                json!({"cardType":"magic","burrowTargetMinionOrArtifact":true,"manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0}}),
+            ),
+            (
+                "north-spell-49",
+                json!({"cardType":"magic","burrowTargetMinionOrArtifact":true,"manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0}}),
+            ),
+        ];
+        for (id, value) in replacements {
+            let index = game
+                .rules
+                .cards
+                .binary_search_by(|definition| definition.id.as_str().cmp(id))
+                .unwrap();
+            Arc::get_mut(&mut game.rules).unwrap().cards[index].facts = facts(id, value);
+        }
+        let artifact_index = game
+            .rules
+            .cards
+            .binary_search_by(|definition| definition.id.as_str().cmp("north-spell-43"))
+            .unwrap();
+        let source_artifact_index = game
+            .rules
+            .cards
+            .binary_search_by(|definition| definition.id.as_str().cmp("south-spell-50"))
+            .unwrap();
+        let artifact_facts = game.rules.cards[source_artifact_index].facts.clone();
+        Arc::get_mut(&mut game.rules).unwrap().cards[artifact_index].facts = artifact_facts;
+
+        let take_spell = |game: &mut Game, id: &str| {
+            let player = &mut game.position.players[seat_index(Seat::North)];
+            let index = player
+                .spellbook
+                .iter()
+                .position(|card| game.rules.cards[usize::from(card.card_id.0)].id == id)
+                .expect("test spellbook card");
+            player.spellbook.remove(index)
+        };
+        let landbound_card = take_spell(&mut game, "north-spell-3");
+        let landbound_definition = landbound_card.card_id;
+        let CardFacts::Minion(landbound_facts) = &mut Arc::get_mut(&mut game.rules).unwrap().cards
+            [usize::from(landbound_definition.0)]
+        .facts
+        else {
+            panic!("Landbound is a Minion")
+        };
+        landbound_facts.landbound = true;
+        landbound_facts.attack = 2;
+        landbound_facts.defense = 4;
+        landbound_facts.deathrite_damage_each_unit_here = None;
+        landbound_facts.deathrite_draw_site = false;
+        let landbound_id = landbound_card.instance_id.clone();
+        let mut landbound = SummonPlacement {
+            card: landbound_card,
+            controller: Seat::North,
+            lance_count: 0,
+            location: cell,
+            occupied_cells: None,
+            region: Region::Surface,
+            stealthed: false,
+            warded: false,
+        }
+        .into_unit();
+        landbound.summoning_sickness = false;
+
+        let burrow_card = take_spell(&mut game, "north-spell-4");
+        let burrow_definition = burrow_card.card_id;
+        let CardFacts::Minion(burrow_facts) = &mut Arc::get_mut(&mut game.rules).unwrap().cards
+            [usize::from(burrow_definition.0)]
+        .facts
+        else {
+            panic!("Submerge minion is a Minion")
+        };
+        burrow_facts.attack = 1;
+        burrow_facts.defense = 4;
+        burrow_facts.deathrite_damage_each_unit_here = None;
+        burrow_facts.deathrite_draw_site = false;
+        burrow_facts.burrowing = !submerge_only;
+        burrow_facts.submerge = true;
+        let burrow_id = burrow_card.instance_id.clone();
+        let mut burrow = SummonPlacement {
+            card: burrow_card,
+            controller: Seat::North,
+            lance_count: 0,
+            location: cell,
+            occupied_cells: None,
+            region: Region::Surface,
+            stealthed: false,
+            warded: false,
+        }
+        .into_unit();
+        burrow.summoning_sickness = false;
+        game.position.units.extend([landbound, burrow]);
+
+        for id in [
+            "north-spell-44",
+            "north-spell-45",
+            "north-spell-46",
+            "north-spell-47",
+            "north-spell-48",
+            "north-spell-49",
+            "north-spell-43",
+        ] {
+            let card = take_spell(&mut game, id);
+            game.position.players[seat_index(Seat::North)]
+                .hand_spellbook
+                .push(card);
+        }
+        let artifact_id = game.position.players[seat_index(Seat::North)]
+            .hand_spellbook
+            .iter()
+            .find(|card| game.rules.cards[usize::from(card.card_id.0)].id == "north-spell-43")
+            .unwrap()
+            .instance_id
+            .clone();
+        for seat in [Seat::North, Seat::South] {
+            game.position.players[seat_index(seat)].domain_established = true;
+            game.position.players[seat_index(seat)].mana = 20;
+        }
+        game.position.phase = Phase::Main;
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.turn_controller = Some(Seat::North);
+        (game, cell, landbound_id, burrow_id, artifact_id)
+    }
+
+    fn play_game_action(
+        game: &mut Game,
+        predicate: impl Fn(&ActionDescriptor) -> bool,
+        label: &str,
+    ) -> Vec<(String, Value)> {
+        let action = game
+            .legal_actions()
+            .expect("issued actions")
+            .into_iter()
+            .find(|action| predicate(&action.descriptor))
+            .unwrap_or_else(|| panic!("issued {label} action"));
+        game.apply_action_recorded(&action)
+            .unwrap_or_else(|error| panic!("{label} resolves: {error}"))
+            .0
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "proves Rubble overlays and flooded Site replacement preserve both lower layers"
+    )]
+    fn rubble_terrain_overlay_and_site_destruction_keep_actual_region() {
+        let (mut land, cell, landbound_id, burrow_id, artifact_id) =
+            rubble_layer_fixture(false, false);
+        let site_id = land.position.sites[cell.index()]
+            .as_ref()
+            .unwrap()
+            .card
+            .instance_id
+            .clone();
+        play_game_action(
+            &mut land,
+            |descriptor| matches!(descriptor, ActionDescriptor::CastArtifact { card_id, cell: Some(target), .. } if card_id == "north-spell-43" && target == &cell),
+            "loose Artifact conjuration",
+        );
+        play_game_action(
+            &mut land,
+            |descriptor| matches!(descriptor, ActionDescriptor::CastMagic { card_id, target: Some(target), .. } if card_id == "north-spell-48" && target.instance_id() == &burrow_id),
+            "Bury the compatible minion",
+        );
+        play_game_action(
+            &mut land,
+            |descriptor| matches!(descriptor, ActionDescriptor::CastMagic { card_id, target_artifact_instance_id: Some(target), .. } if card_id == "north-spell-49" && target == &artifact_id),
+            "Bury the loose Artifact",
+        );
+        assert_eq!(
+            land.position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == burrow_id)
+                .unwrap()
+                .region,
+            Region::Underground
+        );
+        assert!(matches!(
+            land.position.artifacts[0].placement,
+            ArtifactPlacement::Loose {
+                region: Region::Underground,
+                ..
+            }
+        ));
+        play_game_action(
+            &mut land,
+            |descriptor| matches!(descriptor, ActionDescriptor::CastMagic { card_id, target_site_instance_id: Some(target), .. } if card_id == "north-spell-44" && target == &site_id),
+            "destroy the Land Site",
+        );
+        assert!(land.position.sites[cell.index()].is_none());
+        assert!(land.position.rubble[cell.index()].is_some());
+        assert!(
+            !land.minion_is_disabled(
+                land.position
+                    .units
+                    .iter()
+                    .find(|unit| unit.card.instance_id == landbound_id)
+                    .unwrap()
+            )
+        );
+        assert_eq!(
+            land.position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == burrow_id)
+                .unwrap()
+                .region,
+            Region::Underground
+        );
+        assert!(matches!(
+            land.position.artifacts[0].placement,
+            ArtifactPlacement::Loose {
+                region: Region::Underground,
+                ..
+            }
+        ));
+        play_game_action(
+            &mut land,
+            |descriptor| matches!(descriptor, ActionDescriptor::CastAura { card_id, cells, .. } if card_id == "north-spell-45" && cells.contains(&cell)),
+            "Flood the Rubble",
+        );
+        assert!(land.is_water_site(cell));
+        assert!(
+            land.minion_is_disabled(
+                land.position
+                    .units
+                    .iter()
+                    .find(|unit| unit.card.instance_id == landbound_id)
+                    .unwrap()
+            )
+        );
+        assert_eq!(
+            land.position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == burrow_id)
+                .unwrap()
+                .region,
+            Region::Underwater
+        );
+        assert!(matches!(
+            land.position.artifacts[0].placement,
+            ArtifactPlacement::Loose {
+                region: Region::Underwater,
+                ..
+            }
+        ));
+        play_game_action(
+            &mut land,
+            |descriptor| matches!(descriptor, ActionDescriptor::CastAura { card_id, cells, .. } if card_id == "north-spell-47" && cells.contains(&cell)),
+            "Drought the Rubble",
+        );
+        assert!(land.is_land_site(cell));
+        assert!(
+            !land.minion_is_disabled(
+                land.position
+                    .units
+                    .iter()
+                    .find(|unit| unit.card.instance_id == landbound_id)
+                    .unwrap()
+            )
+        );
+        assert_eq!(
+            land.position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == burrow_id)
+                .unwrap()
+                .region,
+            Region::Underground
+        );
+        assert!(matches!(
+            land.position.artifacts[0].placement,
+            ArtifactPlacement::Loose {
+                region: Region::Underground,
+                ..
+            }
+        ));
+        play_game_action(
+            &mut land,
+            |descriptor| matches!(descriptor, ActionDescriptor::CastAura { card_id, cells, .. } if card_id == "north-spell-46" && cells.contains(&cell)),
+            "latest Flood wins on Rubble",
+        );
+        assert!(land.is_water_site(cell));
+        assert_eq!(
+            land.position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == burrow_id)
+                .unwrap()
+                .region,
+            Region::Underwater
+        );
+
+        let (mut flooded, cell, _, burrow_id, artifact_id) = rubble_layer_fixture(false, true);
+        let submerge_index = flooded
+            .rules
+            .cards
+            .binary_search_by(|definition| definition.id.as_str().cmp("north-spell-48"))
+            .unwrap();
+        Arc::get_mut(&mut flooded.rules).unwrap().cards[submerge_index].facts =
+            crate::facts::parse_card_definition(
+                "north-spell-48",
+                &json!({"cardType":"magic","submergeTargetMinion":true,"manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0}}),
+            )
+            .unwrap();
+        let site_id = flooded.position.sites[cell.index()]
+            .as_ref()
+            .unwrap()
+            .card
+            .instance_id
+            .clone();
+        play_game_action(
+            &mut flooded,
+            |descriptor| matches!(descriptor, ActionDescriptor::CastArtifact { card_id, cell: Some(target), .. } if card_id == "north-spell-43" && target == &cell),
+            "loose Artifact conjuration on Land Site",
+        );
+        play_game_action(
+            &mut flooded,
+            |descriptor| matches!(descriptor, ActionDescriptor::CastMagic { card_id, target_artifact_instance_id: Some(target), .. } if card_id == "north-spell-49" && target == &artifact_id),
+            "Bury loose Artifact on Land Site",
+        );
+        play_game_action(
+            &mut flooded,
+            |descriptor| matches!(descriptor, ActionDescriptor::CastAura { card_id, cells, .. } if card_id == "north-spell-45" && cells.contains(&cell)),
+            "Flood the Water Site",
+        );
+        play_game_action(
+            &mut flooded,
+            |descriptor| matches!(descriptor, ActionDescriptor::CastMagic { card_id, target: Some(target), .. } if card_id == "north-spell-48" && target.instance_id() == &burrow_id),
+            "Submerge Submerge-only minion at Water Site",
+        );
+        assert_eq!(
+            flooded
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == burrow_id)
+                .unwrap()
+                .region,
+            Region::Underwater
+        );
+        assert!(matches!(
+            flooded.position.artifacts[0].placement,
+            ArtifactPlacement::Loose {
+                region: Region::Underwater,
+                ..
+            }
+        ));
+        let events = play_game_action(
+            &mut flooded,
+            |descriptor| matches!(descriptor, ActionDescriptor::CastMagic { card_id, target_site_instance_id: Some(target), .. } if card_id == "north-spell-44" && target == &site_id),
+            "destroy Flooded Water Site",
+        );
+        assert!(events.iter().any(|(kind, _)| kind == "site-destroyed"));
+        assert!(events.iter().any(|(kind, _)| kind == "rubble-created"));
+        assert!(flooded.position.sites[cell.index()].is_none());
+        assert!(flooded.position.rubble[cell.index()].is_some());
+        assert!(flooded.is_water_site(cell));
+        assert_eq!(
+            flooded
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == burrow_id)
+                .unwrap()
+                .region,
+            Region::Underwater
+        );
+        assert!(matches!(
+            flooded.position.artifacts[0].placement,
+            ArtifactPlacement::Loose {
+                region: Region::Underwater,
+                ..
+            }
+        ));
+        assert!(matches!(
+            flooded.region_disposition(
+                flooded
+                    .position
+                    .units
+                    .iter()
+                    .find(|unit| unit.card.instance_id == burrow_id)
+                    .unwrap()
+            ),
+            RegionDisposition::Survives
+        ));
+
+        let (mut fate, cell, _, burrow_id, artifact_id) = rubble_layer_fixture(true, false);
+        fate.position
+            .units
+            .retain(|unit| unit.card.instance_id == burrow_id);
+        let fate_source_index = fate
+            .rules
+            .cards
+            .binary_search_by(|definition| definition.id.as_str().cmp("north-spell-46"))
+            .unwrap();
+        Arc::get_mut(&mut fate.rules).unwrap().cards[fate_source_index].facts =
+            crate::facts::parse_card_definition(
+                "north-spell-46",
+                &json!({
+                    "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities": true,
+                    "cardType":"aura", "manaCost":0,
+                    "thresholds":{"air":0,"earth":0,"fire":0,"water":0}
+                }),
+            )
+            .unwrap();
+        let site_id = fate.position.sites[cell.index()]
+            .as_ref()
+            .unwrap()
+            .card
+            .instance_id
+            .clone();
+        play_game_action(
+            &mut fate,
+            |descriptor| matches!(descriptor, ActionDescriptor::CastArtifact { card_id, cell: Some(target), .. } if card_id == "north-spell-43" && target == &cell),
+            "loose Artifact for Fate replacement drain",
+        );
+        play_game_action(
+            &mut fate,
+            |descriptor| matches!(descriptor, ActionDescriptor::CastAura { card_id, cells, .. } if card_id == "north-spell-46" && cells.contains(&cell)),
+            "Fate submerges occupants of the non-Ordinary Water Site",
+        );
+        assert!(fate.is_water_site(cell));
+        assert_eq!(
+            fate.position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == burrow_id)
+                .unwrap()
+                .region,
+            Region::Underwater
+        );
+        assert!(matches!(
+            fate.position.artifacts[0].placement,
+            ArtifactPlacement::Loose {
+                region: Region::Underwater,
+                ..
+            }
+        ));
+        let events = play_game_action(
+            &mut fate,
+            |descriptor| matches!(descriptor, ActionDescriptor::CastMagic { card_id, target_site_instance_id: Some(target), .. } if card_id == "north-spell-44" && target == &site_id),
+            "Fate-only Water Site replacement with Ordinary Rubble",
+        );
+        assert!(events.iter().any(|(kind, _)| kind == "site-destroyed"));
+        assert!(events.iter().any(|(kind, _)| kind == "rubble-created"));
+        assert!(fate.position.sites[cell.index()].is_none());
+        assert!(fate.position.rubble[cell.index()].is_some());
+        assert!(!fate.is_water_site(cell));
+        assert!(fate.is_land_site(cell));
+        assert_eq!(
+            fate.position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == burrow_id)
+                .unwrap()
+                .region,
+            Region::Underground
+        );
+        assert!(matches!(
+            fate.position.artifacts[0].placement,
+            ArtifactPlacement::Loose {
+                region: Region::Underground,
+                ..
+            }
+        ));
+        assert_eq!(fate.position.artifacts[0].card.instance_id, artifact_id);
     }
 }

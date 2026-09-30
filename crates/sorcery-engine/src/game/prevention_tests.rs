@@ -595,11 +595,13 @@ fn silenced_provider_does_not_remove_enemy_stealth_until_its_ability_returns() {
         .temporary_modifiers
         .grant(TemporaryModifierKind::Silence, 1, provider);
     game.position.units[1].stealthed = true;
-    game.settle_nearby_enemy_stealth(&mut OutcomeLog::Ignore);
+    game.settle_nearby_enemy_stealth(&mut OutcomeLog::Ignore)
+        .expect("nearby Stealth settlement");
     assert!(game.position.units[1].stealthed);
     game.position.units[0]
         .temporary_modifiers
         .take(TemporaryModifierKind::Silence);
-    game.settle_nearby_enemy_stealth(&mut OutcomeLog::Ignore);
+    game.settle_nearby_enemy_stealth(&mut OutcomeLog::Ignore)
+        .expect("nearby Stealth settlement");
     assert!(!game.position.units[1].stealthed);
 }

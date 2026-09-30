@@ -8,6 +8,10 @@
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
+use sorcery_engine::checkpoint::{
+    create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+    serialize_game_checkpoint,
+};
 use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::session::{Session, StepResult};
 
@@ -59,6 +63,60 @@ fn landbound() -> Value {
         "cardType": "minion",
         "defense": 2,
         "landbound": true,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn submerge_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "submerge": true,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn dual_region_minion() -> Value {
+    let mut value = submerge_minion();
+    value["burrowing"] = json!(true);
+    value
+}
+
+fn submerge_magic() -> Value {
+    json!({
+        "cardType": "magic",
+        "manaCost": 0,
+        "submergeTargetMinion": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn destroy_site_magic() -> Value {
+    json!({
+        "cardType": "magic",
+        "destroyTargetSite": true,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn artifact() -> Value {
+    json!({
+        "cardType": "artifact",
+        "grantsBearerPower": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn bury_artifact_magic() -> Value {
+    json!({
+        "burrowTargetMinionOrArtifact": true,
+        "cardType": "magic",
         "manaCost": 0,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
@@ -256,6 +314,95 @@ fn composition_manifest(seed: u32) -> String {
     sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
 }
 
+fn rubble_flood_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "terrain-aura-flooded-rubble" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-terrain-aura-flooded-rubble-v1",
+        },
+        "cards": {
+            "north-artifact": artifact(),
+            "north-avatar": avatar(),
+            "north-bury": bury_artifact_magic(),
+            "north-destroy": destroy_site_magic(),
+            "north-drought": drought(),
+            "north-flood": flood(),
+            "north-landbound": landbound(),
+            "north-site": site(),
+            "north-submerge": submerge_magic(),
+            "north-swimmer": dual_region_minion(),
+            "south-avatar": avatar(),
+            "south-minion": minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 12],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-swimmer", "north-artifact", "north-bury", "north-flood",
+                    "north-submerge", "north-destroy", "north-bury", "north-flood",
+                    "north-submerge", "north-destroy", "north-bury", "north-swimmer",
+                    "north-landbound", "north-drought", "north-flood",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 12],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn swap_seat_label(label: &str) -> String {
+    if label == "north" {
+        "south".to_owned()
+    } else if label == "south" {
+        "north".to_owned()
+    } else if let Some(suffix) = label.strip_prefix("north-") {
+        format!("south-{suffix}")
+    } else if let Some(suffix) = label.strip_prefix("south-") {
+        format!("north-{suffix}")
+    } else {
+        label.to_owned()
+    }
+}
+
+fn mirror_manifest_seats(value: Value) -> Value {
+    match value {
+        Value::String(label) => Value::String(swap_seat_label(&label)),
+        Value::Array(items) => Value::Array(items.into_iter().map(mirror_manifest_seats).collect()),
+        Value::Object(object) => Value::Object(
+            object
+                .into_iter()
+                .map(|(key, value)| (swap_seat_label(&key), mirror_manifest_seats(value)))
+                .collect(),
+        ),
+        value => value,
+    }
+}
+
+fn rubble_flood_manifest_for(seed: u32, first: &str) -> String {
+    let encoded = rubble_flood_manifest(seed);
+    if first == "north" {
+        return encoded;
+    }
+    let mut value = mirror_manifest_seats(serde_json::from_str(&encoded).unwrap());
+    value.as_object_mut().unwrap().remove("manifestId");
+    value["firstSeat"] = json!(first);
+    value["manifestId"] = json!(identity_hash(&value).expect("mirrored manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical mirrored manifest")
+}
+
 fn composition_opening() -> Session {
     (1..=4096)
         .map(composition_manifest)
@@ -432,6 +579,371 @@ fn assert_exact_replay(session: &Session) {
     );
     assert_eq!(replayed.transcript(), session.transcript());
     assert!(session.verify_replay().expect("verified replay"));
+}
+
+fn full_session_fingerprint(session: &Session) -> Value {
+    let checkpoint = create_game_checkpoint(session).expect("complete Session checkpoint");
+    json!({
+        "checkpoint": serialize_game_checkpoint(&checkpoint).expect("checkpoint bytes"),
+        "stateHash": session.state_hash().expect("state hash"),
+        "sessionHash": session.session_hash().expect("session hash"),
+        "replay": session.replay_value().expect("replay envelope"),
+        "transcript": session.transcript(),
+        "northView": session.public_view(Seat::North).unwrap(),
+        "southView": session.public_view(Seat::South).unwrap(),
+        "legalActions": serde_json::to_value(session.legal_actions().unwrap()).unwrap(),
+    })
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "keeps the required flooded Rubble Session setup, checkpoint, and replay proof together"
+)]
+fn flooded_site_to_rubble_keeps_submerged_occupants_and_artifact_region() {
+    for caster in ["north", "south"] {
+        let target_cell = if caster == "north" { "C4" } else { "C1" };
+        let opponent_cell = if caster == "north" { "C1" } else { "C4" };
+        let swimmer_card = format!("{caster}-swimmer");
+        let artifact_card = format!("{caster}-artifact");
+        let bury_card = format!("{caster}-bury");
+        let drought_card = format!("{caster}-drought");
+        let flood_card = format!("{caster}-flood");
+        let landbound_card = format!("{caster}-landbound");
+        let submerge_card = format!("{caster}-submerge");
+        let destroy_card = format!("{caster}-destroy");
+        let mut selected = None;
+        for seed in 1..=4096 {
+            let mut session = Session::new(&rubble_flood_manifest_for(seed, caster))
+                .expect("flooded rubble candidate");
+            let hand = opening_spell_ids(&session, caster);
+            let has = |card: &str| hand.iter().any(|id| id == card);
+            if !(has(&swimmer_card) && has(&artifact_card)) {
+                continue;
+            }
+
+            keep(&mut session);
+            keep(&mut session);
+            play_site_at(&mut session, target_cell);
+            let (summoned, _) = accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "summon-minion"
+                    && descriptor["cardId"] == swimmer_card
+                    && descriptor["cell"] == target_cell
+            });
+            let swimmer_id = summoned["cardInstanceId"].as_str().unwrap().to_owned();
+            let (artifact_cast, _) = accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "cast-artifact"
+                    && descriptor["cardId"] == artifact_card
+                    && descriptor["cell"] == target_cell
+                    && descriptor["bearer"].is_null()
+            });
+            let artifact_id = artifact_cast["cardInstanceId"].as_str().unwrap().to_owned();
+            let mut opponent_site_played = false;
+            let mut buried = false;
+            let mut flooded = false;
+            let mut submerged = false;
+            let mut landbound_summoned = false;
+            let mut landbound_id = String::new();
+            for _ in 0..16 {
+                if !buried
+                    && offers(&session, |descriptor| {
+                        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == bury_card
+                    })
+                {
+                    accept_where(&mut session, |descriptor| {
+                        descriptor["kind"] == "cast-magic"
+                            && descriptor["cardId"] == bury_card
+                            && descriptor["targetArtifactInstanceId"] == artifact_id
+                    });
+                    buried = true;
+                }
+                if !landbound_summoned
+                    && offers(&session, |descriptor| {
+                        descriptor["kind"] == "summon-minion"
+                            && descriptor["cardId"] == landbound_card
+                            && descriptor["cell"] == target_cell
+                    })
+                {
+                    let (summoned, _) = accept_where(&mut session, |descriptor| {
+                        descriptor["kind"] == "summon-minion"
+                            && descriptor["cardId"] == landbound_card
+                            && descriptor["cell"] == target_cell
+                    });
+                    landbound_id = summoned["cardInstanceId"].as_str().unwrap().to_owned();
+                    landbound_summoned = true;
+                }
+                if buried
+                    && landbound_summoned
+                    && !flooded
+                    && offers(&session, |descriptor| {
+                        descriptor["kind"] == "cast-aura" && descriptor["cardId"] == flood_card
+                    })
+                {
+                    cast_covering(&mut session, &flood_card, target_cell);
+                    flooded = true;
+                }
+                if flooded && !submerged {
+                    if observed_unit(&session, &swimmer_id)["region"] == "underwater" {
+                        submerged = true;
+                    } else if offers(&session, |descriptor| {
+                        descriptor["kind"] == "cast-magic"
+                            && descriptor["cardId"] == submerge_card
+                            && descriptor["target"]["instanceId"] == swimmer_id
+                    }) {
+                        accept_where(&mut session, |descriptor| {
+                            descriptor["kind"] == "cast-magic"
+                                && descriptor["cardId"] == submerge_card
+                                && descriptor["target"]["instanceId"] == swimmer_id
+                        });
+                        submerged = true;
+                    }
+                }
+                if flooded
+                    && submerged
+                    && landbound_summoned
+                    && offers(&session, |descriptor| {
+                        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == destroy_card
+                    })
+                {
+                    let current_state = state(&session);
+                    let hand = current_state["players"][caster]["hand"]["spellbook"]
+                        .as_array()
+                        .unwrap();
+                    if hand.iter().any(|card| card["cardId"] == drought_card)
+                        && hand.iter().any(|card| card["cardId"] == flood_card)
+                    {
+                        selected = Some((seed, session, swimmer_id, artifact_id, landbound_id));
+                        break;
+                    }
+                }
+
+                end_then_draw(&mut session, "spellbook");
+                if !opponent_site_played {
+                    play_site_at(&mut session, opponent_cell);
+                    opponent_site_played = true;
+                }
+                end_then_draw(&mut session, "spellbook");
+            }
+            if selected.is_some() {
+                break;
+            }
+        }
+        let (seed, mut session, swimmer_id, artifact_id, landbound_id) = selected
+            .expect("bounded seed that draws both overlay Auras, Landbound, Submerge, and Destroy");
+
+        let submerged = observed_unit(&session, &swimmer_id);
+        assert_eq!(submerged["region"], "underwater");
+        let pre_artifact = state(&session)["realm"]["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|value| value["instanceId"] == artifact_id)
+            .unwrap()
+            .clone();
+        assert_eq!(pre_artifact["region"], "underwater");
+        assert_eq!(observed_unit(&session, &landbound_id)["disabled"], true);
+        assert_eq!(observed_unit(&session, &landbound_id)["region"], "surface");
+
+        let pre_parent = session.clone();
+        let pre_parent_fingerprint = full_session_fingerprint(&pre_parent);
+        let pre_checkpoint =
+            create_game_checkpoint(&session).expect("flooded Site pre-destroy checkpoint");
+        let pre_serialized =
+            serialize_game_checkpoint(&pre_checkpoint).expect("serialize pre-destroy");
+        let mut branch = resume_game_checkpoint(
+            &parse_game_checkpoint(&pre_serialized).expect("parse pre-destroy"),
+        )
+        .expect("resume pre-destroy");
+        assert_eq!(
+            branch.replay_value().unwrap(),
+            session.replay_value().unwrap()
+        );
+        assert_eq!(
+            branch.session_hash().unwrap(),
+            session.session_hash().unwrap()
+        );
+        assert_eq!(
+            branch.public_view(Seat::North).unwrap(),
+            session.public_view(Seat::North).unwrap()
+        );
+        assert_eq!(
+            branch.public_view(Seat::South).unwrap(),
+            session.public_view(Seat::South).unwrap()
+        );
+        assert_eq!(
+            branch.legal_actions().unwrap(),
+            session.legal_actions().unwrap()
+        );
+
+        let (destroy_descriptor, destroy_receipt) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic"
+                && descriptor["cardId"] == destroy_card
+                && descriptor["targetLocation"]["cell"] == target_cell
+        });
+        assert!(
+            destroy_receipt
+                .events
+                .iter()
+                .any(|event| event.event_type == "site-destroyed")
+        );
+        assert!(
+            destroy_receipt
+                .events
+                .iter()
+                .any(|event| event.event_type == "rubble-created")
+        );
+        let after_site = state(&session)["realm"]["sites"][target_cell].clone();
+        assert_eq!(after_site["rubble"], true);
+        assert_eq!(observed_unit(&session, &swimmer_id)["region"], "underwater");
+        assert!(
+            offers(&session, |descriptor| {
+                descriptor["kind"] == "move-and-attack"
+                    && descriptor["unitInstanceId"] == swimmer_id
+                    && descriptor["from"]["region"] == "underwater"
+                    && descriptor["to"]["cell"] == target_cell
+                    && descriptor["to"]["region"] == "surface"
+            }),
+            "Flooded Rubble keeps an underwater-to-surface move available"
+        );
+        let after_artifact = state(&session)["realm"]["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|value| value["instanceId"] == artifact_id)
+            .unwrap()
+            .clone();
+        assert_eq!(after_artifact["region"], "underwater");
+        let crater_fingerprint = full_session_fingerprint(&session);
+
+        let rubble_parent = session.clone();
+        let rubble_parent_fingerprint = full_session_fingerprint(&rubble_parent);
+        let rubble_checkpoint =
+            create_game_checkpoint(&session).expect("post-Rubble overlay checkpoint");
+        let rubble_checkpoint = serialize_game_checkpoint(&rubble_checkpoint).unwrap();
+        let rubble_checkpoint = parse_game_checkpoint(&rubble_checkpoint).unwrap();
+        let mut rubble_branch =
+            resume_game_checkpoint(&rubble_checkpoint).expect("restore Rubble overlay parent");
+        let (_, drought_receipt) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-aura"
+                && descriptor["cardId"] == drought_card
+                && cells_include(descriptor, target_cell)
+        });
+        let (_, restored_drought_receipt) = accept_where(&mut rubble_branch, |descriptor| {
+            descriptor["kind"] == "cast-aura"
+                && descriptor["cardId"] == drought_card
+                && cells_include(descriptor, target_cell)
+        });
+        assert_eq!(drought_receipt, restored_drought_receipt);
+        assert_eq!(
+            observed_unit(&session, &swimmer_id)["region"],
+            "underground"
+        );
+        assert_eq!(observed_unit(&session, &landbound_id)["disabled"], false);
+        assert_eq!(observed_unit(&session, &landbound_id)["region"], "surface");
+        let drought_state = state(&session);
+        let drought_artifact = drought_state["realm"]["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|value| value["instanceId"] == artifact_id)
+            .unwrap();
+        assert_eq!(drought_artifact["region"], "underground");
+        assert_eq!(
+            full_session_fingerprint(&rubble_parent),
+            rubble_parent_fingerprint
+        );
+        assert_eq!(
+            full_session_fingerprint(&rubble_branch),
+            full_session_fingerprint(&session)
+        );
+
+        let drought_parent = session.clone();
+        let drought_parent_fingerprint = full_session_fingerprint(&drought_parent);
+        let drought_checkpoint =
+            create_game_checkpoint(&session).expect("Drought Rubble checkpoint");
+        let drought_checkpoint = serialize_game_checkpoint(&drought_checkpoint).unwrap();
+        let drought_checkpoint = parse_game_checkpoint(&drought_checkpoint).unwrap();
+        let mut drought_branch =
+            resume_game_checkpoint(&drought_checkpoint).expect("restore Drought Rubble");
+        let (_, latest_flood_receipt) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-aura"
+                && descriptor["cardId"] == flood_card
+                && cells_include(descriptor, target_cell)
+        });
+        let (_, restored_flood_receipt) = accept_where(&mut drought_branch, |descriptor| {
+            descriptor["kind"] == "cast-aura"
+                && descriptor["cardId"] == flood_card
+                && cells_include(descriptor, target_cell)
+        });
+        assert_eq!(latest_flood_receipt, restored_flood_receipt);
+        assert_eq!(observed_unit(&session, &swimmer_id)["region"], "underwater");
+        assert_eq!(observed_unit(&session, &landbound_id)["disabled"], true);
+        assert_eq!(observed_unit(&session, &landbound_id)["region"], "surface");
+        let latest_flood_state = state(&session);
+        let latest_flood_artifact = latest_flood_state["realm"]["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|value| value["instanceId"] == artifact_id)
+            .unwrap();
+        assert_eq!(latest_flood_artifact["region"], "underwater");
+        assert_eq!(
+            full_session_fingerprint(&drought_parent),
+            drought_parent_fingerprint
+        );
+        assert_eq!(
+            full_session_fingerprint(&drought_branch),
+            full_session_fingerprint(&session)
+        );
+
+        let (branch_descriptor, branch_receipt) = accept_where(&mut branch, |descriptor| {
+            descriptor["kind"] == "cast-magic"
+                && descriptor["cardId"] == destroy_card
+                && descriptor["targetLocation"]["cell"] == target_cell
+        });
+        assert_eq!(branch_descriptor, destroy_descriptor);
+        assert_eq!(branch_receipt, destroy_receipt);
+        assert_eq!(full_session_fingerprint(&branch), crater_fingerprint);
+        assert_eq!(
+            full_session_fingerprint(&pre_parent),
+            pre_parent_fingerprint
+        );
+        assert_exact_replay(&session);
+        let post_checkpoint =
+            create_game_checkpoint(&session).expect("flooded Rubble post-destroy checkpoint");
+        let post_serialized =
+            serialize_game_checkpoint(&post_checkpoint).expect("serialize post-destroy");
+        let post_resume = resume_game_checkpoint(
+            &parse_game_checkpoint(&post_serialized).expect("parse post-destroy"),
+        )
+        .expect("resume post-destroy");
+        assert_eq!(
+            post_resume.replay_value().unwrap(),
+            session.replay_value().unwrap()
+        );
+        assert_eq!(
+            post_resume.session_hash().unwrap(),
+            session.session_hash().unwrap()
+        );
+        assert_eq!(
+            post_resume.public_view(Seat::North).unwrap(),
+            session.public_view(Seat::North).unwrap()
+        );
+        assert_eq!(
+            post_resume.public_view(Seat::South).unwrap(),
+            session.public_view(Seat::South).unwrap()
+        );
+        assert_eq!(
+            post_resume.legal_actions().unwrap(),
+            session.legal_actions().unwrap()
+        );
+        println!(
+            "RBL-P6 flooded first={caster} seed={seed} manifest={} preRequests={} postRequests={} swimmer={swimmer_id} artifact={artifact_id}",
+            session.manifest_json(),
+            serde_json::to_string(&pre_checkpoint.requests).unwrap(),
+            serde_json::to_string(&post_checkpoint.requests).unwrap(),
+        );
+    }
 }
 
 fn after_mulligans(north_spell: &str, south_spell: &str) -> Session {

@@ -354,9 +354,15 @@ Compositions involving Genesis during marked work, changed captured Deathrite op
 post-mark banishment or return, and mixed-object regional exits remain explicitly
 unsupported where their full timing is not implemented. Exercising a guard rolls back
 the action and invalidates the Session; a passing rejection test does not establish
-support for that composition. Checkpoint loading still reconstructs history and checks
-the expected Session hash. Older checkpoints whose reconstructed result changes are
-rejected rather than silently migrated; unchanged histories continue to round-trip.
+support for that composition. Checkpoint loading reconstructs history and checks the
+expected Session hash. That check can reject changed stored state or journals, but
+derived views and legal actions can change across builds while the hash stays equal.
+Reproducible artifacts therefore retain the exact manifest, frozen executable identity
+and build/dependency receipt with their checkpoint, and replay with that same runtime.
+The existing hash-pinned client supports this boundary; its default Cargo launch is
+for development. Raw native v1 checkpoint success does not certify cross-build
+compatibility or perform migration. General cross-build admission needs a separately
+reviewed versioned boundary; historical artifacts and their runtimes remain preserved.
 
 Direct scenarios cover protected targets, independent effects, death-trigger order,
 cloned checkpoint continuation, terminal cleanup, source departure, re-entry, control

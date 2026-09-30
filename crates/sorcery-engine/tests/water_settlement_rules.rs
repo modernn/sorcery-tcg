@@ -24,7 +24,11 @@
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
-use sorcery_engine::contract::{ActionRequest, Receipt};
+use sorcery_engine::checkpoint::{
+    create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+    serialize_game_checkpoint,
+};
+use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::session::{Session, StepResult};
 
 #[test]
@@ -81,6 +85,33 @@ fn dual_region_minion() -> Value {
         "manaCost": 0,
         "submerge": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn submerge_only_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "manaCost": 0,
+        "submerge": true,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        "ward": true,
+    })
+}
+
+fn submerge_draw_site(ward: bool) -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "submerge": true,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        "ward": ward,
     })
 }
 
@@ -159,7 +190,7 @@ fn flood_settlement_manifest(seed: u32, dual_region: bool) -> String {
             "mode": "synthetic",
             "revisionId": format!("synthetic-{fixture}-v1"),
         },
-        "cards": {
+    "cards": {
             "north-avatar": avatar(),
             "north-destroy": destroy_site(),
             "north-earth": earth_site(),
@@ -185,6 +216,213 @@ fn flood_settlement_manifest(seed: u32, dual_region: bool) -> String {
         "schemaVersion": 1,
         "seed": seed,
     }))
+}
+
+fn drought_ward_stranding_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "drought-ward-stranding" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-drought-ward-stranding-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-drought": drought_aura(),
+            "north-water": water_site(),
+            "south-avatar": avatar(),
+            "south-minion": submerge_only_minion(),
+            "south-earth": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-water"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-drought"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-earth"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn mirrored_drought_ward_stranding_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "mirrored-drought-ward-stranding" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-mirrored-drought-ward-stranding-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-earth": earth_site(),
+            "north-minion": submerge_only_minion(),
+            "south-avatar": avatar(),
+            "south-drought": drought_aura(),
+            "south-water": water_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-earth"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-minion"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-water"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-drought"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "south",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn drought_cohort_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "drought-warded-drawsite-cohort" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-drought-warded-drawsite-cohort-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-drought": drought_aura(),
+            "north-water": water_site(),
+            "south-avatar": avatar(),
+            "south-warded-drawsite": submerge_draw_site(true),
+            "south-unwarded-drawsite": submerge_draw_site(false),
+            "south-earth": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-water"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-drought"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-earth"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-warded-drawsite",
+                    "south-warded-drawsite",
+                    "south-warded-drawsite",
+                    "south-unwarded-drawsite",
+                    "south-unwarded-drawsite",
+                    "south-unwarded-drawsite",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn mirrored_drought_cohort_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "mirrored-drought-warded-drawsite-cohort" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-mirrored-drought-warded-drawsite-cohort-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-earth": earth_site(),
+            "north-warded-drawsite": submerge_draw_site(true),
+            "north-unwarded-drawsite": submerge_draw_site(false),
+            "south-avatar": avatar(),
+            "south-drought": drought_aura(),
+            "south-water": water_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-earth"; 6],
+                "avatar": "north-avatar",
+                "spellbook": ["north-warded-drawsite", "north-unwarded-drawsite", "north-warded-drawsite", "north-unwarded-drawsite", "north-warded-drawsite", "north-unwarded-drawsite"],
+            },
+            "south": {
+                "atlas": vec!["south-water"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-drought"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "south",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn seed_with_drought_cohort(start: u32) -> String {
+    (start..start + 256)
+        .map(drought_cohort_manifest)
+        .find(|encoded| {
+            let mut session = Session::new(encoded).expect("cohort candidate");
+            keep(&mut session);
+            keep(&mut session);
+            accept_where(&mut session, "cohort North Water", |descriptor| {
+                descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+            });
+            accept_where(&mut session, "cohort North end-turn", |descriptor| {
+                descriptor["kind"] == "end-turn"
+            });
+            accept_where(&mut session, "cohort South draw", |descriptor| {
+                descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+            });
+            let snapshot = state(&session);
+            let hand = snapshot["players"]["south"]["hand"]["spellbook"]
+                .as_array()
+                .unwrap();
+            hand.iter()
+                .any(|card| card["cardId"] == "south-warded-drawsite")
+                && hand
+                    .iter()
+                    .any(|card| card["cardId"] == "south-unwarded-drawsite")
+        })
+        .expect("bounded seed with both DrawSite source variants")
+}
+
+fn seed_with_mirrored_drought_cohort(start: u32) -> String {
+    (start..start + 256)
+        .map(mirrored_drought_cohort_manifest)
+        .find(|encoded| {
+            let mut session = Session::new(encoded).expect("mirrored cohort candidate");
+            keep(&mut session);
+            keep(&mut session);
+            accept_where(&mut session, "cohort South Water", |descriptor| {
+                descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+            });
+            accept_where(&mut session, "cohort South end-turn", |descriptor| {
+                descriptor["kind"] == "end-turn"
+            });
+            accept_where(&mut session, "cohort North draw", |descriptor| {
+                descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+            });
+            let snapshot = state(&session);
+            let hand = snapshot["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .unwrap();
+            hand.iter()
+                .any(|card| card["cardId"] == "north-warded-drawsite")
+                && hand
+                    .iter()
+                    .any(|card| card["cardId"] == "north-unwarded-drawsite")
+        })
+        .expect("bounded mirrored seed with both DrawSite source variants")
 }
 
 fn accept_where(
@@ -272,6 +510,53 @@ fn assert_exact_replay(session: &Session) {
     );
     assert_eq!(replayed.transcript(), session.transcript());
     assert!(session.verify_replay().expect("verified replay"));
+}
+
+fn full_session_fingerprint(session: &Session) -> Value {
+    let checkpoint = create_game_checkpoint(session).expect("complete Session checkpoint");
+    json!({
+        "checkpoint": serialize_game_checkpoint(&checkpoint).expect("checkpoint bytes"),
+        "stateHash": session.state_hash().expect("state hash"),
+        "sessionHash": session.session_hash().expect("session hash"),
+        "replay": session.replay_value().expect("replay envelope"),
+        "transcript": session.transcript(),
+        "northView": session.public_view(Seat::North).unwrap(),
+        "southView": session.public_view(Seat::South).unwrap(),
+        "legalActions": serde_json::to_value(session.legal_actions().unwrap()).unwrap(),
+    })
+}
+
+fn accept_with_full_checkpoint(
+    session: &mut Session,
+    context: &str,
+    predicate: impl Fn(&Value) -> bool,
+) -> (Value, Receipt) {
+    let retained_parent = session.clone();
+    let parent_fingerprint = full_session_fingerprint(&retained_parent);
+    let before = full_session_fingerprint(session);
+    let checkpoint = create_game_checkpoint(session).expect("pre-action checkpoint");
+    let checkpoint_json = serialize_game_checkpoint(&checkpoint).expect("checkpoint bytes");
+    let parsed = parse_game_checkpoint(&checkpoint_json).expect("parsed checkpoint");
+    let mut restored = resume_game_checkpoint(&parsed).expect("restored pre-action branch");
+    assert_eq!(full_session_fingerprint(&restored), before);
+
+    let (descriptor, receipt) = accept_where(session, context, &predicate);
+    let (restored_descriptor, restored_receipt) = accept_where(&mut restored, context, &predicate);
+    assert_eq!(descriptor, restored_descriptor);
+    assert_eq!(
+        serde_json::to_value(&receipt).expect("receipt JSON"),
+        serde_json::to_value(&restored_receipt).expect("restored receipt JSON")
+    );
+    assert_eq!(
+        full_session_fingerprint(session),
+        full_session_fingerprint(&restored)
+    );
+    assert_eq!(
+        full_session_fingerprint(&retained_parent),
+        parent_fingerprint
+    );
+    assert_exact_replay(session);
+    (descriptor, receipt)
 }
 
 fn seed_with(start: u32, dual_region: bool) -> String {
@@ -385,6 +670,924 @@ fn rule_catalog_0901_water_flood_kills_buried_burrower_without_submerge_in_same_
     assert!(after["pendingDeathrites"].is_null());
     assert!(realm_unit(&after, &target_id).is_none());
     assert!(cemetery_has(&after, "south", &target_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn regional_ward_shared_flood_breaks_ward_before_stranding_death() {
+    let mut manifest: Value = serde_json::from_str(&flood_settlement_manifest(901, false))
+        .expect("flood settlement fixture");
+    manifest.as_object_mut().unwrap().remove("manifestId");
+    manifest["cards"]["south-burrower"]["ward"] = json!(true);
+    let encoded = finish_manifest(manifest);
+    let mut session = opening_main(&encoded);
+    south_draw_spellbook(&mut session);
+    accept_where(&mut session, "south play C1", |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(&mut session, "summon warded burrower", |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-burrower"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"] == "underground"
+    });
+    let target_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("Burrower identity")
+        .to_owned();
+    south_draw_spellbook(&mut session);
+    let target_site_id = state(&session)["realm"]["sites"]["C1"]["instanceId"]
+        .as_str()
+        .expect("South site identity")
+        .to_owned();
+    let destroy_id = state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|card| card["cardId"] == "north-destroy")
+        .unwrap()["instanceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    accept_where(&mut session, "north destroy C1", |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardInstanceId"] == destroy_id
+            && descriptor["targetLocation"]["cell"] == "C1"
+            && descriptor["targetSiteInstanceId"] == target_site_id
+    });
+    south_draw_spellbook(&mut session);
+    if state(&session)["players"]["south"]["hand"]["atlas"]
+        .as_array()
+        .is_none_or(|hand| !hand.iter().any(|card| card["cardId"] == "south-water"))
+    {
+        accept_where(&mut session, "south draw-site", |descriptor| {
+            descriptor["kind"] == "draw-site"
+        });
+    }
+    let (_, flooded) = accept_where(&mut session, "south play water on rubble", |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-water"
+            && descriptor["cell"] == "C1"
+    });
+    assert_eq!(
+        event_types(&flooded),
+        [
+            "rubble-replaced",
+            "site-played",
+            "ward-broken",
+            "minion-died"
+        ]
+    );
+    assert!(realm_unit(&state(&session), &target_id).is_none());
+    assert!(cemetery_has(&state(&session), "south", &target_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn drought_warded_submerge_stranding_breaks_ward_then_marks_once() {
+    let encoded = drought_ward_stranding_manifest(163);
+    assert_drought_single_stranding(&encoded, "north", true);
+}
+
+#[test]
+fn drought_warded_submerge_stranding_mirrors_south_water_owner() {
+    let encoded = mirrored_drought_ward_stranding_manifest(163);
+    assert_drought_single_stranding(&encoded, "south", true);
+}
+
+#[test]
+fn drought_unwarded_submerge_stranding_control_both_owners() {
+    for water_owner in ["north", "south"] {
+        let source = if water_owner == "north" {
+            drought_ward_stranding_manifest(163)
+        } else {
+            mirrored_drought_ward_stranding_manifest(163)
+        };
+        let source_owner = if water_owner == "north" {
+            "south"
+        } else {
+            "north"
+        };
+        let mut manifest: Value = serde_json::from_str(&source).expect("Drought fixture");
+        manifest.as_object_mut().unwrap().remove("manifestId");
+        manifest["cards"][format!("{source_owner}-minion")]["ward"] = json!(false);
+        assert_drought_single_stranding(&finish_manifest(manifest), water_owner, false);
+    }
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "keeps the mirrored Ward and stranding lifecycle proof together"
+)]
+fn assert_drought_single_stranding(encoded: &str, water_owner: &str, warded: bool) {
+    let source_owner = if water_owner == "north" {
+        "south"
+    } else {
+        "north"
+    };
+    let water_cell = if water_owner == "north" { "C4" } else { "C1" };
+    let earth_cell = if water_owner == "north" { "C1" } else { "C4" };
+    let water_card = format!("{water_owner}-water");
+    let earth_card = format!("{source_owner}-earth");
+    let source_card = format!("{source_owner}-minion");
+    let drought_card = format!("{water_owner}-drought");
+    let mut session = Session::new(encoded).expect("valid Drought-Ward fixture");
+    for _ in 0..2 {
+        accept_with_full_checkpoint(&mut session, "keep mulligan", |d| {
+            d["kind"] == "mulligan"
+                && d["atlasOrder"] == json!([])
+                && d["spellbookOrder"] == json!([])
+        });
+    }
+    accept_with_full_checkpoint(&mut session, "play Water home", |d| {
+        d["kind"] == "play-site" && d["cardId"] == water_card && d["cell"] == water_cell
+    });
+    accept_with_full_checkpoint(&mut session, "Water owner end-turn", |d| {
+        d["kind"] == "end-turn"
+    });
+    accept_with_full_checkpoint(&mut session, "source owner draw", |d| {
+        d["kind"] == "draw" && d["zone"] == "spellbook"
+    });
+    accept_with_full_checkpoint(&mut session, "source owner Earth", |d| {
+        d["kind"] == "play-site" && d["cardId"] == earth_card && d["cell"] == earth_cell
+    });
+    let (summoned, _) =
+        accept_with_full_checkpoint(&mut session, "summon warded Submerge minion", |d| {
+            d["kind"] == "summon-minion"
+                && d["cardId"] == source_card
+                && d["cell"] == water_cell
+                && d["region"] == "underwater"
+        });
+    let target_id = summoned["cardInstanceId"].as_str().unwrap().to_owned();
+    let before = state(&session);
+    let before_unit = realm_unit(&before, &target_id).unwrap();
+    assert_eq!(before_unit["warded"], warded);
+    assert!(before_unit["deathMarked"].is_null());
+    assert_eq!(before_unit["region"], "underwater");
+    accept_with_full_checkpoint(&mut session, "source owner end-turn", |d| {
+        d["kind"] == "end-turn"
+    });
+    accept_with_full_checkpoint(&mut session, "Water owner draw", |d| {
+        d["kind"] == "draw" && d["zone"] == "spellbook"
+    });
+    let before_cast = state(&session);
+    let caster = if water_owner == "north" {
+        Seat::North
+    } else {
+        Seat::South
+    };
+    let before_view = session
+        .public_view(caster)
+        .expect("caster view before Drought");
+    let source_view = &before_view["players"][source_owner];
+    assert_eq!(before_view["players"][water_owner]["affinity"]["water"], 1);
+    assert_eq!(before_view["players"][water_owner]["affinity"]["earth"], 0);
+    assert_eq!(source_view["affinity"]["earth"], 1);
+    assert_eq!(source_view["affinity"]["water"], 0);
+    let caster_mana = before_cast["players"][water_owner]["mana"].clone();
+    let retained_parent = session.clone();
+    let parent_fingerprint = full_session_fingerprint(&retained_parent);
+    let (descriptor, receipt) = accept_with_full_checkpoint(&mut session, "cast Drought", |d| {
+        d["kind"] == "cast-aura"
+            && d["cardId"] == drought_card
+            && d["cells"]
+                .as_array()
+                .is_some_and(|cells| cells.iter().any(|cell| cell == water_cell))
+    });
+    assert_eq!(descriptor["cardId"], drought_card);
+    let aura_id = descriptor["cardInstanceId"].as_str().unwrap();
+    assert_eq!(
+        event_types(&receipt),
+        if warded {
+            vec!["aura-conjured", "ward-broken", "minion-died"]
+        } else {
+            vec!["aura-conjured", "minion-died"]
+        }
+    );
+    let aura_events = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "aura-conjured")
+        .collect::<Vec<_>>();
+    assert_eq!(aura_events.len(), 1);
+    assert_eq!(aura_events[0].payload["instanceId"], aura_id);
+    assert_eq!(aura_events[0].payload["cardId"], drought_card);
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .filter(|e| e.event_type == "ward-broken")
+            .count(),
+        usize::from(warded)
+    );
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .filter(|e| e.event_type == "minion-died" && e.payload["instanceId"] == target_id)
+            .count(),
+        1
+    );
+    assert!(
+        receipt
+            .events
+            .iter()
+            .all(|e| e.event_type != "damage-dealt")
+    );
+    let after = state(&session);
+    let after_view = session
+        .public_view(caster)
+        .expect("caster view after Drought");
+    assert_eq!(after_view["players"][water_owner]["affinity"]["water"], 0);
+    assert_eq!(after_view["players"][water_owner]["affinity"]["earth"], 0);
+    assert_eq!(after_view["players"][source_owner]["affinity"]["earth"], 1);
+    assert_eq!(after_view["players"][source_owner]["affinity"]["water"], 0);
+    assert_eq!(after["players"][water_owner]["mana"], caster_mana);
+    let realm_auras = after["realm"]["auras"].as_array().unwrap();
+    assert_eq!(
+        realm_auras
+            .iter()
+            .filter(|a| a["instanceId"] == aura_id)
+            .count(),
+        1
+    );
+    assert!(realm_auras.iter().any(|a| a["instanceId"] == aura_id));
+    assert!(
+        after["players"][water_owner]["hand"]["spellbook"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|card| card["instanceId"] != aura_id)
+    );
+    assert!(
+        after["players"][water_owner]["cemetery"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|card| card["instanceId"] != aura_id)
+    );
+    assert!(realm_unit(&after, &target_id).is_none());
+    assert_eq!(
+        after["players"][source_owner]["cemetery"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["instanceId"] == target_id)
+            .count(),
+        1
+    );
+    assert!(
+        after["realm"]["auras"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a["cardId"] == drought_card)
+    );
+    assert_eq!(
+        full_session_fingerprint(&retained_parent),
+        parent_fingerprint
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn drought_regional_ward_preserves_healthy_dual_and_surface_controls_both_seats() {
+    for (water_owner, control) in [
+        ("north", "dual"),
+        ("north", "surface"),
+        ("south", "dual"),
+        ("south", "surface"),
+    ] {
+        let source = if water_owner == "north" {
+            drought_ward_stranding_manifest(171)
+        } else {
+            mirrored_drought_ward_stranding_manifest(171)
+        };
+        let encoded = drought_healthy_control_manifest(&source, water_owner, control);
+        assert_drought_healthy_control(&encoded, water_owner, control);
+    }
+}
+
+fn drought_healthy_control_manifest(source: &str, water_owner: &str, control: &str) -> String {
+    let source_owner = if water_owner == "north" {
+        "south"
+    } else {
+        "north"
+    };
+    let source_card = format!("{source_owner}-minion");
+    let mut manifest: Value = serde_json::from_str(source).expect("source Drought manifest");
+    manifest.as_object_mut().unwrap().remove("manifestId");
+    let facts = match control {
+        "dual" => {
+            let mut facts = dual_region_minion();
+            facts["ward"] = json!(true);
+            facts["summonToAnySite"] = json!(true);
+            facts
+        }
+        "surface" => json!({
+            "attack": 1,
+            "cardType": "minion",
+            "defense": 1,
+            "manaCost": 0,
+            "summonToAnySite": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            "ward": true,
+        }),
+        _ => panic!("known Ward control"),
+    };
+    manifest["cards"][source_card] = facts;
+    finish_manifest(manifest)
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "keeps both healthy Ward controls and mirrored regional settlement explicit"
+)]
+fn assert_drought_healthy_control(encoded: &str, water_owner: &str, control: &str) {
+    let source_owner = if water_owner == "north" {
+        "south"
+    } else {
+        "north"
+    };
+    let water_cell = if water_owner == "north" { "C4" } else { "C1" };
+    let earth_cell = if water_owner == "north" { "C1" } else { "C4" };
+    let water_card = format!("{water_owner}-water");
+    let earth_card = format!("{source_owner}-earth");
+    let source_card = format!("{source_owner}-minion");
+    let drought_card = format!("{water_owner}-drought");
+    let expected_region = if control == "dual" {
+        "underwater"
+    } else {
+        "surface"
+    };
+    let settled_region = if control == "dual" {
+        "underground"
+    } else {
+        "surface"
+    };
+    let mut session = Session::new(encoded).expect("valid Drought control fixture");
+    for _ in 0..2 {
+        accept_with_full_checkpoint(&mut session, "keep mulligan", |d| {
+            d["kind"] == "mulligan"
+                && d["atlasOrder"] == json!([])
+                && d["spellbookOrder"] == json!([])
+        });
+    }
+    accept_with_full_checkpoint(&mut session, "play Water home", |d| {
+        d["kind"] == "play-site" && d["cardId"] == water_card && d["cell"] == water_cell
+    });
+    accept_with_full_checkpoint(&mut session, "Water owner end-turn", |d| {
+        d["kind"] == "end-turn"
+    });
+    accept_with_full_checkpoint(&mut session, "source owner draw", |d| {
+        d["kind"] == "draw" && d["zone"] == "spellbook"
+    });
+    accept_with_full_checkpoint(&mut session, "source owner Earth", |d| {
+        d["kind"] == "play-site" && d["cardId"] == earth_card && d["cell"] == earth_cell
+    });
+    let summon_context = format!("summon Ward control ({water_owner}, {control})");
+    let (summoned, _) = accept_with_full_checkpoint(&mut session, &summon_context, |d| {
+        d["kind"] == "summon-minion" && d["cardId"] == source_card && d["cell"] == water_cell
+    });
+    let target_id = summoned["cardInstanceId"].as_str().unwrap().to_owned();
+    let before = state(&session);
+    let unit_before = realm_unit(&before, &target_id).expect("live healthy Ward control");
+    assert_eq!(unit_before["warded"], true);
+    assert_eq!(unit_before["region"], expected_region);
+    accept_with_full_checkpoint(&mut session, "source owner end-turn", |d| {
+        d["kind"] == "end-turn"
+    });
+    accept_with_full_checkpoint(&mut session, "Water owner draw", |d| {
+        d["kind"] == "draw" && d["zone"] == "spellbook"
+    });
+    let before_cast = state(&session);
+    let caster = if water_owner == "north" {
+        Seat::North
+    } else {
+        Seat::South
+    };
+    let before_view = session
+        .public_view(caster)
+        .expect("caster view before Drought");
+    assert_eq!(before_view["players"][water_owner]["affinity"]["water"], 1);
+    assert_eq!(before_view["players"][water_owner]["affinity"]["earth"], 0);
+    assert_eq!(before_view["players"][source_owner]["affinity"]["earth"], 1);
+    assert_eq!(before_view["players"][source_owner]["affinity"]["water"], 0);
+    let caster_mana = before_cast["players"][water_owner]["mana"].clone();
+    let (descriptor, receipt) =
+        accept_with_full_checkpoint(&mut session, "cast Drought over control", |d| {
+            d["kind"] == "cast-aura"
+                && d["cardId"] == drought_card
+                && d["cells"]
+                    .as_array()
+                    .is_some_and(|cells| cells.iter().any(|cell| cell == water_cell))
+        });
+    assert_eq!(descriptor["cardId"], drought_card);
+    let aura_id = descriptor["cardInstanceId"].as_str().unwrap();
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .filter(|event| event.event_type == "aura-conjured"
+                && event.payload["instanceId"] == aura_id)
+            .count(),
+        1
+    );
+    assert!(receipt.events.iter().any(|event| {
+        event.event_type == "aura-conjured"
+            && event.payload["instanceId"] == aura_id
+            && event.payload["cardId"] == drought_card
+    }));
+    let after_cast = state(&session);
+    let after_view = session
+        .public_view(caster)
+        .expect("caster view after Drought");
+    assert_eq!(after_view["players"][water_owner]["affinity"]["water"], 0);
+    assert_eq!(after_view["players"][water_owner]["affinity"]["earth"], 0);
+    assert_eq!(after_view["players"][source_owner]["affinity"]["earth"], 1);
+    assert_eq!(after_view["players"][source_owner]["affinity"]["water"], 0);
+    assert_eq!(after_cast["players"][water_owner]["mana"], caster_mana);
+    assert_eq!(
+        after_cast["realm"]["auras"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|aura| aura["instanceId"] == aura_id)
+            .count(),
+        1
+    );
+    assert!(
+        after_cast["players"][water_owner]["hand"]["spellbook"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|card| card["instanceId"] != aura_id)
+    );
+    assert!(
+        after_cast["players"][water_owner]["cemetery"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|card| card["instanceId"] != aura_id)
+    );
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .filter(|e| e.event_type == "ward-broken")
+            .count(),
+        0
+    );
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .filter(|e| e.event_type == "minion-died")
+            .count(),
+        0
+    );
+    assert!(
+        receipt
+            .events
+            .iter()
+            .all(|e| e.event_type != "damage-dealt")
+    );
+    let after = state(&session);
+    let unit_after = realm_unit(&after, &target_id).expect("healthy Ward control survives");
+    assert_eq!(unit_after["location"], water_cell);
+    assert_eq!(unit_after["region"], settled_region);
+    assert_eq!(unit_after["warded"], true);
+    assert!(!cemetery_has(&after, source_owner, &target_id));
+    assert_eq!(after["phase"], "main");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn drought_disabled_waterbound_loses_ward_then_dies_without_running_drawsite() {
+    let mut manifest: Value = serde_json::from_str(&drought_ward_stranding_manifest(164))
+        .expect("Drought Waterbound fixture");
+    manifest.as_object_mut().unwrap().remove("manifestId");
+    manifest["cards"]["south-minion"]["waterbound"] = json!(true);
+    manifest["cards"]["south-minion"]["ward"] = json!(true);
+    manifest["cards"]["south-minion"]["deathriteDrawSite"] = json!(true);
+    let encoded = finish_manifest(manifest);
+    let mut session = Session::new(&encoded).expect("valid Drought Waterbound session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, "north play Water C4", |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, "North end turn", |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut session, "South draw", |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, "South Earth site", |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(&mut session, "summon warded Waterbound", |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"] == "underwater"
+    });
+    let target_id = summoned["cardInstanceId"].as_str().unwrap().to_owned();
+    accept_where(&mut session, "South end turn", |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut session, "North draw", |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let retained_parent = session.clone();
+    let retained_parent_fingerprint = full_session_fingerprint(&retained_parent);
+    let (_, receipt) = accept_where(&mut session, "cast Drought", |descriptor| {
+        descriptor["kind"] == "cast-aura"
+            && descriptor["cardId"] == "north-drought"
+            && descriptor["cells"]
+                .as_array()
+                .is_some_and(|cells| cells.iter().any(|cell| cell == "C4"))
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["aura-conjured", "ward-lost", "minion-died"]
+    );
+    assert!(
+        receipt.events.iter().all(|event| {
+            event.event_type != "deathrite-draw-site" && event.event_type != "site-drawn"
+        }),
+        "disabled Waterbound must not run its populated DrawSite clause"
+    );
+    let after = state(&session);
+    assert!(realm_unit(&after, &target_id).is_none());
+    assert!(cemetery_has(&after, "south", &target_id));
+    assert_eq!(
+        full_session_fingerprint(&retained_parent),
+        retained_parent_fingerprint
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn drought_enabled_drawsite_clause_runs_on_the_same_stranding_transition() {
+    let mut manifest: Value = serde_json::from_str(&drought_ward_stranding_manifest(165))
+        .expect("enabled Drought control fixture");
+    manifest.as_object_mut().unwrap().remove("manifestId");
+    manifest["cards"]["south-minion"]["ward"] = json!(true);
+    manifest["cards"]["south-minion"]["deathriteDrawSite"] = json!(true);
+    let encoded = finish_manifest(manifest);
+    let mut session = Session::new(&encoded).expect("valid enabled DrawSite control");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, "North Water site", |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, "North end turn", |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut session, "South draw", |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, "South Earth site", |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(&mut session, "summon enabled DrawSite", |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"] == "underwater"
+    });
+    let target_id = summoned["cardInstanceId"].as_str().unwrap().to_owned();
+    accept_where(&mut session, "South end turn", |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut session, "North draw", |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let retained_parent = session.clone();
+    let retained_parent_fingerprint = full_session_fingerprint(&retained_parent);
+    let (_, receipt) = accept_where(&mut session, "cast Drought", |descriptor| {
+        descriptor["kind"] == "cast-aura"
+            && descriptor["cardId"] == "north-drought"
+            && descriptor["cells"]
+                .as_array()
+                .is_some_and(|cells| cells.iter().any(|cell| cell == "C4"))
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["aura-conjured", "ward-broken", "site-drawn", "minion-died"]
+    );
+    assert!(realm_unit(&state(&session), &target_id).is_none());
+    assert_eq!(
+        full_session_fingerprint(&retained_parent),
+        retained_parent_fingerprint
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn drought_regional_ward_cohort_pauses_after_all_prevention() {
+    let encoded = seed_with_drought_cohort(163);
+    assert_drought_regional_ward_cohort(&encoded, "north");
+}
+
+#[test]
+fn drought_regional_ward_cohort_mirrors_south_owner_and_source_seat() {
+    let encoded = seed_with_mirrored_drought_cohort(163);
+    assert_drought_regional_ward_cohort(&encoded, "south");
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "keeps both regional Ward trigger orders, checkpoints, and parent parity explicit"
+)]
+fn assert_drought_regional_ward_cohort(encoded: &str, water_owner: &str) {
+    let source_owner = if water_owner == "north" {
+        "south"
+    } else {
+        "north"
+    };
+    let water_cell = if water_owner == "north" { "C4" } else { "C1" };
+    let earth_cell = if water_owner == "north" { "C1" } else { "C4" };
+    let water_card = format!("{water_owner}-water");
+    let earth_card = format!("{source_owner}-earth");
+    let drought_card = format!("{water_owner}-drought");
+    let warded_card = format!("{source_owner}-warded-drawsite");
+    let unwarded_card = format!("{source_owner}-unwarded-drawsite");
+    let mut session = Session::new(encoded).expect("valid regional Ward cohort");
+    accept_with_full_checkpoint(&mut session, "North keep", |d| {
+        d["kind"] == "mulligan" && d["atlasOrder"] == json!([]) && d["spellbookOrder"] == json!([])
+    });
+    accept_with_full_checkpoint(&mut session, "South keep", |d| {
+        d["kind"] == "mulligan" && d["atlasOrder"] == json!([]) && d["spellbookOrder"] == json!([])
+    });
+    accept_with_full_checkpoint(&mut session, "play Water home site", |d| {
+        d["kind"] == "play-site" && d["cardId"] == water_card && d["cell"] == water_cell
+    });
+    accept_with_full_checkpoint(&mut session, "Water owner end-turn", |d| {
+        d["kind"] == "end-turn"
+    });
+    accept_with_full_checkpoint(&mut session, "source owner spellbook draw", |d| {
+        d["kind"] == "draw" && d["zone"] == "spellbook"
+    });
+    accept_with_full_checkpoint(&mut session, "source owner Earth site", |d| {
+        d["kind"] == "play-site" && d["cardId"] == earth_card && d["cell"] == earth_cell
+    });
+    let (warded, _) = accept_with_full_checkpoint(&mut session, "summon warded DrawSite", |d| {
+        d["kind"] == "summon-minion"
+            && d["cardId"] == warded_card
+            && d["cell"] == water_cell
+            && d["region"] == "underwater"
+    });
+    let (unwarded, _) =
+        accept_with_full_checkpoint(&mut session, "summon unwarded DrawSite", |d| {
+            d["kind"] == "summon-minion"
+                && d["cardId"] == unwarded_card
+                && d["cell"] == water_cell
+                && d["region"] == "underwater"
+        });
+    let warded_id = warded["cardInstanceId"].as_str().unwrap().to_owned();
+    let unwarded_id = unwarded["cardInstanceId"].as_str().unwrap().to_owned();
+    accept_with_full_checkpoint(&mut session, "source owner end-turn", |d| {
+        d["kind"] == "end-turn"
+    });
+    accept_with_full_checkpoint(&mut session, "Water owner spellbook draw", |d| {
+        d["kind"] == "draw" && d["zone"] == "spellbook"
+    });
+    let before_cast = state(&session);
+    let caster = if water_owner == "north" {
+        Seat::North
+    } else {
+        Seat::South
+    };
+    let before_view = session
+        .public_view(caster)
+        .expect("caster view before Drought");
+    assert_eq!(before_view["players"][water_owner]["affinity"]["water"], 1);
+    assert_eq!(before_view["players"][water_owner]["affinity"]["earth"], 0);
+    assert_eq!(before_view["players"][source_owner]["affinity"]["earth"], 1);
+    assert_eq!(before_view["players"][source_owner]["affinity"]["water"], 0);
+    let caster_mana = before_cast["players"][water_owner]["mana"].clone();
+    let (descriptor, receipt) =
+        accept_with_full_checkpoint(&mut session, "cast Drought over Water", |d| {
+            d["kind"] == "cast-aura"
+                && d["cardId"] == drought_card
+                && d["cells"]
+                    .as_array()
+                    .is_some_and(|cells| cells.iter().any(|cell| cell == water_cell))
+        });
+    assert_eq!(descriptor["cardId"], drought_card);
+    let aura_id = descriptor["cardInstanceId"].as_str().unwrap();
+    let aura_events = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "aura-conjured")
+        .collect::<Vec<_>>();
+    assert_eq!(aura_events.len(), 1);
+    assert_eq!(aura_events[0].payload["instanceId"], aura_id);
+    assert_eq!(aura_events[0].payload["cardId"], drought_card);
+    let after_cast = state(&session);
+    let after_view = session
+        .public_view(caster)
+        .expect("caster view after Drought");
+    assert_eq!(after_view["players"][water_owner]["affinity"]["water"], 0);
+    assert_eq!(after_view["players"][water_owner]["affinity"]["earth"], 0);
+    assert_eq!(after_view["players"][source_owner]["affinity"]["earth"], 1);
+    assert_eq!(after_view["players"][source_owner]["affinity"]["water"], 0);
+    assert_eq!(after_cast["players"][water_owner]["mana"], caster_mana);
+    assert_eq!(
+        after_cast["realm"]["auras"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|aura| aura["instanceId"] == aura_id)
+            .count(),
+        1
+    );
+    assert!(
+        after_cast["players"][water_owner]["hand"]["spellbook"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|card| card["instanceId"] != aura_id)
+    );
+    assert!(
+        after_cast["players"][water_owner]["cemetery"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|card| card["instanceId"] != aura_id)
+    );
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .filter(|e| e.event_type == "ward-broken")
+            .count(),
+        1
+    );
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .filter(|e| e.event_type == "minion-died")
+            .count(),
+        0
+    );
+    let pause = state(&session);
+    assert_eq!(pause["phase"], "trigger-order");
+    assert!(pause["pendingDeathrites"].is_object());
+    assert!(pause["pendingDeathrites"]["continuation"].is_null());
+    for (id, should_be_warded) in [(&warded_id, false), (&unwarded_id, false)] {
+        let unit = realm_unit(&pause, id).expect("marked casualty remains live at pause");
+        assert_eq!(unit["deathMarked"], true);
+        assert_eq!(unit["warded"], should_be_warded);
+        assert!(!cemetery_has(&pause, source_owner, id));
+    }
+    let pause_auras = pause["realm"]["auras"].as_array().unwrap();
+    assert_eq!(pause_auras.len(), 1);
+    assert_eq!(pause_auras[0]["instanceId"], aura_id);
+    assert_eq!(pause_auras[0]["cardId"], drought_card);
+    assert!(
+        pause["players"][water_owner]["hand"]["spellbook"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|card| card["instanceId"] != aura_id)
+    );
+    assert!(
+        pause["players"][water_owner]["cemetery"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|card| card["instanceId"] != aura_id)
+    );
+    let pause_fingerprint = full_session_fingerprint(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("pause checkpoint");
+    let checkpoint_bytes = serialize_game_checkpoint(&checkpoint).expect("pause checkpoint bytes");
+    let parsed = parse_game_checkpoint(&checkpoint_bytes).expect("parsed pause checkpoint");
+    let restored_pause = resume_game_checkpoint(&parsed).expect("restored pause");
+    assert_eq!(full_session_fingerprint(&restored_pause), pause_fingerprint);
+    let frontier = session
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .map(|action| action.descriptor)
+        .collect::<Vec<_>>();
+    assert_eq!(frontier.len(), 2);
+    assert!(
+        frontier
+            .iter()
+            .all(|descriptor| descriptor["kind"] == "order-triggers")
+    );
+    let order_ids = frontier
+        .iter()
+        .filter(|descriptor| descriptor["kind"] == "order-triggers")
+        .map(|a| a["sourceInstanceId"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(order_ids.len(), 2);
+    assert_ne!(order_ids[0], order_ids[1]);
+    assert!(order_ids.contains(&warded_id) && order_ids.contains(&unwarded_id));
+    let pause_parent = session.clone();
+    for first_id in order_ids.clone() {
+        let second_id = order_ids
+            .iter()
+            .find(|id| *id != &first_id)
+            .expect("other DrawSite source")
+            .clone();
+        let mut branch = resume_game_checkpoint(&parsed).expect("independent order branch");
+        let branch_parent = branch.clone();
+        let branch_parent_fingerprint = full_session_fingerprint(&branch_parent);
+        let (selected, draw) =
+            accept_with_full_checkpoint(&mut branch, "choose first DrawSite source", |d| {
+                d["kind"] == "order-triggers" && d["sourceInstanceId"] == first_id
+            });
+        assert_eq!(selected["sourceInstanceId"], first_id);
+        let drawn = draw
+            .events
+            .iter()
+            .filter(|e| e.event_type == "site-drawn")
+            .collect::<Vec<_>>();
+        assert_eq!(drawn.len(), 2, "the final pending source auto-commits");
+        let draw_order = drawn
+            .iter()
+            .map(|event| {
+                event.payload["sourceInstanceId"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(draw_order, [first_id.clone(), second_id]);
+        assert!(
+            draw.events
+                .iter()
+                .all(|event| event.event_type != "aura-conjured")
+        );
+        assert!(
+            drawn
+                .iter()
+                .all(|event| event.payload["seat"] == source_owner)
+        );
+        assert!(draw.events.iter().all(|e| e.event_type != "spell-drawn"));
+        let complete = state(&branch);
+        assert_eq!(complete["phase"], "main");
+        assert!(complete["pendingDeathrites"].is_null());
+        let complete_auras = complete["realm"]["auras"].as_array().unwrap();
+        assert_eq!(complete_auras.len(), 1);
+        assert_eq!(complete_auras[0]["instanceId"], aura_id);
+        assert_eq!(complete_auras[0]["cardId"], drought_card);
+        assert!(
+            complete["players"][water_owner]["hand"]["spellbook"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|card| card["instanceId"] != aura_id)
+        );
+        assert!(
+            complete["players"][water_owner]["cemetery"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|card| card["instanceId"] != aura_id)
+        );
+        assert!(
+            !branch
+                .legal_actions()
+                .unwrap()
+                .iter()
+                .any(|action| { action.descriptor["kind"] == "order-triggers" })
+        );
+        assert!(realm_unit(&complete, &warded_id).is_none());
+        assert!(realm_unit(&complete, &unwarded_id).is_none());
+        for id in [&warded_id, &unwarded_id] {
+            assert_eq!(
+                draw.events
+                    .iter()
+                    .filter(|event| event.event_type == "minion-died"
+                        && event.payload["instanceId"] == *id)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                complete["players"][source_owner]["cemetery"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|c| c["instanceId"] == *id)
+                    .count(),
+                1
+            );
+        }
+        assert_eq!(
+            full_session_fingerprint(&branch_parent),
+            branch_parent_fingerprint
+        );
+        assert_exact_replay(&branch);
+    }
+    assert_eq!(full_session_fingerprint(&session), pause_fingerprint);
+    assert_eq!(full_session_fingerprint(&pause_parent), pause_fingerprint);
+    assert_eq!(full_session_fingerprint(&restored_pause), pause_fingerprint);
     assert_exact_replay(&session);
 }
 
