@@ -10907,10 +10907,11 @@ impl Game {
         else {
             return Err(GameError::IllegalAction);
         };
+        let seat = action.seat;
         let movement = self.position.pending_basic_movement.as_pending().cloned();
         if !self
             .ranged_projectile_descriptors(
-                action.seat,
+                seat,
                 shooter_instance_id,
                 self.position.phase == Phase::Movement,
             )?
@@ -10924,14 +10925,12 @@ impl Game {
             .units
             .iter()
             .position(|unit| {
-                unit.controller == action.seat && unit.card.instance_id == *shooter_instance_id
+                unit.controller == seat && unit.card.instance_id == *shooter_instance_id
             })
             .ok_or(GameError::IllegalAction)?;
         let strike = hit
             .as_ref()
-            .map(|_| {
-                self.combatant_strike_stats(UnitKind::Minion, action.seat, shooter_instance_id)
-            })
+            .map(|_| self.combatant_strike_stats(UnitKind::Minion, seat, shooter_instance_id))
             .transpose()?;
         self.position.units[shooter_index].tapped = true;
         if let Some(pending) = self.position.pending_basic_movement.as_pending_mut() {
@@ -10942,12 +10941,12 @@ impl Game {
                 "direction": direction,
                 "hit": hit,
                 "path": path,
-                "seat": action.seat,
+                "seat": seat,
                 "shooterInstanceId": shooter_instance_id,
             })
         });
-        self.record_unit_interaction(UnitKind::Minion, action.seat, shooter_instance_id, outcomes)?;
         let Some(target) = hit else {
+            self.record_unit_interaction(UnitKind::Minion, seat, shooter_instance_id, outcomes)?;
             self.position.state_version += 1;
             return Ok(());
         };
@@ -10971,7 +10970,7 @@ impl Game {
                 strike,
                 target: target.clone(),
                 shooter: shooter_instance_id.clone(),
-                seat: action.seat,
+                seat,
                 return_phase,
                 step_after: self.shooter_may_step_after_ranged_strike(shooter_instance_id),
             };
@@ -10987,7 +10986,7 @@ impl Game {
             self.finish_ranged_damage(
                 &strike,
                 target,
-                (action.seat, shooter_instance_id),
+                (seat, shooter_instance_id),
                 return_phase,
                 amount,
                 outcomes,
@@ -11034,10 +11033,27 @@ impl Game {
             self.break_lance(seat, shooter_instance_id, outcomes)?;
         }
         self.consume_next_strike_double(UnitKind::Minion, seat, shooter_instance_id, outcomes)?;
-        let mut dead_minions = if strike.consumed_artifacts.is_empty() {
-            Vec::new()
-        } else {
+        // A hit breaks Stealth after concurrent strike effects, before Deathrites.
+        // Reversion and damage must feed the same death cohort.
+        let controls_changed =
+            if self.mark_unit_interaction(UnitKind::Minion, seat, shooter_instance_id)? {
+                outcomes.push(
+                    "stealth-lost",
+                    || json!({ "instanceId": shooter_instance_id, "seat": seat }),
+                );
+                self.revert_matching_temporary_controls_without_settlement(
+                    outcomes,
+                    |effect, stealthed| {
+                        effect.expiry == TemporaryControlExpiry::UntilStealthLost && !stealthed
+                    },
+                )?
+            } else {
+                false
+            };
+        let mut dead_minions = if controls_changed || !strike.consumed_artifacts.is_empty() {
             self.static_power_death_ids()?
+        } else {
+            Vec::new()
         };
         if damage.minion_died {
             dead_minions.push(target.instance_id().clone());
@@ -38615,5 +38631,281 @@ mod tests {
             }
         ));
         assert_eq!(fate.position.artifacts[0].card.instance_id, artifact_id);
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one direct internal fixture proves Ranged control reversion and a combined death cohort"
+    )]
+    fn ranged_stealth_control_reversion_joins_hit_and_power_loss_deaths() {
+        let (mut game, sources) = marked_lifecycle_fixture(true, false);
+        let shooter_id = game
+            .position
+            .units
+            .iter()
+            .find(|u| !sources.contains(&u.card.instance_id))
+            .unwrap()
+            .card
+            .instance_id
+            .clone();
+        let shooter_card = game
+            .position
+            .units
+            .iter()
+            .find(|u| u.card.instance_id == shooter_id)
+            .unwrap()
+            .card
+            .card_id;
+        let CardFacts::Minion(facts) =
+            &mut Arc::get_mut(&mut game.rules).unwrap().cards[usize::from(shooter_card.0)].facts
+        else {
+            panic!("shooter")
+        };
+        facts.ranged = true;
+        facts.stealth = true;
+        facts.other_nearby_allies_power_bonus = true;
+        for id in &sources {
+            let card_id = game
+                .position
+                .units
+                .iter()
+                .find(|u| u.card.instance_id == *id)
+                .unwrap()
+                .card
+                .card_id;
+            let CardFacts::Minion(facts) =
+                &mut Arc::get_mut(&mut game.rules).unwrap().cards[usize::from(card_id.0)].facts
+            else {
+                panic!("Deathrite body")
+            };
+            facts.attack = 1;
+            facts.defense = 1;
+            facts.deathrite_damage_each_unit_here = None;
+            facts.deathrite_draw_site = true;
+            let body = game
+                .position
+                .units
+                .iter_mut()
+                .find(|u| u.card.instance_id == *id)
+                .unwrap();
+            body.damage = 0;
+            body.location = Cell::parse(if *id == sources[0] { "B4" } else { "C3" }).unwrap();
+        }
+        let shooter_cell = Cell::parse("C4").unwrap();
+        let shooter = game
+            .position
+            .units
+            .iter_mut()
+            .find(|u| u.card.instance_id == shooter_id)
+            .unwrap();
+        shooter.location = shooter_cell;
+        shooter.stealthed = true;
+        shooter.summoning_sickness = false;
+        shooter.tapped = false;
+        game.apply_minion_control_change(
+            Some(&UnitTarget::Minion {
+                instance_id: shooter_id.clone(),
+                seat: Seat::South,
+            }),
+            Seat::North,
+            &sources[0],
+            Some(TemporaryControlExpiry::UntilStealthLost),
+            false,
+            &mut OutcomeLog::Ignore,
+        )
+        .unwrap();
+        game.position
+            .units
+            .iter_mut()
+            .find(|u| u.card.instance_id == sources[0])
+            .unwrap()
+            .damage = 1;
+        for cell in ["C4", "B4", "D4"] {
+            let mut card = game.position.players[seat_index(Seat::North)]
+                .atlas
+                .pop()
+                .unwrap();
+            card.enter_realm().unwrap();
+            game.position.sites[Cell::parse(cell).unwrap().index()] = Some(SitePosition {
+                card,
+                controller: Seat::North,
+                last_flight_turn: None,
+                warded: false,
+            });
+        }
+        let south = &mut game.position.players[seat_index(Seat::South)];
+        let take = |zones: [&mut Vec<CardInstance>; 2], name: &str| {
+            zones
+                .into_iter()
+                .find_map(|zone| {
+                    zone.iter()
+                        .position(|card| game.rules.cards[usize::from(card.card_id.0)].id == name)
+                        .map(|i| zone.remove(i))
+                })
+                .unwrap()
+        };
+        let mut artifact = take(
+            [&mut south.hand_spellbook, &mut south.spellbook],
+            "south-spell-50",
+        );
+        artifact.enter_realm().unwrap();
+        let artifact_id = artifact.instance_id.clone();
+        game.position.artifacts.push(ArtifactPosition {
+            card: artifact,
+            placement: ArtifactPlacement::Carried {
+                bearer: UnitTarget::Minion {
+                    instance_id: shooter_id.clone(),
+                    seat: Seat::North,
+                },
+                cell: Some(shooter_cell),
+            },
+        });
+        let mut healthy_card = take(
+            [&mut south.hand_spellbook, &mut south.spellbook],
+            "south-spell-4",
+        );
+        healthy_card.enter_realm().unwrap();
+        let healthy_id = healthy_card.instance_id.clone();
+        game.position.units.push(
+            SummonPlacement {
+                card: healthy_card,
+                controller: Seat::South,
+                lance_count: 0,
+                location: Cell::parse("D4").unwrap(),
+                occupied_cells: None,
+                region: Region::Surface,
+                stealthed: false,
+                warded: false,
+            }
+            .into_unit(),
+        );
+        game.position.players[seat_index(Seat::North)]
+            .avatar
+            .location = Cell::parse("C1").unwrap();
+        game.position.players[seat_index(Seat::South)]
+            .avatar
+            .location = Cell::parse("E1").unwrap();
+        assert!(game.static_power_death_ids().unwrap().is_empty());
+        let parent_position = game.position.clone();
+        let parent_hash = game.state_hash().unwrap();
+        let parent_actions = game.legal_actions().unwrap();
+        let shot = parent_actions
+            .iter()
+            .find(|a| {
+                matches!(&a.descriptor,
+            ActionDescriptor::ShootProjectile {shooter_instance_id,hit:Some(target),..}
+                if *shooter_instance_id==shooter_id && *target.instance_id()==sources[1])
+            })
+            .unwrap();
+        let mut recorded = game.clone();
+        let (events, _) = recorded.apply_action_recorded(shot).unwrap();
+        let mut ignored = game.clone();
+        ignored.apply_action(shot).unwrap();
+        let owned = game.clone().apply_action_owned(shot).unwrap();
+        for actual in [&ignored, &owned] {
+            assert_eq!(actual.position, recorded.position);
+            assert_eq!(actual.state_hash().unwrap(), recorded.state_hash().unwrap());
+            assert_eq!(
+                actual.legal_actions().unwrap(),
+                recorded.legal_actions().unwrap()
+            );
+        }
+        let event_at = |name: &str| events.iter().position(|(kind, _)| kind == name).unwrap();
+        assert!(event_at("damage-dealt") < event_at("stealth-lost"));
+        assert!(event_at("stealth-lost") < event_at("minion-control-changed"));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|(kind, _)| kind == "stealth-lost")
+                .count(),
+            1
+        );
+        let allocated = &events[event_at("strike-damage-allocated")].1;
+        assert_eq!(
+            allocated["amount"], 3,
+            "captured power includes the carried Artifact"
+        );
+        assert_eq!(allocated["strikerInstanceId"], json!(shooter_id));
+        assert_eq!(allocated["targetInstanceId"], json!(sources[1]));
+        let shooter = recorded
+            .position
+            .units
+            .iter()
+            .find(|u| u.card.instance_id == shooter_id)
+            .unwrap();
+        assert_eq!(shooter.controller, Seat::South);
+        assert!(!shooter.stealthed && shooter.tapped);
+        assert!(matches!(&recorded.position.artifacts[0].placement,
+            ArtifactPlacement::Carried {bearer:UnitTarget::Minion {instance_id,seat:Seat::South},..} if *instance_id==shooter_id));
+        assert_eq!(recorded.position.artifacts[0].card.instance_id, artifact_id);
+        let pending = recorded.position.pending_deathrites.as_ref().unwrap();
+        assert_eq!(recorded.position.phase, Phase::TriggerOrder);
+        assert_eq!(pending.marked.len(), 2);
+        assert!(
+            sources
+                .iter()
+                .all(|id| pending.marked.iter().any(|r| r.instance_id() == id))
+        );
+        assert!(
+            recorded
+                .position
+                .units
+                .iter()
+                .any(|u| u.card.instance_id == healthy_id && !u.death_marked)
+        );
+        assert_eq!(recorded.legal_actions().unwrap().len(), 2);
+        for first_source in &sources {
+            let mut branch = recorded.clone();
+            let order = branch.legal_actions().unwrap().into_iter().find(|a|matches!(&a.descriptor,
+                ActionDescriptor::OrderTriggers {source_instance_id,..} if source_instance_id==first_source)).unwrap();
+            let (ordered_events, _) = branch.apply_action_recorded(&order).unwrap();
+            let draws: Vec<_> = ordered_events
+                .iter()
+                .filter(|(kind, _)| kind == "site-drawn")
+                .map(|(_, v)| (v["sourceInstanceId"].clone(), v["seat"].clone()))
+                .collect();
+            let other = sources.iter().find(|id| *id != first_source).unwrap();
+            assert_eq!(
+                draws,
+                [
+                    (json!(first_source), json!(Seat::North)),
+                    (json!(other), json!(Seat::North))
+                ]
+            );
+            assert!(branch.position.pending_deathrites.is_none());
+            assert_eq!(branch.position.phase, Phase::Main);
+            for id in &sources {
+                assert_eq!(
+                    branch.position.players[seat_index(Seat::North)]
+                        .cemetery
+                        .iter()
+                        .filter(|c| c.instance_id == *id)
+                        .count(),
+                    1
+                );
+            }
+            assert!(
+                branch
+                    .position
+                    .units
+                    .iter()
+                    .any(|u| u.card.instance_id == healthy_id && !u.death_marked)
+            );
+            let mut ignored_branch = ignored.clone();
+            ignored_branch.apply_action(&order).unwrap();
+            let owned_branch = owned.clone().apply_action_owned(&order).unwrap();
+            for actual in [&ignored_branch, &owned_branch] {
+                assert_eq!(actual.position, branch.position);
+                assert_eq!(actual.state_hash().unwrap(), branch.state_hash().unwrap());
+                assert_eq!(
+                    actual.legal_actions().unwrap(),
+                    branch.legal_actions().unwrap()
+                );
+            }
+        }
+        assert_eq!(game.position, parent_position);
+        assert_eq!(game.state_hash().unwrap(), parent_hash);
+        assert_eq!(game.legal_actions().unwrap(), parent_actions);
     }
 }

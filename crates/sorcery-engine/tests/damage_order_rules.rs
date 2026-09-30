@@ -64,7 +64,11 @@ fn manifest(first: &str, bonuses: usize, step_after: bool) -> String {
 }
 
 fn pending(first: &str, bonuses: usize, step_after: bool) -> Session {
-    let mut session = Session::new(&manifest(first, bonuses, step_after)).expect("manifest");
+    pending_from_manifest(first, &manifest(first, bonuses, step_after))
+}
+
+fn pending_from_manifest(first: &str, encoded: &str) -> Session {
+    let mut session = Session::new(encoded).expect("manifest");
     for _ in 0..2 {
         act(&mut session, |a| {
             a["kind"] == "mulligan"
@@ -126,6 +130,74 @@ fn pending(first: &str, bonuses: usize, step_after: bool) -> Session {
     }
     assert_eq!(state["state"]["players"][enemy]["avatar"]["life"], 20);
     session
+}
+
+#[test]
+fn ranged_stealth_survives_replacement_order_then_breaks_after_damage() {
+    for first in ["north", "south"] {
+        let mut value: Value = serde_json::from_str(&manifest(first, 1, false)).unwrap();
+        value["cards"]["shooter"]["stealth"] = json!(true);
+        value.as_object_mut().unwrap().remove("manifestId");
+        value["manifestId"] = json!(identity_hash(&value).unwrap());
+        let original = pending_from_manifest(first, &canonical_json(&value).unwrap());
+        let parent = original.replay_value().unwrap();
+        let shooter = &parent["state"]["realm"]["units"][0];
+        let shooter_id = shooter["instanceId"].clone();
+        assert_eq!(shooter["stealthed"], true);
+        assert_eq!(shooter["tapped"], true);
+        assert_eq!(shooter["controller"], first);
+        let checkpoint = parse_game_checkpoint(
+            &serialize_game_checkpoint(&create_game_checkpoint(&original).unwrap()).unwrap(),
+        )
+        .unwrap();
+        for (index, expected) in [(0, 6), (1, 5)] {
+            let mut branch = original.clone();
+            let mut resumed = resume_game_checkpoint(&checkpoint).unwrap();
+            let receipt = act(&mut branch, |a| {
+                a["kind"] == "choose-damage-modifier" && a["modifierIndex"] == index
+            });
+            assert_eq!(
+                receipt,
+                act(&mut resumed, |a| a["kind"] == "choose-damage-modifier"
+                    && a["modifierIndex"] == index)
+            );
+            let events = &receipt.events;
+            let event_index = |name| {
+                events
+                    .iter()
+                    .position(|event| event.event_type == name)
+                    .unwrap()
+            };
+            assert!(event_index("avatar-life-lost") < event_index("stealth-lost"));
+            assert!(event_index("artifact-consumed-after-strike") < event_index("stealth-lost"));
+            let lost: Vec<_> = events
+                .iter()
+                .filter(|event| event.event_type == "stealth-lost")
+                .collect();
+            assert_eq!(lost.len(), 1);
+            assert_eq!(lost[0].payload["instanceId"], shooter_id);
+            assert_eq!(
+                events[event_index("strike-damage-allocated")].payload["amount"],
+                expected
+            );
+            let completed = branch.replay_value().unwrap();
+            assert_eq!(completed["state"]["realm"]["units"][0]["stealthed"], false);
+            assert_eq!(completed, resumed.replay_value().unwrap());
+            assert_eq!(branch.transcript(), resumed.transcript());
+            assert_eq!(
+                branch.legal_actions().unwrap(),
+                resumed.legal_actions().unwrap()
+            );
+            for seat in [Seat::North, Seat::South] {
+                assert_eq!(
+                    branch.public_view(seat).unwrap(),
+                    resumed.public_view(seat).unwrap()
+                );
+            }
+            assert!(branch.verify_replay().unwrap());
+            assert_eq!(original.replay_value().unwrap(), parent);
+        }
+    }
 }
 
 fn fight_pending(first: &str) -> Session {

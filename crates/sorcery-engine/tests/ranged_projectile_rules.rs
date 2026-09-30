@@ -2365,3 +2365,186 @@ fn rule_catalog_1119_shoot_projectile_withheld_during_pending_deathrite_order() 
     assert_eq!(event_types(&shot)[0], "projectile-shot");
     assert_exact_replay(session);
 }
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one compact family proves all Ranged Stealth loss boundaries"
+)]
+fn ranged_stealth_breaks_before_deathrite_and_on_zero_prevented_or_empty_shot() {
+    for (seed, attack, target_facts, atlas, miss, expected_events) in [
+        (
+            401,
+            4,
+            json!({"defense":1,"deathriteDrawSite":true}),
+            6,
+            false,
+            vec![
+                "projectile-shot",
+                "strike-damage-allocated",
+                "damage-dealt",
+                "stealth-lost",
+                "site-drawn",
+                "minion-died",
+            ],
+        ),
+        (
+            402,
+            4,
+            json!({"defense":1,"ward":true}),
+            6,
+            false,
+            vec![
+                "projectile-shot",
+                "strike-damage-allocated",
+                "damage-dealt",
+                "ward-broken",
+                "stealth-lost",
+            ],
+        ),
+        (
+            403,
+            0,
+            json!({"defense":5}),
+            6,
+            false,
+            vec![
+                "projectile-shot",
+                "strike-damage-allocated",
+                "damage-dealt",
+                "stealth-lost",
+            ],
+        ),
+        (
+            404,
+            4,
+            json!({}),
+            6,
+            true,
+            vec!["projectile-shot", "stealth-lost"],
+        ),
+        (
+            405,
+            4,
+            json!({"defense":1,"deathriteDrawSite":true}),
+            5,
+            false,
+            vec![
+                "projectile-shot",
+                "strike-damage-allocated",
+                "damage-dealt",
+                "stealth-lost",
+                "game-ended",
+            ],
+        ),
+    ] {
+        let mut target = minion(target_facts);
+        target["summonToAnySite"] = json!(true);
+        let setup = prepare_ranged(
+            seed,
+            &minion(json!({"attack":attack,"ranged":true,"stealth":true})),
+            &target,
+            &minion(json!({})),
+            &site(json!({})),
+            if miss { None } else { Some("C3") },
+            None,
+            atlas,
+        );
+        let parent = setup.session;
+        let before = state(&parent);
+        assert_eq!(unit(&before, &setup.shooter_id)["stealthed"], true);
+        assert_checkpoint_round_trip(&parent);
+        let checkpoint = create_game_checkpoint(&parent).unwrap();
+        let mut resumed = resume_game_checkpoint(&checkpoint).unwrap();
+        let mut branch = parent.clone();
+        let shoot = |session: &mut Session| {
+            accept_where(session, |a| {
+                a["kind"] == "shoot-projectile"
+                    && a["shooterInstanceId"] == setup.shooter_id
+                    && if miss {
+                        a["direction"] == "west" && a["hit"].is_null()
+                    } else {
+                        a["direction"] == "south"
+                            && a["hit"]["instanceId"] == *setup.near_target_id.as_ref().unwrap()
+                    }
+            })
+            .1
+        };
+        let receipt = shoot(&mut branch);
+        assert_eq!(receipt, shoot(&mut resumed));
+        assert_eq!(event_types(&receipt), expected_events);
+        let lost = receipt
+            .events
+            .iter()
+            .find(|e| e.event_type == "stealth-lost")
+            .unwrap();
+        assert_eq!(lost.payload["instanceId"], setup.shooter_id);
+        assert_eq!(lost.payload["seat"], "north");
+        let after = state(&branch);
+        let shooter = unit(&after, &setup.shooter_id);
+        assert_eq!(shooter["stealthed"], false);
+        assert_eq!(shooter["tapped"], true);
+        assert_eq!(shooter["controller"], "north");
+        assert_eq!(shooter["damage"], 0, "Ranged has no return strike");
+        if !miss {
+            let allocated = receipt
+                .events
+                .iter()
+                .find(|e| e.event_type == "strike-damage-allocated")
+                .unwrap();
+            assert_eq!(allocated.payload["amount"], attack);
+            assert_eq!(
+                allocated.payload["targetInstanceId"],
+                *setup.near_target_id.as_ref().unwrap()
+            );
+        }
+        if seed == 401 {
+            let drawn = receipt
+                .events
+                .iter()
+                .find(|e| e.event_type == "site-drawn")
+                .unwrap();
+            assert_eq!(
+                drawn.payload["sourceInstanceId"],
+                *setup.near_target_id.as_ref().unwrap()
+            );
+            assert_eq!(drawn.payload["seat"], "south");
+        } else if seed == 402 {
+            assert_eq!(
+                unit(&after, setup.near_target_id.as_ref().unwrap())["damage"],
+                0
+            );
+        } else if seed == 405 {
+            assert_eq!(after["terminal"]["status"], "finished");
+            marked_death::assert_live_marked_before_cemetery(
+                &after,
+                std::slice::from_ref(setup.near_target_id.as_ref().unwrap()),
+            );
+            assert!(branch.legal_actions().unwrap().is_empty());
+        }
+        if seed != 405 {
+            assert_eq!(after["phase"], "main");
+        }
+        assert_eq!(state(&parent), before);
+        assert_eq!(
+            branch.replay_value().unwrap(),
+            resumed.replay_value().unwrap()
+        );
+        assert_eq!(branch.transcript(), resumed.transcript());
+        assert_eq!(
+            branch.legal_actions().unwrap(),
+            resumed.legal_actions().unwrap()
+        );
+        for seat in [
+            sorcery_engine::contract::Seat::North,
+            sorcery_engine::contract::Seat::South,
+        ] {
+            assert_eq!(
+                branch.public_view(seat).unwrap(),
+                resumed.public_view(seat).unwrap()
+            );
+        }
+        assert_exact_replay(&branch);
+        assert_checkpoint_round_trip(&branch);
+    }
+}
