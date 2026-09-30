@@ -155,8 +155,16 @@ export function canonicalJson(value: JsonValue): string {
   return serialize(value, 0, '', { nodes: 0, stringBytes: 0, stack: new WeakSet<object>() });
 }
 
-export function parseJsonWithDuplicateKeyCheck(text: string): JsonValue {
+export function parseJsonWithDuplicateKeyCheck(text: string, options: Readonly<{
+  validateCanonical?: boolean;
+  maxStringBytes?: number;
+  maxNodes?: number;
+}> = {}): JsonValue {
   let index = 0;
+  let nodeCount = 0;
+  let stringBytes = 0;
+  const maxStringBytes = options.maxStringBytes ?? MAX_CANONICAL_STRING_BYTES;
+  const maxNodes = options.maxNodes ?? MAX_CANONICAL_NODES;
 
   function invalid(path: string): never {
     return fail('invalid_json', path, 'invalid JSON text');
@@ -174,13 +182,16 @@ export function parseJsonWithDuplicateKeyCheck(text: string): JsonValue {
       const character = text[index];
       if (character === '"') {
         index += 1;
+        let parsed: unknown;
         try {
-          const parsed: unknown = JSON.parse(text.slice(start, index));
-          if (typeof parsed !== 'string') invalid(path);
-          return parsed;
+          parsed = JSON.parse(text.slice(start, index));
         } catch {
           invalid(path);
         }
+        if (typeof parsed !== 'string') invalid(path);
+        stringBytes += Buffer.byteLength(parsed, 'utf8');
+        if (stringBytes > maxStringBytes) fail('max_string_bytes', path, 'JSON strings exceed byte limit');
+        return parsed;
       }
       if (character === '\\') index += 1;
       index += 1;
@@ -200,7 +211,9 @@ export function parseJsonWithDuplicateKeyCheck(text: string): JsonValue {
   }
 
   function parseValue(depth: number, path: string): void {
+    nodeCount += 1;
     if (depth > MAX_CANONICAL_DEPTH) fail('max_depth', path, 'JSON text exceeds depth limit');
+    if (nodeCount > maxNodes) fail('max_nodes', path, 'JSON text exceeds node limit');
     skipWhitespace();
     const character = text[index];
     if (character === '{') {
@@ -273,7 +286,7 @@ export function parseJsonWithDuplicateKeyCheck(text: string): JsonValue {
 
   try {
     const parsed = JSON.parse(text) as JsonValue;
-    canonicalJson(parsed);
+    if (options.validateCanonical !== false) canonicalJson(parsed);
     return parsed;
   } catch (error: unknown) {
     if (error instanceof CanonicalJsonError) throw error;

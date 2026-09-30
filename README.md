@@ -13,7 +13,7 @@ instructions, rulings, and printed characteristics; rank composable rule batches
 their companion dependencies. Start with complete mappings to existing operations.
 
 The [binding and validation loop](docs/shared-rule-behaviors.md#binding-and-validation-batch-loop)
-guides native rule proofs, the private SQLite dependency catalog, bounded per-card
+guides native rule proofs, the [private SQLite dependency catalog](docs/card-tracker.md), bounded per-card
 validation, reviewed bindings, and the refreshed local workbook. Source review,
 validation readiness, admission, format legality, and competitive strength are separate.
 Current counts come from the private catalog; historical phase notes are not a queue.

@@ -13,7 +13,7 @@ Rust alone executes legality; official sources define the required behavior. The
 - Rust loads those immutable facts once into `RulesContext`; compact game positions borrow that shared context during simulation.
 - Rust rule helpers interpret generic facts and issue the only legal actions. Card names, deck-site data, prices, and future databases never define legality.
 
-The private SQLite catalog tracks source reviews, exact Codex references, contextual
+The [private SQLite catalog](card-tracker.md) tracks source reviews, exact Codex references, contextual
 rule dependencies, validation jobs, and admission evidence. The local workbook is a
 view of that evidence. Keep shared-rule proof, per-card proof, and admission distinct;
 a catalog row or broad Codex link cannot unlock a card. Use the
