@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import test from 'node:test';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 import { createSyntheticDemoManifest } from '../../src/commands/run-game-demo.ts';
 import { canonicalJson } from '../../src/authority/canonical-json.ts';
@@ -9,6 +13,7 @@ import { withSetup } from './rust-setup-session.ts';
 test('Rust session-json client creates, views, steps, and verifies a synthetic match', async () => {
   const client = await RustSessionClient.start();
   try {
+    assert.equal(client.launchIdentity.mode, 'development');
     const manifest = createSyntheticDemoManifest(31);
     const created = await client.newSession(canonicalJson(manifest as never));
     assert.match(created.stateHash, /^sha256:[0-9a-f]{64}$/);
@@ -53,6 +58,82 @@ test('Rust session-json client creates, views, steps, and verifies a synthetic m
     assert.equal(steps.steps[0]?.seat, 'north');
   } finally {
     await client.close();
+  }
+});
+
+test('pinned session executable launches the exact verified path directly', {
+  skip: process.platform === 'win32',
+}, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sorcery-pinned-session-'));
+  const executablePath = join(directory, 'session-json');
+  const markerPath = join(directory, 'started');
+  const source = `#!/usr/bin/env node\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(markerPath)}, 'started');\nprocess.stdin.resume();\n`;
+  await writeFile(executablePath, source);
+  await chmod(executablePath, 0o755);
+  const expectedSha256 = createHash('sha256').update(await readFile(executablePath)).digest('hex');
+  const client = await RustSessionClient.start({ executablePath, expectedSha256 });
+  try {
+    assert.deepEqual(client.launchIdentity, {
+      mode: 'pinned',
+      executablePath: resolve(executablePath),
+      sha256: `sha256:${expectedSha256}`,
+    });
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      try {
+        assert.equal(await readFile(markerPath, 'utf8'), 'started');
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
+      }
+    }
+    assert.fail('the verified executable did not start');
+  } finally {
+    await client.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('pinned session executable with a wrong hash fails before spawn', {
+  skip: process.platform === 'win32',
+}, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sorcery-pinned-session-'));
+  const executablePath = join(directory, 'session-json');
+  const markerPath = join(directory, 'started');
+  const source = `#!/usr/bin/env node\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(markerPath)}, 'started');\nprocess.stdin.resume();\n`;
+  await writeFile(executablePath, source);
+  await chmod(executablePath, 0o755);
+  const start = RustSessionClient.start({ executablePath, expectedSha256: '0'.repeat(64) });
+  try {
+    await assert.rejects(start, /SHA-256 mismatch/);
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+    await assert.rejects(readFile(markerPath), { code: 'ENOENT' });
+  } finally {
+    const result = await start.catch(() => undefined);
+    if (result) await result.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('pinned session executable rejects missing and non-executable paths', {
+  skip: process.platform === 'win32',
+}, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sorcery-pinned-session-'));
+  const executablePath = join(directory, 'session-json');
+  const expectedSha256 = '0'.repeat(64);
+  try {
+    await assert.rejects(
+      RustSessionClient.start({ executablePath, expectedSha256 }),
+      { code: 'ENOENT' },
+    );
+    await writeFile(executablePath, 'not executable');
+    await chmod(executablePath, 0o644);
+    await assert.rejects(
+      RustSessionClient.start({ executablePath, expectedSha256 }),
+      { code: 'EACCES' },
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });
 

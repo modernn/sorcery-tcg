@@ -1,5 +1,9 @@
 import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { constants } from 'node:fs';
+import { access, readFile, realpath } from 'node:fs/promises';
 import { createInterface, type Interface } from 'node:readline';
+import { isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -17,6 +21,7 @@ import {
 const REPOSITORY_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const MAX_OUTPUT_BYTES = 16 * 1_048_576;
 const HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
+const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 
 export function sessionJsonLaunch(): Readonly<{ args: readonly string[]; command: string }> {
   return {
@@ -29,6 +34,40 @@ export function sessionJsonLaunch(): Readonly<{ args: readonly string[]; command
 }
 
 export type Sha256Hash = `sha256:${string}`;
+
+export type RustSessionLaunchIdentity = Readonly<{
+  mode: 'development';
+  command: string;
+  args: readonly string[];
+} | {
+  mode: 'pinned';
+  executablePath: string;
+  sha256: Sha256Hash;
+}>;
+
+export type PinnedSessionJsonExecutable = Readonly<{
+  executablePath: string;
+  expectedSha256: string;
+}>;
+
+async function verifyPinnedExecutable(
+  input: PinnedSessionJsonExecutable,
+): Promise<Readonly<{ executablePath: string; sha256: Sha256Hash }>> {
+  if (!isAbsolute(input.executablePath)) {
+    throw new Error('pinned session-json executable path must be absolute');
+  }
+  if (!DIGEST_PATTERN.test(input.expectedSha256)) {
+    throw new Error('pinned session-json expectedSha256 must be 64 lowercase hex characters');
+  }
+  const executablePath = await realpath(input.executablePath);
+  await access(executablePath, constants.X_OK);
+  const bytes = await readFile(executablePath);
+  const digest = createHash('sha256').update(bytes).digest('hex');
+  if (digest !== input.expectedSha256) {
+    throw new Error(`pinned session-json SHA-256 mismatch: expected ${input.expectedSha256}, got ${digest}`);
+  }
+  return Object.freeze({ executablePath, sha256: `sha256:${digest}` });
+}
 
 export type RustDeterministicGameReport = Readonly<{
   acceptedActionCount: number;
@@ -412,14 +451,16 @@ type PendingRpc = {
 /** Persistent line-delimited JSON-RPC client for `session-json`. */
 export class RustSessionClient {
   private readonly child: ChildProcessWithoutNullStreams;
+  readonly launchIdentity: RustSessionLaunchIdentity;
   private closed = false;
   private readonly pending = new Map<number, PendingRpc>();
   private readonly reader: Interface;
   private nextId = 1;
   private stdoutBytes = 0;
 
-  private constructor(child: ChildProcessWithoutNullStreams) {
+  private constructor(child: ChildProcessWithoutNullStreams, launchIdentity: RustSessionLaunchIdentity) {
     this.child = child;
+    this.launchIdentity = launchIdentity;
     this.reader = createInterface({ crlfDelay: Infinity, input: child.stdout });
     this.reader.on('line', (line) => this.onLine(line));
     child.stderr.on('data', (chunk: Buffer) => {
@@ -434,16 +475,23 @@ export class RustSessionClient {
     });
   }
 
-  static async start(): Promise<RustSessionClient> {
-    const launch = sessionJsonLaunch();
-    const child = spawn(launch.command, [...launch.args], {
-      cwd: REPOSITORY_ROOT,
+  static async start(pinned?: PinnedSessionJsonExecutable): Promise<RustSessionClient> {
+    const launch = pinned === undefined
+      ? sessionJsonLaunch()
+      : await verifyPinnedExecutable(pinned);
+    const launchIdentity: RustSessionLaunchIdentity = 'command' in launch
+      ? Object.freeze({ mode: 'development', command: launch.command, args: launch.args })
+      : Object.freeze({ mode: 'pinned', ...launch });
+    const command = 'command' in launch ? launch.command : launch.executablePath;
+    const args = 'args' in launch ? [...launch.args] : [];
+    const child = spawn(command, args, {
+      ...(launchIdentity.mode === 'development' ? { cwd: REPOSITORY_ROOT } : {}),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    const client = new RustSessionClient(child);
+    const client = new RustSessionClient(child, launchIdentity);
     await new Promise<void>((resolve, reject) => {
+      child.once('spawn', resolve);
       child.once('error', reject);
-      setImmediate(() => resolve());
     });
     return client;
   }
