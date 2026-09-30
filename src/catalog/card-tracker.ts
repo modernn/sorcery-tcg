@@ -313,6 +313,27 @@ function ensurePrivateDatabaseRoot(repositoryRoot: string): string {
   return catalogRoot;
 }
 
+/** Expire work annotations without deleting historical proof or admission records. */
+export function expireStaleCardValidationAnnotations(database: DatabaseSync, engineHash: string): void {
+  database.prepare(`
+    UPDATE card_status SET validation_status='awaiting-current-engine-revalidation',validation_ready_annotation=1
+    WHERE validation_status='current-native-validation-accepted' AND (
+      NOT EXISTS (SELECT 1 FROM card_requirements r WHERE r.card_id=card_status.card_id AND r.is_current=1)
+      OR EXISTS (
+        SELECT 1 FROM card_requirements r JOIN cards c USING(card_id)
+        LEFT JOIN rule_slices s USING(slice_id)
+        WHERE r.card_id=card_status.card_id AND r.is_current=1 AND (
+          s.is_current IS NOT 1 OR NOT EXISTS (
+            SELECT 1 FROM proof_metadata p WHERE p.card_id=r.card_id AND p.slice_id=r.slice_id
+              AND p.source_hash=c.source_hash AND p.slice_hash=s.source_hash AND p.engine_hash=?
+              AND p.status='verified' AND p.evidence_hash IS NOT NULL
+          )
+        )
+      )
+    )
+  `).run(engineHash);
+}
+
 function upsertRows(database: DatabaseSync, rows: Readonly<{
   authorityHash: string;
   revisionId: string;
@@ -510,6 +531,7 @@ function upsertRows(database: DatabaseSync, rows: Readonly<{
       authorityHash: rows.authorityHash, revisionId: rows.revisionId, feedHash: rows.feedHash,
       engineHash: rows.engineHash, codexSnapshotHash: rows.codexSnapshotHash,
     })) putMeta.run(key, value);
+    expireStaleCardValidationAnnotations(database, rows.engineHash);
     database.exec('COMMIT');
     return { boundCount, sourceReviewedCount, sourceReviewCandidateCount, requirementCount: requirements };
   } catch (error) {
