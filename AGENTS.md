@@ -35,4 +35,4 @@
 - Use Podman, not Docker, when containers are necessary.
 - Run `pnpm verify` after changes. Run `pnpm authority:verify-private` only for authority-release work that has the required ignored local inputs.
 - For Rust changes, use locked dependencies and run `cargo fmt --all -- --check`, `cargo check --workspace --all-targets --all-features --locked`, `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, and `cargo test --workspace --all-features --locked`.
-- Make one coherent verified commit per change. Delegate only independent work that benefits from parallel execution.
+- Make one coherent verified commit per change and push each accepted batch to the authorized remote. A batch is complete only after its commit is confirmed on the remote; failed verification or push keeps it open. Keep private authority artifacts ignored. Delegate only independent work that benefits from parallel execution.

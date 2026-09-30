@@ -163,6 +163,11 @@ uses the shared legality, targeting, settlement, and replay mechanisms.
    make a coherent verified commit and push. Keep all official data, private proof
    drivers/receipts, registry inputs, and workbook bytes ignored under `.local/authority/`.
 
+Completion includes delivery: root records the verified commit and confirms it is on
+the authorized remote before marking a batch complete. Do not accumulate accepted
+changes only in local worktrees. Failed checks or a failed push leave the batch open
+with an explicit blocker. Private authority artifacts remain local and ignored.
+
 Source review, existing-operation mapping, a verified shared rule, per-card validation,
 and binding admission are separate states. None grants ranked eligibility or proves
 Constructed legality, strategic strength, price, or all possible interactions. An
