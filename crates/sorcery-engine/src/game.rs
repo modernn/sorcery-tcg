@@ -16687,6 +16687,30 @@ impl Game {
         Ok(())
     }
 
+    /// Consumes an opponent-controlled site's Ward when a valid location target resolves.
+    fn protect_warded_location(
+        &mut self,
+        location: Location,
+        caster: Seat,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> bool {
+        let Some(site) = self.position.sites[location.cell.index()].as_mut() else {
+            return false;
+        };
+        if site.controller == caster || !site.warded {
+            return false;
+        }
+        site.warded = false;
+        outcomes.push("ward-broken", || {
+            json!({
+                "cell": location.cell,
+                "instanceId": site.card.instance_id,
+                "seat": site.controller,
+            })
+        });
+        true
+    }
+
     /// Taps a carried Artifact's bearer and one other ally beside it so the Artifact damages one
     /// measured target. The Artifact is the source, so damage prevention keyed to unit power does
     /// not apply and no unit power or Lethal is lent to the shot.
@@ -16834,6 +16858,10 @@ impl Game {
                 "targetRegion": target_location.region,
             })
         });
+        if self.protect_warded_location(target_location, seat, outcomes) {
+            self.position.state_version += 1;
+            return Ok(());
+        }
         self.damage_each_unit_at_location(
             target_location,
             amount,
@@ -20586,6 +20614,18 @@ impl Game {
             self.position.state_version += 1;
             return Ok(());
         }
+        let protects_location = matches!(
+            &effect,
+            MagicEffect::BanishDemonAndUndeadMinionsAtLocationWithinTwoSteps
+                | MagicEffect::DestroyArtifactsAndAurasAtLocationWithinTwoSteps
+                | MagicEffect::DestroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps
+                | MagicEffect::KillMortalMinionsAtLocationWithinTwoSteps
+                | MagicEffect::DamageRandomUnitAtLocation(_)
+        ) && self.protect_warded_location(
+            target_location.ok_or(GameError::IllegalAction)?,
+            seat,
+            outcomes,
+        );
         let leap_attack = matches!(
             effect,
             MagicEffect::LeapAttackAlly | MagicEffect::AllyStrikesEachEnemyAtItsLocation
@@ -20594,6 +20634,12 @@ impl Game {
         // A raised minion resolves its Magic from the free placement it still owes.
         let mut raising = false;
         match effect {
+            MagicEffect::DamageRandomUnitAtLocation(_)
+            | MagicEffect::BanishDemonAndUndeadMinionsAtLocationWithinTwoSteps
+            | MagicEffect::DestroyArtifactsAndAurasAtLocationWithinTwoSteps
+            | MagicEffect::DestroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps
+            | MagicEffect::KillMortalMinionsAtLocationWithinTwoSteps
+                if protects_location => {}
             MagicEffect::HealController(amount) => {
                 self.heal_avatar(seat, u16::from(amount), card_instance_id, outcomes)?;
             }
@@ -30700,6 +30746,497 @@ pub mod catalog_proofs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn location_ward_helper_only_consumes_opponents_ward() {
+        let manifest = crate::synthetic::selfplay_manifest_with(31, |_| {});
+        let mut game = Game::from_manifest_json(&manifest).expect("Ward helper fixture");
+        let cell = Cell::parse("C3").expect("C3");
+        let card = game.position.players[seat_index(Seat::South)]
+            .hand_atlas
+            .remove(0);
+        game.position.sites[cell.index()] = Some(SitePosition {
+            card,
+            controller: Seat::South,
+            last_flight_turn: None,
+            warded: true,
+        });
+        let location = Location {
+            cell,
+            region: Region::Surface,
+        };
+        let mut events = Vec::new();
+        assert!(game.protect_warded_location(
+            location,
+            Seat::North,
+            &mut OutcomeLog::Record(&mut events),
+        ));
+        assert!(!game.position.sites[cell.index()].as_ref().unwrap().warded);
+        assert_eq!(
+            events
+                .iter()
+                .map(|(kind, _)| kind.as_str())
+                .collect::<Vec<_>>(),
+            ["ward-broken"]
+        );
+
+        let site = game.position.sites[cell.index()].as_mut().unwrap();
+        site.warded = true;
+        site.controller = Seat::North;
+        assert!(!game.protect_warded_location(location, Seat::North, &mut OutcomeLog::Ignore));
+        assert!(game.position.sites[cell.index()].as_ref().unwrap().warded);
+
+        game.position.sites[cell.index()]
+            .as_mut()
+            .unwrap()
+            .controller = Seat::South;
+        game.position.sites[cell.index()].as_mut().unwrap().warded = false;
+        assert!(!game.protect_warded_location(location, Seat::North, &mut OutcomeLog::Ignore));
+        assert!(!game.position.sites[cell.index()].as_ref().unwrap().warded);
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn artifact_location_ward_keeps_activation_costs_and_skips_damage() {
+        let manifest = crate::synthetic::selfplay_manifest_with(43, |manifest| {
+            for ordinal in 1..=50 {
+                manifest["cards"][format!("north-spell-{ordinal}")] = json!({
+                    "attack": 1,
+                    "cardType": "minion",
+                    "defense": 4,
+                    "manaCost": 2,
+                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                });
+            }
+            manifest["cards"]["north-spell-50"] = json!({
+                "cardType": "artifact",
+                "manaCost": 0,
+                "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("artifact Ward fixture");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card definition"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let target_cell = Cell::parse("C3").expect("C3");
+        let bearer_cell = Cell::parse("C4").expect("C4");
+        let site = game.position.players[seat_index(Seat::South)]
+            .hand_atlas
+            .remove(0);
+        game.position.sites[target_cell.index()] = Some(SitePosition {
+            card: site,
+            controller: Seat::South,
+            last_flight_turn: None,
+            warded: true,
+        });
+        let source_site = game.position.players[seat_index(Seat::North)]
+            .hand_atlas
+            .remove(0);
+        game.position.sites[bearer_cell.index()] = Some(SitePosition {
+            card: source_site,
+            controller: Seat::North,
+            last_flight_turn: None,
+            warded: false,
+        });
+        let bearer_id = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let helper_id = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let target_id = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+        let minion = |name: &str, instance_id: &str, owner: Seat, location: Cell| {
+            SummonPlacement {
+                card: CardInstance {
+                    realm_entry: 0,
+                    card_id: card_id(name),
+                    instance_id: IdentityHash::parse(instance_id).expect("minion identity"),
+                    owner,
+                    source: CardSource::Spellbook,
+                },
+                controller: owner,
+                lance_count: 0,
+                location,
+                occupied_cells: None,
+                region: Region::Surface,
+                stealthed: false,
+                warded: false,
+            }
+            .into_unit()
+        };
+        game.position.units = vec![
+            minion("north-spell-1", bearer_id, Seat::North, bearer_cell),
+            minion("north-spell-2", helper_id, Seat::North, bearer_cell),
+            minion("south-spell-1", target_id, Seat::South, target_cell),
+        ];
+        for unit in &mut game.position.units {
+            unit.tapped = false;
+            unit.summoning_sickness = false;
+        }
+        let artifact_id =
+            identity_hash(&json!({ "fixture": "warded-trebuchet" })).expect("artifact identity");
+        let artifact_card_id = card_id("north-spell-50");
+        game.position.artifacts = vec![ArtifactPosition {
+            card: CardInstance {
+                realm_entry: 0,
+                card_id: artifact_card_id,
+                instance_id: artifact_id.clone(),
+                owner: Seat::North,
+                source: CardSource::Spellbook,
+            },
+            placement: ArtifactPlacement::Carried {
+                bearer: UnitTarget::Minion {
+                    instance_id: IdentityHash::parse(bearer_id).unwrap(),
+                    seat: Seat::North,
+                },
+                cell: None,
+            },
+        }];
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.domain_established = true;
+        north.mana = 0;
+        game.position.phase = Phase::Main;
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+
+        let discard_id = north.hand_spellbook[0].instance_id.clone();
+        let before_version = game.position.state_version;
+        let action = game
+            .legal_actions()
+            .expect("engine-issued artifact action")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::ActivateArtifactDiscardAreaDamage {
+                        artifact_instance_id,
+                        discard_card_instance_id,
+                        helper,
+                        target_location,
+                        ..
+                    } if artifact_instance_id == &artifact_id
+                        && discard_card_instance_id == &discard_id
+                        && helper.instance_id().as_str() == helper_id
+                        && target_location.cell == target_cell
+                )
+            })
+            .expect("issued location activation");
+        let (events, random) = game
+            .apply_action_recorded(&action)
+            .expect("protected artifact activation");
+        assert!(random.is_empty());
+        assert_eq!(
+            events
+                .iter()
+                .map(|(kind, _)| kind.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "card-discarded",
+                "artifact-discard-area-damage-activated",
+                "ward-broken"
+            ]
+        );
+        assert_eq!(game.position.state_version, before_version + 1);
+        assert!(
+            !game.position.sites[target_cell.index()]
+                .as_ref()
+                .unwrap()
+                .warded
+        );
+        assert!(game.position.units[0].tapped);
+        assert!(game.position.units[1].tapped);
+        assert_eq!(game.position.units[2].damage, 0);
+        assert!(
+            game.position.players[seat_index(Seat::North)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == discard_id)
+        );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn artifact_targeted_magic_does_not_consume_ward_from_its_target_location() {
+        let manifest = crate::synthetic::selfplay_manifest_with(47, |manifest| {
+            manifest["cards"]["north-spell-1"] = json!({
+                "cardType": "magic",
+                "destroyOwnArtifactAtLocationForAreaDamage": 3,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+            manifest["cards"]["north-spell-50"] = json!({
+                "cardType": "artifact",
+                "grantsBearerPower": 2,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+            manifest["cards"]["south-spell-1"] = json!({
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 4,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("targeted artifact fixture");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card definition"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let target_cell = Cell::parse("C3").expect("C3");
+        let source_cell = Cell::parse("C4").expect("C4");
+        let north_site = game.position.players[seat_index(Seat::North)]
+            .hand_atlas
+            .remove(0);
+        let south_site = game.position.players[seat_index(Seat::South)]
+            .hand_atlas
+            .remove(0);
+        game.position.sites[source_cell.index()] = Some(SitePosition {
+            card: north_site,
+            controller: Seat::North,
+            last_flight_turn: None,
+            warded: false,
+        });
+        game.position.sites[target_cell.index()] = Some(SitePosition {
+            card: south_site,
+            controller: Seat::South,
+            last_flight_turn: None,
+            warded: true,
+        });
+        let target_id = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+        game.position.units.push(
+            SummonPlacement {
+                card: CardInstance {
+                    realm_entry: 0,
+                    card_id: card_id("south-spell-1"),
+                    instance_id: IdentityHash::parse(target_id).unwrap(),
+                    owner: Seat::South,
+                    source: CardSource::Spellbook,
+                },
+                controller: Seat::South,
+                lance_count: 0,
+                location: target_cell,
+                occupied_cells: None,
+                region: Region::Surface,
+                stealthed: false,
+                warded: false,
+            }
+            .into_unit(),
+        );
+        let artifact_id =
+            identity_hash(&json!({ "fixture": "own-artifact-target" })).expect("artifact identity");
+        game.position.artifacts.push(ArtifactPosition {
+            card: CardInstance {
+                realm_entry: 0,
+                card_id: card_id("north-spell-50"),
+                instance_id: artifact_id.clone(),
+                owner: Seat::North,
+                source: CardSource::Spellbook,
+            },
+            placement: ArtifactPlacement::Loose {
+                location: target_cell,
+                region: Region::Surface,
+            },
+        });
+        let magic_id =
+            identity_hash(&json!({ "fixture": "detonate-magic" })).expect("Magic identity");
+        game.position.players[seat_index(Seat::North)]
+            .hand_spellbook
+            .push(CardInstance {
+                realm_entry: 0,
+                card_id: card_id("north-spell-1"),
+                instance_id: magic_id.clone(),
+                owner: Seat::North,
+                source: CardSource::Spellbook,
+            });
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.domain_established = true;
+        north.mana = 0;
+        north.avatar.location = source_cell;
+        north.mulligan_complete = true;
+        game.position.phase = Phase::Main;
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        let location = Location {
+            cell: target_cell,
+            region: Region::Surface,
+        };
+        let action = game
+            .legal_actions()
+            .expect("legal targeted Magic action")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::CastMagic {
+                        card_instance_id,
+                        target_artifact_instance_id: Some(target_artifact),
+                        target_location: Some(target),
+                        ..
+                    } if card_instance_id == &magic_id
+                        && target_artifact == &artifact_id
+                        && *target == location
+                )
+            })
+            .expect("issued artifact-targeted action");
+        let version = game.position.state_version;
+        let (events, _) = game
+            .apply_action_recorded(&action)
+            .expect("resolve artifact-targeted Magic");
+        assert!(!events.iter().any(|(kind, _)| kind == "ward-broken"));
+        assert!(
+            game.position.sites[target_cell.index()]
+                .as_ref()
+                .unwrap()
+                .warded
+        );
+        assert_eq!(game.position.units[0].damage, 3);
+        assert!(game.position.artifacts.is_empty());
+        assert_eq!(game.position.state_version, version + 1);
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn warded_random_location_magic_has_record_ignore_position_and_prng_parity() {
+        let manifest = crate::synthetic::selfplay_manifest_with(53, |manifest| {
+            manifest["cards"]["north-spell-1"] = json!({
+                "cardType": "magic",
+                "damageRandomUnitAtLocation": 1,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+        });
+        let mut recorded = Game::from_manifest_json(&manifest).expect("random Ward fixture");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    recorded
+                        .rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card definition"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let target_cell = Cell::parse("C3").expect("C3");
+        let source_cell = Cell::parse("C4").expect("C4");
+        for (seat, cell, warded) in [
+            (Seat::North, source_cell, false),
+            (Seat::South, target_cell, true),
+        ] {
+            let site = recorded.position.players[seat_index(seat)]
+                .hand_atlas
+                .remove(0);
+            recorded.position.sites[cell.index()] = Some(SitePosition {
+                card: site,
+                controller: seat,
+                last_flight_turn: None,
+                warded,
+            });
+        }
+        let target_id = "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+        recorded.position.units.push(
+            SummonPlacement {
+                card: CardInstance {
+                    realm_entry: 0,
+                    card_id: card_id("south-spell-1"),
+                    instance_id: IdentityHash::parse(target_id).unwrap(),
+                    owner: Seat::South,
+                    source: CardSource::Spellbook,
+                },
+                controller: Seat::South,
+                lance_count: 0,
+                location: target_cell,
+                occupied_cells: None,
+                region: Region::Surface,
+                stealthed: false,
+                warded: false,
+            }
+            .into_unit(),
+        );
+        let magic_id =
+            identity_hash(&json!({ "fixture": "random-location-magic" })).expect("Magic identity");
+        recorded.position.players[seat_index(Seat::North)]
+            .hand_spellbook
+            .push(CardInstance {
+                realm_entry: 0,
+                card_id: card_id("north-spell-1"),
+                instance_id: magic_id.clone(),
+                owner: Seat::North,
+                source: CardSource::Spellbook,
+            });
+        let north = &mut recorded.position.players[seat_index(Seat::North)];
+        north.domain_established = true;
+        north.mana = 0;
+        north.avatar.location = source_cell;
+        recorded.position.phase = Phase::Main;
+        recorded.position.active_seat = Seat::North;
+        recorded.position.decision_seat = Seat::North;
+        let target_location = Location {
+            cell: target_cell,
+            region: Region::Surface,
+        };
+        let action = recorded
+            .legal_actions()
+            .expect("legal random Magic")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::CastMagic {
+                        card_instance_id,
+                        target_location: Some(location),
+                        ..
+                    } if card_instance_id == &magic_id && *location == target_location
+                )
+            })
+            .expect("issued random Magic action");
+        let mut ignored = recorded.clone();
+        let ignored_action = ignored
+            .legal_actions()
+            .expect("Ignore branch legal actions")
+            .into_iter()
+            .find(|candidate| candidate.descriptor == action.descriptor)
+            .expect("matching Ignore branch action");
+        let (events, random_draws) = recorded
+            .apply_action_recorded(&action)
+            .expect("recorded protected random Magic");
+        ignored
+            .apply_action(&ignored_action)
+            .expect("ignored protected random Magic");
+        assert!(random_draws.is_empty());
+        assert!(
+            !events
+                .iter()
+                .any(|(kind, _)| kind == "magic-damage-allocated")
+        );
+        assert_eq!(recorded.position, ignored.position);
+        assert_eq!(
+            recorded.legal_actions().unwrap(),
+            ignored.legal_actions().unwrap()
+        );
+        assert_eq!(
+            recorded.state_hash().unwrap(),
+            ignored.state_hash().unwrap()
+        );
+        assert_eq!(recorded.position.units[0].damage, 0);
+    }
 
     fn damage_transaction_fixture(prevention: Option<(&str, u8)>) -> (Game, IdentityHash) {
         let manifest = crate::synthetic::selfplay_manifest_with(31, |manifest| {

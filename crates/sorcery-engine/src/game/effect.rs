@@ -428,10 +428,12 @@ impl Game {
             match (&binding.site, site) {
                 _ if binding.state == BindingState::Invalid => {}
                 (Some(reference), Some(site)) if reference.matches(&site.card) => {
-                    if site.controller != frame.source.controller && site.warded {
-                        site.warded = false;
+                    if self.protect_warded_location(
+                        binding.location,
+                        frame.source.controller,
+                        outcomes,
+                    ) {
                         binding.state = BindingState::Protected;
-                        outcomes.push("ward-broken", || json!({ "cell": binding.location.cell, "instanceId": site.card.instance_id, "seat": site.controller }));
                     }
                 }
                 (None, None) => {}

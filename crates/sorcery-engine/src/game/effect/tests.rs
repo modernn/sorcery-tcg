@@ -1528,6 +1528,10 @@ fn site_ward_protects_the_target_location_but_preserves_an_independent_draw() {
                 recipients: AT_LOCATION,
                 amount: 1,
             },
+            Effect::Damage {
+                recipients: AT_LOCATION,
+                amount: 1,
+            },
             Effect::Draw {
                 zone: DeckZone::Spellbook,
                 count: 1,
@@ -1556,6 +1560,22 @@ fn site_ward_protects_the_target_location_but_preserves_an_independent_draw() {
             .warded
     );
     assert_eq!(
+        events
+            .iter()
+            .find(|(kind, _)| kind == "ward-broken")
+            .map(|(_, payload)| payload.clone()),
+        Some(json!({
+            "cell": location.cell,
+            "instanceId": game.position.sites[location.cell.index()]
+                .as_ref()
+                .unwrap()
+                .card
+                .instance_id,
+            "seat": "south",
+        })),
+        "the shared helper keeps the compiled three-field event payload"
+    );
+    assert_eq!(
         game.position.players[seat_index(Seat::North)]
             .hand_spellbook
             .len(),
@@ -1565,6 +1585,14 @@ fn site_ward_protects_the_target_location_but_preserves_an_independent_draw() {
         !events
             .iter()
             .any(|(kind, _)| kind == "magic-damage-allocated")
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|(kind, _)| kind == "ward-broken")
+            .count(),
+        1,
+        "consuming the Ward protects every dependent operation in this frame"
     );
 }
 

@@ -339,6 +339,84 @@ fn exorcism_deathrite_manifest(seed: u32) -> String {
     }))
 }
 
+fn location_warded_site_manifest(
+    seed: u32,
+    location_effect: &Value,
+    target_minion: &Value,
+) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "location-target-ward" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-location-target-ward-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-effect": location_effect,
+            "north-site": earth_site(),
+            "south-avatar": avatar(),
+            "south-site": earth_site(),
+            "south-target": target_minion,
+            "south-ward": {
+                "cardType": "magic",
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                "wardNearbyMinionOrSite": true,
+            },
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 12],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-effect"; 12],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": (0..12)
+                    .map(|index| if index % 2 == 0 { "south-target" } else { "south-ward" })
+                    .collect::<Vec<_>>(),
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn location_warded_site_artifact_manifest(seed: u32, location_effect: &Value) -> String {
+    let mut value: Value = serde_json::from_str(&location_warded_site_manifest(
+        seed,
+        location_effect,
+        &beast(),
+    ))
+    .expect("base location Ward manifest");
+    value.as_object_mut().unwrap().remove("manifestId");
+    value["cards"]["south-artifact"] = json!({
+        "cardType": "artifact",
+        "grantsBearerPower": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    });
+    value["decks"]["south"]["spellbook"] = json!([
+        "south-artifact",
+        "south-artifact",
+        "south-artifact",
+        "south-artifact",
+        "south-target",
+        "south-target",
+        "south-target",
+        "south-target",
+        "south-ward",
+        "south-ward",
+        "south-ward",
+        "south-ward",
+    ]);
+    finish_manifest(value)
+}
+
 fn try_accept_where(
     session: &mut Session,
     predicate: impl Fn(&Value) -> bool,
@@ -713,6 +791,278 @@ fn assert_exact_replay(session: &Session) {
     );
     assert_eq!(replayed.transcript(), session.transcript());
     assert!(session.verify_replay().expect("verified replay"));
+}
+
+fn warded_location_magic_session(encoded: &str, add_artifact: bool, ward_site: bool) -> Session {
+    let mut session = Session::new(encoded).expect("valid warded location session");
+    keep(&mut session);
+    keep(&mut session);
+    let pass_and_draw = |session: &mut Session| {
+        accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+        for _ in 0..3 {
+            let draws = session
+                .legal_actions()
+                .expect("legal draw actions")
+                .into_iter()
+                .find(|action| {
+                    matches!(
+                        action.descriptor["kind"].as_str(),
+                        Some("draw" | "draw-card" | "choose-draw")
+                    )
+                });
+            let Some(draw) = draws else {
+                break;
+            };
+            let kind = draw.descriptor["kind"].clone();
+            let zone = draw.descriptor["zone"].clone();
+            accept_where(session, |descriptor| {
+                descriptor["kind"] == kind && descriptor["zone"] == zone
+            });
+        }
+    };
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    pass_and_draw(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    pass_and_draw(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    pass_and_draw(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-target"
+            && descriptor["cell"] == "C2"
+    });
+    if add_artifact {
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-artifact"
+                && descriptor["cardId"] == "south-artifact"
+                && descriptor["cell"] == "C2"
+                && descriptor["bearer"].is_null()
+        });
+    }
+    if ward_site {
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic"
+                && descriptor["cardId"] == "south-ward"
+                && descriptor["targetLocation"]["cell"] == "C2"
+        });
+    }
+    pass_and_draw(&mut session);
+    session
+}
+
+#[test]
+fn opponent_site_ward_protects_location_targeted_exorcism_across_checkpoint_replay() {
+    let encoded = location_warded_site_manifest(1032, &exorcism(), &undead());
+    let mut session = warded_location_magic_session(&encoded, false, true);
+
+    let before = state(&session);
+    assert_eq!(before["realm"]["sites"]["C2"]["controller"], "south");
+    assert_eq!(before["realm"]["sites"]["C2"]["warded"], true);
+    let victim_id = before["realm"]["units"][0]["instanceId"]
+        .as_str()
+        .expect("Undead instance")
+        .to_owned();
+    let mut restored = checkpoint_round_trip(&session);
+    let cast_and_receipt = |session: &mut Session| {
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "cast-magic"
+                && descriptor["cardId"] == "north-effect"
+                && descriptor["targetLocation"]["cell"] == "C2"
+        })
+    };
+    let (_, receipt) = cast_and_receipt(&mut session);
+    let (_, replayed_receipt) = cast_and_receipt(&mut restored);
+    assert_eq!(receipt, replayed_receipt);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "ward-broken", "magic-resolved"]
+    );
+    let after = state(&session);
+    assert_eq!(after["realm"]["sites"]["C2"]["warded"], Value::Null);
+    assert!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .any(|unit| unit["instanceId"] == victim_id),
+        "the location Ward protects every occupant"
+    );
+    assert!(!cemetery_has(&after, "south", &victim_id));
+    assert_exact_replay(&session);
+    assert_exact_replay(&restored);
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn opponent_site_ward_protects_each_legacy_location_target_operation() {
+    let cases = [
+        (
+            "banishDemonAndUndeadMinionsAtLocationWithinTwoSteps",
+            json!(true),
+            undead(),
+        ),
+        (
+            "destroyArtifactsAndAurasAtLocationWithinTwoSteps",
+            json!(true),
+            beast(),
+        ),
+        (
+            "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
+            json!(true),
+            undead(),
+        ),
+        (
+            "killMortalMinionsAtLocationWithinTwoSteps",
+            json!(true),
+            beast(),
+        ),
+        ("damageRandomUnitAtLocation", json!(1), beast()),
+    ];
+    for (field, value, target) in cases {
+        let mut effect = json!({
+            "cardType": "magic",
+            "manaCost": 0,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        });
+        effect[field] = value;
+        let artifact_case = field == "destroyArtifactsAndAurasAtLocationWithinTwoSteps";
+        let encoded = if artifact_case {
+            (1032..=4096)
+                .map(|seed| location_warded_site_artifact_manifest(seed, &effect))
+                .find(|manifest| {
+                    let opened = state(&Session::new(manifest).expect("artifact seed candidate"));
+                    let hand = opened["players"]["south"]["hand"]["spellbook"]
+                        .as_array()
+                        .expect("South opening Spellbook hand");
+                    ["south-artifact", "south-target", "south-ward"]
+                        .iter()
+                        .all(|id| hand.iter().any(|card| card["cardId"] == *id))
+                })
+                .expect("bounded opening with an Artifact, Minion and Ward")
+        } else {
+            location_warded_site_manifest(1032, &effect, &target)
+        };
+        let mut session = warded_location_magic_session(&encoded, artifact_case, true);
+        let before = state(&session);
+        assert_eq!(before["realm"]["units"].as_array().unwrap().len(), 1);
+        let artifact_ids_before: Vec<_> = before["realm"]["artifacts"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|artifact| artifact["instanceId"].clone())
+            .collect();
+        if artifact_case {
+            assert_eq!(artifact_ids_before.len(), 1);
+            assert_eq!(before["realm"]["artifacts"][0]["location"], "C2");
+        }
+        let victim_id = before["realm"]["units"][0]["instanceId"]
+            .as_str()
+            .expect("ordinary target")
+            .to_owned();
+        let (_, receipt) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic"
+                && descriptor["cardId"] == "north-effect"
+                && descriptor["targetLocation"]["cell"] == "C2"
+        });
+        assert_eq!(
+            event_types(&receipt),
+            ["magic-cast", "ward-broken", "magic-resolved"],
+            "location Ward is checked before {field}"
+        );
+        assert_eq!(
+            receipt.state_version,
+            before["stateVersion"].as_u64().expect("pre-cast version")
+        );
+        if field == "damageRandomUnitAtLocation" {
+            assert!(receipt.random_draws.is_empty());
+            assert!(
+                !receipt
+                    .events
+                    .iter()
+                    .any(|event| event.event_type == "magic-damage-allocated")
+            );
+        }
+        let after = state(&session);
+        assert_eq!(after["realm"]["sites"]["C2"]["warded"], Value::Null);
+        assert_eq!(
+            after["stateVersion"].as_u64(),
+            before["stateVersion"].as_u64().map(|version| version + 1)
+        );
+        let victim = after["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .find(|unit| unit["instanceId"] == victim_id)
+            .expect("protected target survives");
+        assert_eq!(victim["damage"], 0, "location Ward protects {field}");
+        if artifact_case {
+            assert_eq!(
+                after["realm"]["artifacts"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|artifact| artifact["instanceId"].clone())
+                    .collect::<Vec<_>>(),
+                artifact_ids_before,
+                "location Ward preserves the Artifact recipient"
+            );
+
+            let mut unwarded = warded_location_magic_session(&encoded, true, false);
+            let unwarded_before = state(&unwarded);
+            assert_eq!(
+                unwarded_before["realm"]["artifacts"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                1
+            );
+            let (_, control) = accept_where(&mut unwarded, |descriptor| {
+                descriptor["kind"] == "cast-magic"
+                    && descriptor["cardId"] == "north-effect"
+                    && descriptor["targetLocation"]["cell"] == "C2"
+            });
+            assert_eq!(
+                event_types(&control),
+                ["magic-cast", "artifact-destroyed", "magic-resolved"]
+            );
+            assert!(
+                state(&unwarded)["realm"]["artifacts"]
+                    .as_array()
+                    .is_none_or(Vec::is_empty)
+            );
+            assert_eq!(
+                control.state_version,
+                unwarded_before["stateVersion"].as_u64().unwrap()
+            );
+            assert_exact_replay(&unwarded);
+        }
+        if field == "damageRandomUnitAtLocation" {
+            let (_, control) = accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "cast-magic"
+                    && descriptor["cardId"] == "north-effect"
+                    && descriptor["targetLocation"]["cell"] == "C2"
+            });
+            assert!(!control.random_draws.is_empty());
+            assert!(
+                control
+                    .events
+                    .iter()
+                    .any(|event| event.event_type == "magic-damage-allocated")
+            );
+            let unwarded = state(&session);
+            assert_eq!(unwarded["realm"]["units"][0]["damage"], 1);
+        }
+        assert_exact_replay(&session);
+    }
 }
 
 fn deathrite_exorcism_manifest(seed: u32) -> String {
