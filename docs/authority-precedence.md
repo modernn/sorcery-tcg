@@ -20,6 +20,17 @@ characteristics against those entries. Preserve unresolved conflicts as blocked
 requirements. Source review establishes the intended behavior; a native scenario
 and each card's guarded validation establish implementation evidence separately.
 
+Before deriving shared rule definitions, verify complete retained article contents,
+including nested entries, examples, structured diagrams, and resolved webpage data
+references. An inventory of valid article IDs does not establish content completeness.
+Preserve original source hashes; a repaired extraction is a new private derivative
+with its own hash and reproducible extraction receipt.
+
+Record source obligations separately from proposed implementation contracts and
+exercised scenario evidence. A passing test establishes observed behavior; review
+against the applicable source establishes whether its expected outcome is correct.
+Title matches, test filename matches, and broad family links are discovery aids only.
+
 ## Normative authority
 
 Only records whose `authorityClass` is `official` can determine an outcome. The five normative source classes are:

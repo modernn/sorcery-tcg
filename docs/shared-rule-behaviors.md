@@ -25,6 +25,16 @@ and subsection IDs/URLs, preserving parents and the scope of each reference. Gen
 family context is distinct from a clause-specific authority match; follow
 [authority precedence](authority-precedence.md) when sources disagree.
 
+Derive the shared contracts from complete Codex clauses first, then reconcile existing
+Rust helpers, scenario expectations, and card dependencies against them. Keep the
+private normative obligation ledger distinct from the card wording inventory and
+implementation hypotheses. Audit existing green tests rather than treating their
+expected outcomes as authority. Reuse conforming helpers; replace incorrect behavior
+in bounded slices with discriminating proofs. Start with death marking, Deathrite
+ordering, zone departure, replacement, and relationship cleanup before expanding
+batches that depend on those contracts. This is incremental reconciliation of the
+single Rust engine, not generated legality or a parallel rules interpreter.
+
 Private behavior inventories and identity-comparison receipts remain under
 `.local/authority/`. Reuse the accepted complete semantic and characteristic reviews.
 The older `mechanic-workload` classifier is only a lexical inventory, not the semantic
