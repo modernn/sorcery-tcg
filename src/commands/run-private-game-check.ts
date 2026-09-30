@@ -23425,11 +23425,11 @@ function runWaterGnarledWendigo(
   const sacrificedPayload = events[0] && isJsonRecord(events[0].payload)
     ? events[0].payload
     : undefined;
-  const deathPayload = events[1] && isJsonRecord(events[1].payload)
-    ? events[1].payload
-    : undefined;
-  const summonPayload = events[2] && isJsonRecord(events[2].payload)
+  const deathPayload = events[2] && isJsonRecord(events[2].payload)
     ? events[2].payload
+    : undefined;
+  const summonPayload = events[1] && isJsonRecord(events[1].payload)
+    ? events[1].payload
     : undefined;
   const wendigo = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.gnarledWendigoInstanceId);
@@ -23443,7 +23443,7 @@ function runWaterGnarledWendigo(
       && selected.descriptor.sacrificedMinionInstanceIds?.length === 1
       && selected.descriptor.sacrificedMinionInstanceIds[0] === opening.seravaInstanceId,
     causalEventsVerified: events.map(({ type }) => type).join(',')
-      === 'minion-sacrificed,minion-died,minion-summoned'
+      === 'minion-sacrificed,minion-summoned,minion-died'
       && sacrificedPayload?.cardId === input.seravaTownsfolk.stableId
       && sacrificedPayload.instanceId === opening.seravaInstanceId
       && sacrificedPayload.owner === 'north'
