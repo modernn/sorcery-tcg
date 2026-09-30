@@ -21,6 +21,7 @@
 ## Rule and card batches
 
 - Follow the [shared-rule batch loop](docs/shared-rule-behaviors.md#binding-and-validation-batch-loop). Review complete source semantics before grouping cards; reuse existing operations first and pair missing rules with their companion dependencies.
+- Every implementation packet must name its approved representations, shared helpers, affected callers, timing owner, proof pattern, and compatibility consequences. Independent review checks both source semantics and architecture conformance before integration. New representations, operators, timing boundaries, or material hot-path ownership changes return to design before coding; ordinary approved reuse proceeds directly.
 - Keep per-card source review, contextual requirements, shared-rule proofs, validation jobs, and admission distinct in the private catalog. A keyword match, source review, family count, or successful game does not establish complete support.
 - After a native rule proof passes, recompute exact contextual dependencies and queue all newly eligible cards for bounded independent validation. Each card needs a passing source-guarded receipt before registry promotion; no arbitrary small-card cap or blanket group unlock.
 - Keep catalog/workbook data under `.local/authority/`; SQLite tracks evidence and work, never legality. Refresh it after proof or binding changes. Get current counts from current inputs, not historical plans.

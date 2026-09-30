@@ -117,33 +117,48 @@ uses the shared legality, targeting, settlement, and replay mechanisms.
    referenced definition. Record unresolved requirements explicitly. Prioritize complete
    mappings to existing operations, including truly simple cards; blank text alone does
    not remove characteristic or inherent-type requirements.
-2. **Prove shared rules.** Group cards by concrete operations and contextual requirements,
+2. **Approve architecture fit.** Design a bounded packet before coding. Name the existing
+   representations, reused helpers and affected callers, one owner for mutation,
+   settlement, trigger arbitration and parent continuation, identity/lifetime policy,
+   discriminating proofs, permitted files and compatibility consequences. Use the
+   implementation contract below. A new representation, operator, timing boundary or
+   material hot-path ownership change returns to design review; approved reuse does
+   not require another whole-engine review. Assign one writer per conflicting slice.
+3. **Prove shared rules.** Group cards by concrete operations and contextual requirements,
    then pair companion rules needed together: selection with targeting, entry with
    regional settlement, a grant with suppression and expiry, or replacement with damage
    ordering. Rank by conditional card reach and selected-deck demand, with explicit
    blockers. Implement the smallest coherent Rust slice and a discriminating native
    scenario, including negative cases and relevant interactions. Reuse shared proof
    families without creating a card-name dispatcher or duplicated legality in a driver.
-3. **Recompute eligibility.** Refresh exact per-card dependencies in the ignored SQLite
+4. **Review semantics and conformance.** An independent reviewer checks complete scoped
+   source obligations and architectural fit, including equivalent callers, identity,
+   settlement order, interruption/resume and execution-mode parity where affected.
+   A green test is evidence, not authority. Deviations return to the design packet;
+   source contradictions return to the source review. Root integrates the accepted
+   slice, runs required gates, commits and pushes before downstream validation uses it.
+5. **Recompute eligibility.** Refresh exact per-card dependencies in the ignored SQLite
    catalog after rule verification. Preserve shared rule identity separately from each
    card's contextual mapping, source guard, Codex links, and proofs. A repeated semantic
    requirement ID does not make those card contexts interchangeable. Group counts are
    conditional planning estimates, never blanket unlocks.
-4. **Validate eligible cards.** Queue all newly eligible cards with complete guarded
+6. **Validate eligible cards.** Queue all newly eligible cards with complete guarded
    candidate facts and no unresolved contextual requirement. Readiness means a card
    needs validation; it must not require prior admission or an already-passing card
    proof. Dispatch bounded independent validation agents. Pin source, candidate facts,
    complete dependency set, and engine identity; stale evidence cannot authorize a job.
+   Launch the preserved executable whose exact path and hash the receipt records;
+   hashing one binary and starting a Cargo rebuild does not freeze the runtime.
    Use engine-issued actions and checkpoint/replay to exercise complete characteristics,
    abilities, and discriminating interactions. No arbitrary state edits or arbitrary
    one-to-three-card admission limit. Resource limits bound concurrency, not review scope.
-5. **Promote passing receipts.** Each card needs its own source/admission evidence and
+7. **Promote passing receipts.** Each card needs its own source/admission evidence and
    direct native scenario receipt before adding its complete facts to the private
    `bindings/reviewed.json`. Refer to shared rule proofs for common mechanics, retaining
    per-card evidence rather than duplicating an engine or test suite. Keep partial,
    failed, stale, and source-ambiguous cases unbound. Loader acceptance and a completed
    game alone are insufficient.
-6. **Refresh and verify.** Refresh the catalog, queue, workbook, and deck coverage from
+8. **Refresh and verify.** Refresh the catalog, queue, workbook, and deck coverage from
    accepted receipts. Run the required Rust gates for Rust changes and `pnpm verify`;
    make a coherent verified commit and push. Keep all official data, private proof
    drivers/receipts, registry inputs, and workbook bytes ignored under `.local/authority/`.
@@ -159,6 +174,33 @@ hypothesis. Run both seats over fixed seeds and use checkpoint scenarios for mec
 the baseline policy did not choose. This experimental design does not cap rule batches.
 Measure native worker throughput and memory before increasing concurrency; preserve
 input order and manifest/seed identity. Swap capacity is not a rollout budget.
+
+### Worker implementation contract
+
+Keep immutable `Arc<RulesContext>` shared and each branch's `Position` owned. Reuse
+typed `CardFacts`, bounded `AbilityProgram`/`EffectFrame`, `SelectionSpec`/`UnitQuery`
+and shared footprint queries. Use `RealmReference` for deferred incarnation identity,
+`TriggerBatch` for trigger ordering, `ResolutionContinuation` for suspended work,
+and existing damage/modifier helpers. These are reuse patterns, not certification
+that every existing helper already satisfies every Codex interaction.
+
+Do not add card-name branches, copied selectors or prevention logic, alternate
+producer queues, a shadow realm, worker-local frameworks or a second legality engine.
+Eligibility and payment must agree through shared checks; no universal cost hierarchy
+is assumed. Distinguish source, actor, owner, current controller and captured trigger
+controller, and snapshot only the values required by the reviewed source contract.
+
+`OutcomeLog` observes native state transitions and does not define timing. Changed
+resolution boundaries need authoritative state, legal-action and terminal parity
+between owned/Ignore and recorded execution, source-derived negative/composition
+cases, and serialized checkpoint/resume/replay at actual interruptions. Parent work
+resumes once; terminal state stops later work. Keep wire/schema compatibility separate
+from behavioral and executable identity, and preserve historical receipts unchanged.
+
+Measure material hot-path ownership/allocation changes on paired release workloads;
+trivial deletions need no invented benchmark gate. Root accepts design deviations,
+integrates verified slices and promotes current complete card evidence. After each
+refresh, dispatch the next dependency-ready packet through these same gates.
 
 When diagnosis benefits from a second view, use [Jev's existing synthetic adapters](agent-evaluation.md).
 Its suggested counterexample, probe, or action ordering must pass the same local native

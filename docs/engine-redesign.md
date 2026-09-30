@@ -8,10 +8,21 @@ and admission. No section declares complete released-card support.
 
 ## Decision and evidence
 
-Build one Rust rules kernel that executes composed ability data. Replace the existing
-card-shaped runtime facts and continuations as each shared mechanism is migrated.
+Build one Rust rules kernel that executes composed ability data. Keep the existing
+immutable shared rules, branch-owned state, typed programs/selectors, incarnation
+references, trigger ordering and explicit continuations. Reconcile a legacy fact or
+producer only through a source-reviewed bounded packet; a migration must preserve
+its complete semantics or explicitly correct them with discriminating evidence.
 Retain the deterministic session boundary, seeded randomness, replay checks, and
 native batch scheduling. Do not grow another collection of named card handlers.
+
+The global model below describes semantic requirements and migration directions,
+not authorization to invent every proposed representation now. The permanent
+[worker implementation contract](shared-rule-behaviors.md#worker-implementation-contract)
+and architecture-fit/review stages govern each implementation. There is no approved
+universal cost hierarchy, layer engine, pending-state replacement or realm storage
+rewrite. Prefer existing representations and one owner for each reviewed resolution
+boundary; new patterns return to bounded design review before coding.
 
 The private review now contains an individually authored semantic description for
 every card in the pinned 1,100-card corpus: 489 minions, 202 magics, 129 artifacts,
