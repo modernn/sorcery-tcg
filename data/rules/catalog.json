@@ -23900,7 +23900,7 @@
       "requirementIds": [
         "RULE-04"
       ],
-      "plainLanguage": "Banish-demon-and-undead-minions-at-location-within-two-steps Magic that banishes a Deathrite minion draws a site for that minion's controller before magic-resolved.",
+      "plainLanguage": "Banish-demon-and-undead-minions-at-location-within-two-steps Magic banishes an unmarked Demon or Undead without causing it to die; its Deathrite does not trigger, and the Magic resolves once.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "banishDemonAndUndeadMinionsAtLocationWithinTwoSteps",
@@ -23911,12 +23911,11 @@
       ],
       "eventHints": [
         "minion-banished",
-        "site-drawn",
         "magic-resolved"
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/banish_demon_undead_here_rules.rs",
-        "testName": "rule_catalog_1029_banish_demon_undead_deathrite_draws_for_controller_on_kill"
+        "testName": "rule_catalog_1029_unmarked_banish_does_not_trigger_deathrite"
       }
     },
     {

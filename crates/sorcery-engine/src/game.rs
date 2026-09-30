@@ -13931,67 +13931,6 @@ impl Game {
         self.revert_source_bound_controls(outcomes)
     }
 
-    fn collect_banish_deathrite_sources(
-        &self,
-        instance_ids: &[IdentityHash],
-    ) -> Result<Vec<PendingDeathriteSource>, GameError> {
-        let mut sources = Vec::new();
-        for instance_id in instance_ids {
-            let unit = self
-                .position
-                .units
-                .iter()
-                .find(|unit| unit.card.instance_id == *instance_id)
-                .ok_or(GameError::IllegalAction)?;
-            let CardFacts::Minion(facts) =
-                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
-            else {
-                return Err(GameError::IllegalAction);
-            };
-            let has_deathrite = facts.deathrite_damage_each_unit_here.is_some()
-                || facts.deathrite_draw_site
-                || facts.deathrite_draw_spells
-                || facts.deathrite_heal.is_some()
-                || facts.deathrite_lose_life_per_nearby_site_controlled
-                || facts.deathrite_mill_sites
-                || facts.deathrite_mill_spells;
-            if has_deathrite && !self.minion_abilities_lost(unit) {
-                let (_, damage_source) = self.minion_damage_stats(unit)?;
-                sources.push(PendingDeathriteSource {
-                    controller: unit.controller,
-                    current_power: damage_source.current_power,
-                    instance_id: unit.card.instance_id.clone(),
-                    lethal: damage_source.lethal,
-                    unit: unit.clone(),
-                });
-            }
-        }
-        Ok(sources)
-    }
-
-    fn begin_banish_deathrites(
-        &mut self,
-        sources: Vec<PendingDeathriteSource>,
-        outcomes: &mut OutcomeLog<'_>,
-    ) -> Result<(), GameError> {
-        if sources.is_empty() {
-            return Ok(());
-        }
-        self.revert_source_bound_controls(outcomes)?;
-        let batch = self.make_deathrite_batch(sources);
-        let pending = PendingDeathrites {
-            batches: batch.into_iter().collect(),
-            continuation: None,
-            corpses: Vec::new(),
-            deck_losers: Vec::new(),
-            deferred_magic_resolved: None,
-            defeated_avatars: Vec::new(),
-            return_decision_seat: self.position.decision_seat,
-            return_phase: self.position.phase,
-        };
-        self.drive_deathrites(pending, outcomes, None)
-    }
-
     fn begin_minion_deaths(
         &mut self,
         instance_ids: &[IdentityHash],
@@ -21703,9 +21642,7 @@ impl Game {
                 }
                 victims.sort_unstable();
                 if !victims.is_empty() {
-                    let sources = self.collect_banish_deathrite_sources(&victims)?;
                     self.banish_units(&victims, outcomes)?;
-                    self.begin_banish_deathrites(sources, outcomes)?;
                 }
             }
             MagicEffect::KillMortalMinionsAtLocationWithinTwoSteps => {
@@ -31411,10 +31348,16 @@ mod tests {
         assert_eq!(game.position.units[1].damage, 0);
         game.position.units[1].location = Cell::parse("C3").expect("source location");
 
-        let banish_sources = game
-            .collect_banish_deathrite_sources(std::slice::from_ref(&source))
-            .expect("banishment Deathrite snapshot");
-        assert_eq!(banish_sources[0].current_power, 4);
+        let source_unit = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == source)
+            .expect("Deathrite source before ordinary lethal resolution");
+        let (_, deathrite_source) = game
+            .minion_damage_stats(source_unit)
+            .expect("generic Deathrite power snapshot");
+        assert_eq!(deathrite_source.current_power, 4);
         game.begin_minion_deaths(
             std::slice::from_ref(&source),
             &[],

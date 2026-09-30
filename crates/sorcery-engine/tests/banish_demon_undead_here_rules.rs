@@ -1,8 +1,8 @@
 //! Direct proofs for banish-demon-and-undead-minions-at-location-within-two-steps
 //! Magic (RULE-CATALOG-0573–0574, 1029, 1097, RULE-CATALOG-1843–1848).
 //!
-//! 1029 covers exorcism banishing a Deathrite undead minion: the controller
-//! draws a site and magic-resolved only appears after deathrite settlement.
+//! 1029 covers exorcism banishing an unmarked Deathrite undead minion: no
+//! death or Deathrite occurs, and the spell completes exactly once.
 //! 1097 covers Exorcism withheld while Deathrites wait for ordering, until
 //! the chain drains.
 //!
@@ -14,6 +14,10 @@
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
+use sorcery_engine::checkpoint::{
+    create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+    serialize_game_checkpoint,
+};
 use sorcery_engine::contract::{ActionRequest, Receipt};
 use sorcery_engine::session::{Session, StepResult};
 
@@ -63,8 +67,32 @@ fn deathrite_undead() -> Value {
         "deathriteDrawSite": true,
         "defense": 3,
         "manaCost": 0,
+        "genesisGainControlOfTappedMinionsHereUntilThisLeaves": true,
+        "spellcaster": true,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
         "undead": true,
+    })
+}
+
+fn tapper_beast() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 3,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "tapForMana": 1,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn bearer_power_artifact() -> Value {
+    json!({
+        "cardType": "artifact",
+        "grantsBearerPower": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
 
@@ -277,10 +305,11 @@ fn exorcism_deathrite_manifest(seed: u32) -> String {
             "north-beast": beast(),
             "north-exorcism": exorcism(),
             "north-site": earth_site(),
+            "north-sword": bearer_power_artifact(),
             "north-undead": deathrite_undead(),
             "south-avatar": avatar(),
+            "south-beast": tapper_beast(),
             "south-site": earth_site(),
-            "south-undead": undead(),
         },
         "decks": {
             "north": {
@@ -290,15 +319,17 @@ fn exorcism_deathrite_manifest(seed: u32) -> String {
                     "north-undead",
                     "north-beast",
                     "north-exorcism",
+                    "north-sword",
                     "north-undead",
                     "north-beast",
                     "north-exorcism",
+                    "north-sword",
                 ],
             },
             "south": {
                 "atlas": vec!["south-site"; 6],
                 "avatar": "south-avatar",
-                "spellbook": vec!["south-undead"; 6],
+                "spellbook": vec!["south-beast"; 6],
             },
         },
         "engineVersion": "sorcery-core-v1",
@@ -355,6 +386,19 @@ fn opening_main(encoded: &str) -> Session {
 
 fn state(session: &Session) -> Value {
     session.replay_value().expect("authoritative replay")["state"].clone()
+}
+
+fn checkpoint_round_trip(session: &Session) -> Session {
+    let checkpoint = create_game_checkpoint(session).expect("captured scenario checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized checkpoint");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed checkpoint");
+    let restored = resume_game_checkpoint(&parsed).expect("restored checkpoint");
+    assert_eq!(state(&restored), state(session));
+    assert_eq!(
+        restored.legal_actions().expect("restored actions"),
+        session.legal_actions().expect("source actions")
+    );
+    restored
 }
 
 fn event_types(receipt: &Receipt) -> Vec<&str> {
@@ -1008,17 +1052,28 @@ fn rule_catalog_1848_second_exorcism_banishes_a_newly_summoned_demon() {
 }
 
 #[test]
-fn rule_catalog_1029_banish_demon_undead_deathrite_draws_for_controller_on_kill() {
+fn rule_catalog_1029_unmarked_banish_does_not_trigger_deathrite() {
     let encoded = (1029..1029 + 256)
         .map(exorcism_deathrite_manifest)
         .find(|candidate| {
             let hand = opening_spell_ids(candidate);
             hand.iter().any(|card| card == "north-undead")
                 && hand.iter().any(|card| card == "north-exorcism")
+                && hand.iter().any(|card| card == "north-sword")
         })
-        .unwrap_or_else(|| seed_with_deathrite(&["north-undead", "north-exorcism"]));
+        .unwrap_or_else(|| seed_with_deathrite(&["north-undead", "north-exorcism", "north-sword"]));
     let mut session = opening_main(&encoded);
     let undead_id = summon_at(&mut session, "north-undead", "C4");
+    let (sword, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "north-sword"
+            && descriptor["bearer"]["instanceId"] == undead_id
+    });
+    let sword_id = sword["cardInstanceId"]
+        .as_str()
+        .expect("carried artifact identity")
+        .to_owned();
+    let mut restored = checkpoint_round_trip(&session);
     let before = state(&session);
     let north_atlas = atlas_len(&before, "north");
     let south_atlas = atlas_len(&before, "south");
@@ -1028,15 +1083,24 @@ fn rule_catalog_1029_banish_demon_undead_deathrite_draws_for_controller_on_kill(
             && descriptor["cardId"] == "north-exorcism"
             && descriptor["targetLocation"]["cell"] == "C4"
     });
+    let (_, resumed_banish) = accept_where(&mut restored, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-exorcism"
+            && descriptor["targetLocation"]["cell"] == "C4"
+    });
+    assert_eq!(banished, resumed_banish);
+    assert_eq!(state(&restored), state(&session));
     assert_eq!(
         event_types(&banished),
         [
             "magic-cast",
+            "artifact-dropped",
             "minion-banished",
-            "site-drawn",
             "magic-resolved"
         ]
     );
+    assert_eq!(banished.events[1].payload["instanceId"], sword_id);
+    assert_eq!(banished.events[1].payload["bearerInstanceId"], undead_id);
     let banish = banished
         .events
         .iter()
@@ -1045,31 +1109,22 @@ fn rule_catalog_1029_banish_demon_undead_deathrite_draws_for_controller_on_kill(
     assert_eq!(banish.payload["cardId"], "north-undead");
     assert_eq!(banish.payload["instanceId"], undead_id);
     assert_eq!(banish.payload["owner"], "north");
-    let drawn = banished
-        .events
-        .iter()
-        .find(|event| event.event_type == "site-drawn")
-        .expect("Deathrite site draw");
-    assert_eq!(drawn.payload["seat"], "north");
-    assert_eq!(drawn.payload["sourceInstanceId"], undead_id);
-    let site_drawn = event_types(&banished)
-        .iter()
-        .position(|event_type| *event_type == "site-drawn")
-        .expect("site-drawn index");
-    let magic_resolved = event_types(&banished)
-        .iter()
-        .position(|event_type| *event_type == "magic-resolved")
-        .expect("magic-resolved index");
-    assert!(
-        site_drawn < magic_resolved,
-        "magic-resolved must follow deathrite site-drawn"
-    );
-    assert_eq!(event_types(&banished).last(), Some(&"magic-resolved"));
-    assert!(
-        !banished
-            .events
+    assert_eq!(
+        event_types(&banished)
             .iter()
-            .any(|event| event.event_type == "minion-killed" || event.event_type == "minion-died")
+            .filter(|event_type| **event_type == "magic-resolved")
+            .count(),
+        1,
+        "the banishing spell resolves exactly once"
+    );
+    assert!(
+        !banished.events.iter().any(|event| {
+            matches!(
+                event.event_type.as_str(),
+                "site-drawn" | "minion-killed" | "minion-died"
+            )
+        }),
+        "unmarked banishment does not produce a Deathrite or death"
     );
 
     let after = state(&session);
@@ -1081,8 +1136,106 @@ fn rule_catalog_1029_banish_demon_undead_deathrite_draws_for_controller_on_kill(
             .all(|unit| unit["instanceId"] != undead_id)
     );
     assert!(!cemetery_has(&after, "north", &undead_id));
-    assert_eq!(atlas_len(&after, "north"), north_atlas - 1);
+    let dropped = after["realm"]["artifacts"]
+        .as_array()
+        .expect("realm artifacts")
+        .iter()
+        .find(|artifact| artifact["instanceId"] == sword_id)
+        .expect("carried artifact remains in realm after banishment");
+    assert!(dropped["bearer"].is_null());
+    assert_eq!(dropped["location"], "C4");
+    assert_eq!(dropped["region"], "surface");
+    assert_eq!(atlas_len(&after, "north"), north_atlas);
     assert_eq!(atlas_len(&after, "south"), south_atlas);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1029_unmarked_banish_reverts_source_bound_control_on_departure() {
+    let encoded = seed_with_deathrite(&["north-undead", "north-exorcism"]);
+    let mut session = opening_main(&encoded);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    let (beast, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-beast"
+            && descriptor["cell"] == "C1"
+    });
+    let beast_id = beast["cardInstanceId"]
+        .as_str()
+        .expect("beast identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "activate-mana" && descriptor["unitInstanceId"] == beast_id
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let undead_id = summon_at(&mut session, "north-undead", "C1");
+    assert_eq!(unit(&state(&session), &beast_id)["controller"], "north");
+    assert_eq!(unit(&state(&session), &beast_id)["owner"], "south");
+    assert_eq!(unit(&state(&session), &beast_id)["tapped"], true);
+
+    let mut restored = checkpoint_round_trip(&session);
+    let (_, banished) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-exorcism"
+            && descriptor["casterInstanceId"] == undead_id
+            && descriptor["targetLocation"]["cell"] == "C1"
+    });
+    let (_, resumed_banish) = accept_where(&mut restored, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-exorcism"
+            && descriptor["casterInstanceId"] == undead_id
+            && descriptor["targetLocation"]["cell"] == "C1"
+    });
+    assert_eq!(banished, resumed_banish);
+    assert_eq!(
+        event_types(&banished),
+        [
+            "magic-cast",
+            "minion-banished",
+            "minion-control-changed",
+            "magic-resolved"
+        ]
+    );
+    assert!(banished.events.iter().any(|event| {
+        event.event_type == "minion-control-changed"
+            && event.payload["instanceId"] == beast_id
+            && event.payload["fromSeat"] == "north"
+            && event.payload["seat"] == "south"
+    }));
+    assert!(
+        !banished.events.iter().any(|event| {
+            matches!(
+                event.event_type.as_str(),
+                "site-drawn" | "minion-killed" | "minion-died"
+            )
+        }),
+        "direct banishment does not trigger the victim's Deathrite"
+    );
+    let after = state(&session);
+    assert_eq!(unit(&after, &beast_id)["controller"], "south");
+    assert_eq!(unit(&after, &beast_id)["owner"], "south");
+    assert_eq!(unit(&after, &beast_id)["tapped"], true);
+    assert!(unit_absent(&after, &undead_id));
+    assert!(!cemetery_has(&after, "north", &undead_id));
     assert_exact_replay(&session);
 }
 
