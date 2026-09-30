@@ -11,7 +11,7 @@ const MAX_INPUT = 16 * 1024 * 1024;
 const DB_NAME = 'card-tracker.sqlite3';
 const FEED = 'binding-cycles/direct-maps-20260929/spreadsheet-feed.json';
 const CODEX = 'codex/official-codex.snapshot.json';
-const CATALOG = 'experiments/timed-disable-244-20260929.catalog.json';
+const CATALOG = 'catalog/current-bindings.catalog.json';
 const REVIEWED = 'bindings/reviewed.json';
 
 export const CARD_TRACKER_SCHEMA = `
