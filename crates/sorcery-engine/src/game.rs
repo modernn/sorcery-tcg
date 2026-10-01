@@ -8830,6 +8830,14 @@ impl Game {
                 }
                 if can_voidwalk {
                     candidates.extend(bordering(Region::Void));
+                    if profile.airborne {
+                        candidates.extend(current.cell.diagonals(profile.connects_top_bottom).map(
+                            |cell| Location {
+                                cell,
+                                region: Region::Void,
+                            },
+                        ));
+                    }
                 }
             }
             Region::Underground if profile.regions.burrowing => {
@@ -38907,5 +38915,143 @@ mod tests {
         assert_eq!(game.position, parent_position);
         assert_eq!(game.state_hash().unwrap(), parent_hash);
         assert_eq!(game.legal_actions().unwrap(), parent_actions);
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the single-action fixture and three execution modes are compared together"
+    )]
+    fn airborne_voidwalk_surface_to_void_action_matches_record_ignore_and_owned() {
+        let manifest = crate::synthetic::synthetic_demo_manifest_json(904)
+            .expect("synthetic Airborne Voidwalk manifest");
+        let mut game =
+            Game::from_manifest_json(&manifest).expect("Airborne Voidwalk transaction fixture");
+        let north = seat_index(Seat::North);
+        for player in &mut game.position.players {
+            player.mulligan_complete = true;
+        }
+
+        let site_card = game.position.players[north].hand_atlas.remove(0);
+        let site_cell = Cell::parse("C4").expect("site cell");
+        game.position.sites[site_cell.index()] = Some(SitePosition {
+            card: site_card,
+            controller: Seat::North,
+            last_flight_turn: None,
+            warded: false,
+        });
+
+        let mut minion_card = game.position.players[north].hand_spellbook.remove(0);
+        let minion_index = usize::from(minion_card.card_id.0);
+        {
+            let rules = Arc::get_mut(&mut game.rules).expect("fixture rules remain unique");
+            let CardFacts::Minion(facts) = &mut rules.cards[minion_index].facts else {
+                panic!("synthetic spellbook card is a minion");
+            };
+            facts.airborne = true;
+            facts.voidwalk = true;
+        }
+        let minion_instance_id = minion_card.instance_id.clone();
+        minion_card.enter_realm().expect("enter minion into realm");
+        let mut unit = SummonPlacement {
+            card: minion_card,
+            controller: Seat::North,
+            lance_count: 0,
+            location: site_cell,
+            occupied_cells: None,
+            region: Region::Surface,
+            stealthed: false,
+            warded: false,
+        }
+        .into_unit();
+        unit.summoning_sickness = false;
+        game.position.units.push(unit);
+        game.position.phase = Phase::Main;
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.turn_controller = Some(Seat::North);
+        game.position.turn_number = 1;
+        game.position.players[north].domain_established = true;
+
+        let action = game
+            .legal_actions()
+            .expect("issued Airborne Voidwalk actions")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::MoveAndAttack {
+                        from: Location { cell: from, region: Region::Surface },
+                        path,
+                        to: Location { cell: to, region: Region::Void },
+                        unit_instance_id,
+                    } if *from == site_cell
+                        && *to == Cell::parse("B3").unwrap()
+                        && *unit_instance_id == minion_instance_id
+                        && path.len() == 2
+                )
+            })
+            .expect("Surface-diagonal to Void is engine-issued");
+        let parent_position = game.position.clone();
+        let parent_hash = game.state_hash().expect("parent hash");
+        let parent_actions = game.legal_actions().expect("parent legal frontier");
+        let parent_north_view = game.public_view(Seat::North).expect("North parent view");
+        let parent_south_view = game.public_view(Seat::South).expect("South parent view");
+
+        let mut recorded = game.clone();
+        let (events, draws) = recorded
+            .apply_action_recorded(&action)
+            .expect("Record issued step");
+        let mut ignored = game.clone();
+        ignored.apply_action(&action).expect("Ignore issued step");
+        let owned_root = game.clone();
+        let owned = game
+            .clone()
+            .apply_action_owned(&action)
+            .expect("owned issued step");
+
+        assert!(
+            events
+                .iter()
+                .any(|(kind, _)| kind == "move-and-attack-activated")
+        );
+        assert!(draws.is_empty());
+        for actual in [&ignored, &owned] {
+            assert_eq!(actual.position, recorded.position);
+            assert_eq!(actual.state_hash().unwrap(), recorded.state_hash().unwrap());
+            assert_eq!(
+                actual.legal_actions().unwrap(),
+                recorded.legal_actions().unwrap()
+            );
+            assert_eq!(
+                actual.public_view(Seat::North).unwrap(),
+                recorded.public_view(Seat::North).unwrap()
+            );
+            assert_eq!(
+                actual.public_view(Seat::South).unwrap(),
+                recorded.public_view(Seat::South).unwrap()
+            );
+        }
+        let moved = recorded
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == minion_instance_id)
+            .expect("same unit after step");
+        assert_eq!(moved.location, Cell::parse("B3").unwrap());
+        assert_eq!(moved.region, Region::Void);
+        assert_eq!(moved.controller, Seat::North);
+        assert!(moved.tapped);
+        assert_eq!(owned_root.position, parent_position);
+        assert_eq!(owned_root.state_hash().unwrap(), parent_hash);
+        assert_eq!(owned_root.legal_actions().unwrap(), parent_actions);
+        assert_eq!(
+            owned_root.public_view(Seat::North).unwrap(),
+            parent_north_view
+        );
+        assert_eq!(
+            owned_root.public_view(Seat::South).unwrap(),
+            parent_south_view
+        );
     }
 }

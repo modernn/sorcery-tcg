@@ -11,6 +11,10 @@ mod marked_death;
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
+use sorcery_engine::checkpoint::{
+    create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+    serialize_game_checkpoint,
+};
 use sorcery_engine::contract::{ActionRequest, Receipt};
 use sorcery_engine::session::{Session, StepResult};
 
@@ -110,6 +114,46 @@ fn step_manifest(seed: u32) -> String {
                 "atlas": vec!["south-site"; 6],
                 "avatar": "south-avatar",
                 "spellbook": vec!["south-enemy"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn airborne_voidwalk_leap_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "leap-airborne-voidwalk" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-leap-airborne-voidwalk-v1",
+        },
+        "cards": {
+            "north-ally": ally(json!({ "airborne": true, "voidwalk": true })),
+            "north-avatar": avatar(),
+            "north-leap": leap(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-enemy": ally(json!({ "attack": 2, "defense": 5, "voidwalk": true })),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 16],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-leap", "north-ally", "north-leap", "north-ally",
+                    "north-leap", "north-ally", "north-leap", "north-ally",
+                    "north-leap", "north-ally", "north-leap", "north-ally",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 16],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-enemy"; 12],
             },
         },
         "engineVersion": "sorcery-core-v1",
@@ -1027,4 +1071,121 @@ fn rule_catalog_1968_second_leap_strikes_a_newly_summoned_enemy() {
     assert!(event_types(&receipt).contains(&"strike-damage-allocated"));
     assert!(realm_unit(&state(&session), &enemy_id).is_none());
     assert_exact_replay(&session);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one issued Leap route keeps setup, checkpoint, and strike proof together"
+)]
+fn leap_attack_uses_airborne_voidwalk_surface_departure() {
+    let encoded = (1970..1970 + 512)
+        .map(airborne_voidwalk_leap_manifest)
+        .find(|candidate| {
+            Session::new(candidate).ok().is_some_and(|preview| {
+                let snapshot = state(&preview);
+                let hand = &snapshot["players"]["north"]["hand"]["spellbook"];
+                hand.as_array().is_some_and(|cards| {
+                    cards.iter().any(|card| card["cardId"] == "north-leap")
+                        && cards.iter().any(|card| card["cardId"] == "north-ally")
+                })
+            })
+        })
+        .expect("bounded seed with Leap and ally in North's opening hand");
+    let mut session = Session::new(&encoded).expect("Leap Airborne Voidwalk fixture");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+    });
+    let ally_id = summoned["cardInstanceId"].as_str().unwrap().to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let (enemy, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-enemy"
+            && descriptor["cell"] == "B3"
+            && descriptor["region"] == "void"
+    });
+    let enemy_id = enemy["cardInstanceId"].as_str().unwrap().to_owned();
+    assert_eq!(
+        realm_unit(&state(&session), &ally_id).unwrap()["location"],
+        "C4"
+    );
+    assert_eq!(
+        realm_unit(&state(&session), &enemy_id).unwrap()["region"],
+        "void"
+    );
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+
+    let checkpoint = create_game_checkpoint(&session).expect("pre-Leap checkpoint");
+    let encoded_checkpoint = serialize_game_checkpoint(&checkpoint).expect("serialized checkpoint");
+    let parsed = parse_game_checkpoint(&encoded_checkpoint).expect("parsed checkpoint");
+    let mut resumed = resume_game_checkpoint(&parsed).expect("resumed checkpoint");
+    assert_eq!(
+        resumed.replay_value().unwrap(),
+        session.replay_value().unwrap()
+    );
+    assert_eq!(
+        resumed.legal_actions().unwrap(),
+        session.legal_actions().unwrap()
+    );
+
+    let cast = |descriptor: &Value| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-leap"
+            && descriptor["ally"]["instanceId"] == ally_id
+            && descriptor["allyDestination"]["cell"] == "B3"
+            && descriptor["allyDestination"]["region"] == "void"
+    };
+    assert!(
+        session
+            .legal_actions()
+            .unwrap()
+            .iter()
+            .any(|action| cast(&action.descriptor))
+    );
+    let (_, original_receipt) = accept_where(&mut session, cast);
+    let (_, resumed_receipt) = accept_where(&mut resumed, cast);
+    assert_eq!(original_receipt, resumed_receipt);
+    assert!(event_types(&original_receipt).contains(&"unit-stepped"));
+    assert!(event_types(&original_receipt).contains(&"strike-damage-allocated"));
+    assert!(event_types(&original_receipt).contains(&"magic-resolved"));
+    let after = state(&session);
+    let moved_ally = realm_unit(&after, &ally_id).expect("Leap ally after strike");
+    assert_eq!(moved_ally["location"], "B3");
+    assert_eq!(moved_ally["region"], "void");
+    assert_eq!(moved_ally["controller"], "north");
+    assert_eq!(moved_ally["owner"], "north");
+    assert_eq!(realm_unit(&after, &enemy_id).unwrap()["damage"], 3);
+    assert_eq!(
+        session.replay_value().unwrap(),
+        resumed.replay_value().unwrap()
+    );
+    assert_exact_replay(&session);
+    assert_exact_replay(&resumed);
 }

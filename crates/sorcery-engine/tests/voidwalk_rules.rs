@@ -9,7 +9,11 @@
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
-use sorcery_engine::contract::{ActionRequest, Receipt};
+use sorcery_engine::checkpoint::{
+    create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+    serialize_game_checkpoint,
+};
+use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::session::{Session, StepResult};
 
 fn avatar() -> Value {
@@ -199,6 +203,19 @@ fn assert_exact_replay(session: &Session) {
     assert!(session.verify_replay().expect("verified replay"));
 }
 
+fn public_session_fingerprint(session: &Session) -> Value {
+    json!({
+        "legalActions": session.legal_actions().expect("legal frontier"),
+        "northView": session.public_view(Seat::North).expect("north public view"),
+        "replay": session.replay_value().expect("replay value"),
+        "sessionHash": session.session_hash().expect("session hash"),
+        "southView": session.public_view(Seat::South).expect("south public view"),
+        "stateHash": session.state_hash().expect("state hash"),
+        "transcript": session.transcript(),
+        "transcriptHash": session.transcript_hash().expect("transcript hash"),
+    })
+}
+
 fn play_site(session: &mut Session, cell: &str) {
     accept_where(session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == cell
@@ -241,6 +258,113 @@ fn voidwalk_cards(voidwalker: &Value, north_site: &Value) -> Value {
         "south-filler": minion(json!({})),
         "south-site": site(&["earth"]),
     })
+}
+
+fn oriented_step_manifest(seed: u32, first_seat: &str, walker: &Value) -> String {
+    let north_spellbook = if first_seat == "north" {
+        vec!["walker"; 8]
+    } else {
+        vec!["filler"; 8]
+    };
+    let south_spellbook = if first_seat == "south" {
+        vec!["walker"; 8]
+    } else {
+        vec!["filler"; 8]
+    };
+    let value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "airborne-voidwalk-step" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-airborne-voidwalk-step-v1",
+        },
+        "cards": {
+            "filler": minion(json!({})),
+            "north-avatar": avatar(),
+            "north-site": site(&["earth"]),
+            "south-avatar": avatar(),
+            "south-site": site(&["earth"]),
+            "walker": walker.clone(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 9],
+                "avatar": "north-avatar",
+                "spellbook": north_spellbook,
+            },
+            "south": {
+                "atlas": vec!["south-site"; 9],
+                "avatar": "south-avatar",
+                "spellbook": south_spellbook,
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": first_seat,
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    let mut value = value;
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+/// Opens both domains through issued Site actions and returns the first seat's ready walker.
+fn ready_oriented_walker(
+    seed: u32,
+    first_seat: &str,
+    walker: &Value,
+    summon_in_void: bool,
+) -> (Session, String, String, String, String) {
+    let mut session = Session::new(&oriented_step_manifest(seed, first_seat, walker))
+        .expect("valid oriented movement fixture");
+    keep(&mut session);
+    keep(&mut session);
+
+    let (
+        site_cell,
+        other_site_cell,
+        second_site_cell,
+        walker_card_id,
+        surface_cell,
+        diagonal_cell,
+        void_cell,
+        surface_diagonal,
+    ) = if first_seat == "north" {
+        ("C4", "C1", "C3", "walker", "C4", "B3", "B4", "C3")
+    } else {
+        ("C1", "C4", "C2", "walker", "C1", "B2", "B2", "C1")
+    };
+    play_site(&mut session, site_cell);
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == walker_card_id
+            && if summon_in_void {
+                descriptor["region"] == "void" && descriptor["cell"] == void_cell
+            } else {
+                descriptor["region"].is_null() && descriptor["cell"] == surface_cell
+            }
+    });
+    let walker_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("summoned walker identity")
+        .to_owned();
+
+    pass_turn(&mut session);
+    play_site(&mut session, other_site_cell);
+    pass_turn(&mut session);
+    if summon_in_void {
+        play_site(&mut session, second_site_cell);
+        pass_turn(&mut session);
+        pass_turn(&mut session);
+    }
+
+    (
+        session,
+        walker_id,
+        diagonal_cell.to_owned(),
+        void_cell.to_owned(),
+        surface_diagonal.to_owned(),
+    )
 }
 
 fn planar_gate_site() -> Value {
@@ -921,6 +1045,292 @@ fn rule_catalog_0317_oversized_voidwalk_steps_between_void_squares_not_onto_surf
         )
     );
     assert_exact_replay(&session);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the paired seat and isolated keyword control cases form one boundary proof"
+)]
+fn airborne_voidwalk_allows_only_surface_departure_diagonal_into_void() {
+    for (index, seat) in ["north", "south"].into_iter().enumerate() {
+        let walker = minion(json!({ "airborne": true, "voidwalk": true }));
+        let (mut session, walker_id, diagonal, _, _) =
+            ready_oriented_walker(840 + u32::try_from(index).unwrap(), seat, &walker, false);
+        let from = if seat == "north" { "C4" } else { "C1" };
+        let path = [format!("{from}/surface"), format!("{diagonal}/void")];
+        let movement = |descriptor: &Value| {
+            descriptor["kind"] == "move-and-attack"
+                && descriptor["unitInstanceId"] == walker_id
+                && path_locations(descriptor) == path
+        };
+        let parent_session = session.clone();
+        let parent_fingerprint = public_session_fingerprint(&parent_session);
+        let mut branch = parent_session.clone();
+        let parent_state = state(&session);
+        let old = realm_unit(&parent_state, &walker_id).expect("ready Airborne Voidwalker");
+        assert_eq!(old["controller"], seat);
+        assert_eq!(old["owner"], seat);
+        assert_eq!(old["tapped"], false);
+        assert!(offers(&session, movement));
+
+        let checkpoint = create_game_checkpoint(&session).expect("pre-step checkpoint");
+        let encoded = serialize_game_checkpoint(&checkpoint).expect("serialized checkpoint");
+        let parsed = parse_game_checkpoint(&encoded).expect("parsed checkpoint");
+        let mut resumed = resume_game_checkpoint(&parsed).expect("resumed pre-step checkpoint");
+        assert_eq!(
+            resumed.replay_value().unwrap(),
+            session.replay_value().unwrap()
+        );
+        assert_eq!(
+            resumed.legal_actions().unwrap(),
+            session.legal_actions().unwrap()
+        );
+
+        let (descriptor, receipt) = accept_where(&mut session, movement);
+        let (_, resumed_receipt) = accept_where(&mut resumed, movement);
+        let (_, branch_receipt) = accept_where(&mut branch, movement);
+        assert_eq!(receipt, resumed_receipt);
+        assert_eq!(receipt, branch_receipt);
+        decline_attack_if_needed(&mut session);
+        decline_attack_if_needed(&mut resumed);
+        decline_attack_if_needed(&mut branch);
+        assert_eq!(descriptor["path"].as_array().unwrap().len(), 2);
+        assert_eq!(receipt.events[0].event_type, "move-and-attack-activated");
+        let moved = realm_unit(&state(&session), &walker_id).expect("moved Voidwalker");
+        assert_eq!(moved["location"], diagonal);
+        assert_eq!(moved["region"], "void");
+        assert_eq!(moved["controller"], seat);
+        assert_eq!(moved["owner"], seat);
+        assert_eq!(moved["tapped"], true);
+        assert_eq!(moved["instanceId"], walker_id);
+        assert_eq!(
+            public_session_fingerprint(&parent_session),
+            parent_fingerprint
+        );
+        let expected_fingerprint = public_session_fingerprint(&session);
+        assert_eq!(public_session_fingerprint(&resumed), expected_fingerprint);
+        assert_eq!(public_session_fingerprint(&branch), expected_fingerprint);
+        assert_exact_replay(&session);
+        assert_exact_replay(&resumed);
+        assert_exact_replay(&branch);
+    }
+
+    for (index, seat) in ["north", "south"].into_iter().enumerate() {
+        let walker = minion(json!({ "voidwalk": true }));
+        let (session, walker_id, diagonal, _, _) =
+            ready_oriented_walker(850 + u32::try_from(index).unwrap(), seat, &walker, false);
+        assert!(!offers(&session, |descriptor| {
+            descriptor["kind"] == "move-and-attack"
+                && descriptor["unitInstanceId"] == walker_id
+                && path_locations(descriptor).last() == Some(&format!("{diagonal}/void"))
+        }));
+        assert!(offers(&session, |descriptor| {
+            descriptor["kind"] == "move-and-attack"
+                && descriptor["unitInstanceId"] == walker_id
+                && path_locations(descriptor)
+                    .last()
+                    .is_some_and(|location| location.ends_with("/void"))
+        }));
+
+        let walker = minion(json!({ "airborne": true }));
+        let (session, walker_id, diagonal, _, _) =
+            ready_oriented_walker(860 + u32::try_from(index).unwrap(), seat, &walker, false);
+        assert!(!offers(&session, |descriptor| {
+            descriptor["kind"] == "move-and-attack"
+                && descriptor["unitInstanceId"] == walker_id
+                && path_locations(descriptor).last() == Some(&format!("{diagonal}/void"))
+        }));
+    }
+
+    for (index, seat) in ["north", "south"].into_iter().enumerate() {
+        let walker = minion(json!({ "airborne": true, "voidwalk": true }));
+        let (session, walker_id, _, void_source, surface_diagonal) =
+            ready_oriented_walker(870 + u32::try_from(index).unwrap(), seat, &walker, true);
+        let surface_from_void = |descriptor: &Value| {
+            descriptor["kind"] == "move-and-attack"
+                && descriptor["unitInstanceId"] == walker_id
+                && path_locations(descriptor)
+                    == [
+                        format!("{void_source}/void"),
+                        format!("{surface_diagonal}/surface"),
+                    ]
+        };
+        let diagonal_void = if seat == "north" { "A3" } else { "A1" };
+        let void_from_void = |descriptor: &Value| {
+            descriptor["kind"] == "move-and-attack"
+                && descriptor["unitInstanceId"] == walker_id
+                && path_locations(descriptor)
+                    == [
+                        format!("{void_source}/void"),
+                        format!("{diagonal_void}/void"),
+                    ]
+        };
+        assert!(!offers(&session, surface_from_void));
+        assert!(!offers(&session, void_from_void));
+        assert!(offers(&session, |descriptor| {
+            descriptor["kind"] == "move-and-attack"
+                && descriptor["unitInstanceId"] == walker_id
+                && path_locations(descriptor).len() == 2
+                && path_locations(descriptor).last().is_some_and(|location| {
+                    location.ends_with("/void") && location != &format!("{diagonal_void}/void")
+                })
+        }));
+    }
+}
+
+#[test]
+fn airborne_voidwalk_multistep_permission_restarts_after_surface_arrival() {
+    for (index, seat) in ["north", "south"].into_iter().enumerate() {
+        let walker = minion(json!({
+            "airborne": true,
+            "movementBonus": 1,
+            "voidwalk": true,
+        }));
+        let (mut session, walker_id, diagonal, _, _) =
+            ready_oriented_walker(880 + u32::try_from(index).unwrap(), seat, &walker, false);
+        let (from, next_void) = if seat == "north" {
+            ("C4", "A3")
+        } else {
+            ("C1", "A2")
+        };
+        let two_steps = [
+            format!("{from}/surface"),
+            format!("{diagonal}/void"),
+            format!("{next_void}/void"),
+        ];
+        let allowed = |descriptor: &Value| {
+            descriptor["kind"] == "move-and-attack"
+                && descriptor["unitInstanceId"] == walker_id
+                && path_locations(descriptor) == two_steps
+        };
+        let forbidden_second_diagonal = if seat == "north" {
+            ["C4/surface", "B3/void", "A2/void"]
+        } else {
+            ["C1/surface", "B2/void", "A3/void"]
+        };
+        assert!(!offers(&session, |descriptor| {
+            descriptor["kind"] == "move-and-attack"
+                && descriptor["unitInstanceId"] == walker_id
+                && path_locations(descriptor) == forbidden_second_diagonal
+        }));
+        assert!(offers(&session, allowed));
+        let (descriptor, _) = accept_where(&mut session, allowed);
+        assert_eq!(descriptor["path"].as_array().unwrap().len(), 3);
+        decline_attack_if_needed(&mut session);
+        let moved = realm_unit(&state(&session), &walker_id).expect("two-step walker");
+        assert_eq!(moved["location"], next_void);
+        assert_eq!(moved["region"], "void");
+        assert_exact_replay(&session);
+
+        let (mut session, walker_id, _, void_source, _) =
+            ready_oriented_walker(890 + u32::try_from(index).unwrap(), seat, &walker, true);
+        let (surface, diagonal_void) = if seat == "north" {
+            ("C4", "B3")
+        } else {
+            ("C2", "B3")
+        };
+        let restart = [
+            format!("{void_source}/void"),
+            format!("{surface}/surface"),
+            format!("{diagonal_void}/void"),
+        ];
+        let allowed_after_surface = |descriptor: &Value| {
+            descriptor["kind"] == "move-and-attack"
+                && descriptor["unitInstanceId"] == walker_id
+                && path_locations(descriptor) == restart
+        };
+        assert!(offers(&session, allowed_after_surface));
+        let (descriptor, _) = accept_where(&mut session, allowed_after_surface);
+        assert_eq!(descriptor["path"].as_array().unwrap().len(), 3);
+        decline_attack_if_needed(&mut session);
+        assert_eq!(
+            realm_unit(&state(&session), &walker_id).unwrap()["location"],
+            diagonal_void
+        );
+        assert_exact_replay(&session);
+    }
+}
+
+#[test]
+fn airborne_uses_the_effective_planar_gate_voidwalk_loan_until_surface_exit() {
+    let mut cards = planar_gate_cards();
+    cards["north-spell"]["airborne"] = json!(true);
+    let mut session = Session::new(&manifest(900, &cards, "north-site", &["north-spell"; 8]))
+        .expect("Airborne Planar Gate scenario");
+    keep(&mut session);
+    keep(&mut session);
+    play_site(&mut session, "C4");
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C4"
+    });
+    let walker = summoned["cardInstanceId"]
+        .as_str()
+        .expect("borrower identity")
+        .to_owned();
+    pass_turn(&mut session);
+    play_site(&mut session, "C1");
+    pass_turn(&mut session);
+
+    let diagonal_into_void = |descriptor: &Value| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == walker
+            && path_locations(descriptor) == ["C4/surface", "B3/void"]
+    };
+    assert!(offers(&session, diagonal_into_void));
+    accept_where(&mut session, diagonal_into_void);
+    decline_attack_if_needed(&mut session);
+    assert_eq!(
+        realm_unit(&state(&session), &walker).unwrap()["planarGateVoidwalk"],
+        true
+    );
+
+    pass_turn(&mut session);
+    pass_turn(&mut session);
+    play_site(&mut session, "C3");
+    assert_eq!(
+        realm_unit(&state(&session), &walker).unwrap()["planarGateVoidwalk"],
+        true
+    );
+    let exit_to_surface = |descriptor: &Value| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == walker
+            && path_locations(descriptor) == ["B3/void", "C3/surface"]
+    };
+    assert!(offers(&session, exit_to_surface));
+    accept_where(&mut session, exit_to_surface);
+    decline_attack_if_needed(&mut session);
+    assert!(
+        realm_unit(&state(&session), &walker)
+            .unwrap()
+            .get("planarGateVoidwalk")
+            .is_none()
+    );
+    assert_exact_replay(&session);
+
+    let cards = planar_gate_cards();
+    let mut grounded = Session::new(&manifest(901, &cards, "north-site", &["north-spell"; 8]))
+        .expect("grounded Planar Gate control");
+    keep(&mut grounded);
+    keep(&mut grounded);
+    play_site(&mut grounded, "C4");
+    let (summoned, _) = accept_where(&mut grounded, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C4"
+    });
+    let grounded_id = summoned["cardInstanceId"].as_str().unwrap().to_owned();
+    pass_turn(&mut grounded);
+    play_site(&mut grounded, "C1");
+    pass_turn(&mut grounded);
+    assert!(!offers(&grounded, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == grounded_id
+            && path_locations(descriptor) == ["C4/surface", "B3/void"]
+    }));
+    assert!(offers(&grounded, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == grounded_id
+            && path_locations(descriptor) == ["C4/surface", "B4/void"]
+    }));
 }
 
 #[test]
