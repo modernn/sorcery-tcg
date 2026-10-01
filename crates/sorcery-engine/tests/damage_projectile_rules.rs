@@ -651,11 +651,18 @@ fn mask_fixed_projectile_manifest() -> String {
         .map(|seed| {
             let cards = json!({
                 "north-avatar": avatar(),
-                "north-shooter": minion(json!({ "tapToShootProjectileDamage": 1 })),
+                "north-shooter": minion(json!({ "healsControllerForStrikeDamage": true, "tapToShootProjectileDamage": 1 })),
+                "north-wound": {
+                    "cardType": "magic",
+                    "damageTargetUnit": 1,
+                    "manaCost": 0,
+                    "payLifeAsAdditionalCost": 1,
+                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                },
                 "north-site": site(),
                 "south-avatar": avatar(),
                 "south-mask": double_mask(),
-                "south-minion": minion(json!({ "defense": 2, "summonToAnySite": true })),
+                "south-minion": minion(json!({ "defense": 3, "summonToAnySite": true })),
                 "south-site": site(),
             });
             let mut value = json!({
@@ -672,7 +679,7 @@ fn mask_fixed_projectile_manifest() -> String {
                     "north": {
                         "atlas": vec!["north-site"; 6],
                         "avatar": "north-avatar",
-                        "spellbook": vec!["north-shooter"; 6],
+                        "spellbook": ["north-shooter", "north-shooter", "north-shooter", "north-shooter", "north-shooter", "north-wound"],
                     },
                     "south": {
                         "atlas": vec!["south-site"; 6],
@@ -700,8 +707,13 @@ fn mask_fixed_projectile_manifest() -> String {
             let hand = opening["players"]["south"]["hand"]["spellbook"]
                 .as_array()
                 .expect("south opening spellbook");
+            let north_hand = opening["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("north opening spellbook");
             hand.iter().any(|card| card["cardId"] == "south-mask")
                 && hand.iter().any(|card| card["cardId"] == "south-minion")
+                && north_hand.iter().any(|card| card["cardId"] == "north-shooter")
+                && north_hand.iter().any(|card| card["cardId"] == "north-wound")
         })
         .expect("bounded seed opening with a Mask and a south minion")
 }
@@ -778,8 +790,41 @@ fn fixed_damage_projectile_is_not_a_strike_even_near_a_strike_doubler() {
         let mut session = after_fixed_projectile_mask_ready(carry_mask);
         let shooter_id = unit_id(&session, "north-shooter");
         let target_id = unit_id(&session, "south-minion");
+        let (_, magic) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic"
+                && descriptor["cardId"] == "north-wound"
+                && descriptor["target"]["instanceId"] == target_id
+        });
+        assert!(magic.events.iter().any(|event| {
+            event.event_type == "magic-damage-allocated"
+                && event.payload["amount"] == 1
+                && event.payload["targetInstanceId"] == target_id
+        }));
+        assert!(
+            !magic
+                .events
+                .iter()
+                .any(|event| event.event_type == "avatar-healed")
+        );
+        assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 19);
+        assert_eq!(
+            state(&session)["realm"]["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|unit| unit["instanceId"] == target_id)
+                .unwrap()["damage"],
+            1
+        );
         let receipt = fire_south(&mut session, &shooter_id, &target_id);
         assert_eq!(projectile_amount(&receipt, &target_id), 1);
+        assert!(
+            !receipt
+                .events
+                .iter()
+                .any(|event| event.event_type == "avatar-healed")
+        );
+        assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 19);
         let after = state(&session);
         let target = after["realm"]["units"]
             .as_array()
@@ -787,7 +832,7 @@ fn fixed_damage_projectile_is_not_a_strike_even_near_a_strike_doubler() {
             .iter()
             .find(|unit| unit["instanceId"] == target_id)
             .expect("fixed damage leaves the 2-defense minion alive");
-        assert_eq!(target["damage"], 1);
+        assert_eq!(target["damage"], 2);
         assert_exact_replay(&session);
     }
 }

@@ -1174,6 +1174,7 @@ enum WinReason {
 struct DamageResult {
     minion_died: bool,
     avatar_defeated: bool,
+    dealt_by_source: Vec<u16>,
 }
 
 #[derive(Default)]
@@ -1282,6 +1283,7 @@ struct StrikeStats {
     current_power: u16,
     lance_count: u8,
     lethal: bool,
+    heals_controller_for_strike_damage: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -1812,6 +1814,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         lance_count: _,
         landbound: _,
         lethal: _,
+        heals_controller_for_strike_damage: _,
         mana_cost: _,
         may_ranged_strike_once_during_basic_movement: _,
         may_step_after_ranged_strike: _,
@@ -11036,6 +11039,14 @@ impl Game {
             },
             outcomes,
         )?;
+        if strike.heals_controller_for_strike_damage {
+            self.heal_avatar(
+                seat,
+                u64::from(damage.dealt_by_source.first().copied().unwrap_or(0)),
+                shooter_instance_id,
+                outcomes,
+            )?;
+        }
         self.consume_strike_artifacts(strike, shooter_instance_id, outcomes)?;
         if strike.lance_count > 0 {
             self.break_lance(seat, shooter_instance_id, outcomes)?;
@@ -12755,6 +12766,23 @@ impl Game {
             current_power: damage_source.current_power,
             lance_count,
             lethal: damage_source.lethal,
+            heals_controller_for_strike_damage: match kind {
+                UnitKind::Avatar => false,
+                UnitKind::Minion => self
+                    .position
+                    .units
+                    .iter()
+                    .find(|unit| unit.controller == seat && unit.card.instance_id == *instance_id)
+                    .is_some_and(|unit| {
+                        let CardFacts::Minion(facts) =
+                            &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                        else {
+                            return false;
+                        };
+                        facts.heals_controller_for_strike_damage
+                            && !self.minion_abilities_lost(unit)
+                    }),
+            },
         })
     }
 
@@ -13326,6 +13354,7 @@ impl Game {
             DamageResult {
                 minion_died: false,
                 avatar_defeated: false,
+                dealt_by_source: Vec::new(),
             }
         } else {
             self.apply_simultaneous_unit_damage(
@@ -13382,6 +13411,30 @@ impl Game {
             }
         }
         let lost_stealth = !stealth_losses.is_empty();
+        if attacker.heals_controller_for_strike_damage {
+            let amount = combatant_results
+                .iter()
+                .map(|(_, result)| u64::from(result.dealt_by_source.first().copied().unwrap_or(0)))
+                .try_fold(0_u64, u64::checked_add)
+                .ok_or(GameError::IllegalAction)?;
+            self.heal_avatar(attacking_seat, amount, &attacker_id, outcomes)?;
+        }
+        for (index, (_, source, strike)) in return_sources.iter().enumerate() {
+            if strike.heals_controller_for_strike_damage {
+                self.heal_avatar(
+                    source.seat(),
+                    u64::from(
+                        attacker_damage
+                            .dealt_by_source
+                            .get(index)
+                            .copied()
+                            .unwrap_or(0),
+                    ),
+                    source.instance_id(),
+                    outcomes,
+                )?;
+            }
+        }
         for (instance_id, seat) in stealth_losses {
             outcomes.push(
                 "stealth-lost",
@@ -13511,20 +13564,21 @@ impl Game {
     fn damage_after_prevention(
         sources: &[(u16, UnitDamageSource)],
         prevention: DamagePreventionSnapshot,
-    ) -> Result<(u16, bool), GameError> {
-        sources
-            .iter()
-            .try_fold((0_u16, false), |(total, any_lethal), (amount, source)| {
-                let dealt = if prevention.prevents(*source) {
-                    0
-                } else {
-                    amount.saturating_sub(prevention.reduction)
-                };
-                total
-                    .checked_add(dealt)
-                    .map(|next| (next, any_lethal || source.lethal && dealt > 0))
-                    .ok_or(GameError::IllegalAction)
-            })
+    ) -> Result<(u16, bool, Vec<u16>), GameError> {
+        let mut total = 0_u16;
+        let mut lethal_dealt = false;
+        let mut dealt_by_source = Vec::with_capacity(sources.len());
+        for (amount, source) in sources {
+            let dealt = if prevention.prevents(*source) {
+                0
+            } else {
+                amount.saturating_sub(prevention.reduction)
+            };
+            total = total.checked_add(dealt).ok_or(GameError::IllegalAction)?;
+            lethal_dealt |= source.lethal && dealt > 0;
+            dealt_by_source.push(dealt);
+        }
+        Ok((total, lethal_dealt, dealt_by_source))
     }
 
     /// Resolves one recipient's simultaneous damage group. Prevention applies to each source;
@@ -13557,7 +13611,7 @@ impl Game {
                 {
                     return Err(GameError::IllegalAction);
                 }
-                let (unwarded, lethal_dealt) =
+                let (unwarded, lethal_dealt, mut dealt_by_source) =
                     Self::damage_after_prevention(sources, status.prevention)?;
                 // Codex Damage lets the controller order prevention. If innate prevention
                 // can save the Ward but Ward-first would consume it, no fixed order is valid
@@ -13573,6 +13627,9 @@ impl Game {
                     unit.warded = false;
                 }
                 let dealt = if ward_broken { 0 } else { unwarded };
+                if ward_broken {
+                    dealt_by_source.fill(0);
+                }
                 let prevented = dealt < amount;
                 unit.damage = unit.damage.saturating_add(dealt);
                 let accumulated = unit.damage;
@@ -13612,12 +13669,14 @@ impl Game {
                     minion_died: accumulated > 0
                         && (accumulated >= defense || lethal_dealt && dealt > 0),
                     avatar_defeated: false,
+                    dealt_by_source,
                 })
             }
             UnitKind::Avatar => {
                 let avatar = &mut self.position.players[seat_index(seat)].avatar;
                 let attempted = amount;
-                let (amount, _) = Self::damage_after_prevention(sources, status.prevention)?;
+                let (amount, _, dealt_by_source) =
+                    Self::damage_after_prevention(sources, status.prevention)?;
                 if avatar.card.instance_id != *instance_id {
                     return Err(GameError::IllegalAction);
                 }
@@ -13631,6 +13690,7 @@ impl Game {
                     return Ok(DamageResult {
                         minion_died: false,
                         avatar_defeated: false,
+                        dealt_by_source,
                     });
                 }
                 let damage_event = || {
@@ -13647,6 +13707,7 @@ impl Game {
                         return Ok(DamageResult {
                             minion_died: false,
                             avatar_defeated: false,
+                            dealt_by_source,
                         });
                     }
                     if avatar.death_door_turn != Some(self.position.turn_number) {
@@ -13658,6 +13719,7 @@ impl Game {
                         return Ok(DamageResult {
                             minion_died: false,
                             avatar_defeated: true,
+                            dealt_by_source,
                         });
                     }
                     outcomes.push("damage-dealt", || {
@@ -13673,12 +13735,14 @@ impl Game {
                     return Ok(DamageResult {
                         minion_died: false,
                         avatar_defeated: false,
+                        dealt_by_source: vec![0; dealt_by_source.len()],
                     });
                 }
                 if amount == 0 {
                     return Ok(DamageResult {
                         minion_died: false,
                         avatar_defeated: false,
+                        dealt_by_source,
                     });
                 }
                 let old_life = avatar.life;
@@ -13704,6 +13768,7 @@ impl Game {
                 Ok(DamageResult {
                     minion_died: false,
                     avatar_defeated: false,
+                    dealt_by_source,
                 })
             }
         }
@@ -14399,7 +14464,7 @@ impl Game {
         if let Some(amount) = facts.deathrite_heal {
             self.heal_avatar(
                 source.controller,
-                u16::from(amount),
+                u64::from(amount),
                 &source.instance_id,
                 outcomes,
             )?;
@@ -19371,7 +19436,7 @@ impl Game {
         }
         let mut resolved_exclusive = false;
         if let Some(amount) = start_turn_gains_life {
-            self.heal_avatar(action.seat, u16::from(amount), source_instance_id, outcomes)?;
+            self.heal_avatar(action.seat, u64::from(amount), source_instance_id, outcomes)?;
             resolved_exclusive = true;
         }
         if let Some(amount) = start_turn_loses_life {
@@ -21210,7 +21275,7 @@ impl Game {
             | MagicEffect::KillMortalMinionsAtLocationWithinTwoSteps
                 if protects_location => {}
             MagicEffect::HealController(amount) => {
-                self.heal_avatar(seat, u16::from(amount), card_instance_id, outcomes)?;
+                self.heal_avatar(seat, u64::from(amount), card_instance_id, outcomes)?;
             }
             MagicEffect::HealTargetMinion(amount) => {
                 let Some(UnitTarget::Minion {
@@ -21408,7 +21473,7 @@ impl Game {
             }
             MagicEffect::TargetPlayerGainsLife(amount) => {
                 let target_seat = self.targeted_avatar_seat(target.as_ref())?;
-                self.heal_avatar(target_seat, u16::from(amount), card_instance_id, outcomes)?;
+                self.heal_avatar(target_seat, u64::from(amount), card_instance_id, outcomes)?;
             }
             MagicEffect::TargetPlayerLosesLife(amount) => {
                 let target_seat = self.targeted_avatar_seat(target.as_ref())?;
@@ -24703,7 +24768,7 @@ impl Game {
     fn heal_avatar(
         &mut self,
         seat: Seat,
-        attempted_amount: u16,
+        attempted_amount: u64,
         source_instance_id: &IdentityHash,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
@@ -24715,9 +24780,11 @@ impl Game {
         };
         let old_life = player.avatar.life;
         if old_life > 0 {
-            player.avatar.life = old_life
+            let healed_life = u64::from(old_life)
                 .saturating_add(attempted_amount)
-                .min(u16::from(avatar_facts.life));
+                .min(u64::from(avatar_facts.life));
+            player.avatar.life =
+                u16::try_from(healed_life).map_err(|_| GameError::IllegalAction)?;
         }
         let amount = player.avatar.life - old_life;
         if amount > 0 {
@@ -24878,7 +24945,7 @@ impl Game {
             .collect();
         for (instance_id, gain, loss) in sources {
             if let Some(amount) = gain {
-                self.heal_avatar(seat, u16::from(amount), &instance_id, outcomes)?;
+                self.heal_avatar(seat, u64::from(amount), &instance_id, outcomes)?;
             }
             if let Some(amount) = loss {
                 self.apply_avatar_life_loss(seat, u16::from(amount), &instance_id, outcomes);
@@ -31981,6 +32048,21 @@ mod tests {
         (game, id)
     }
 
+    fn strike_healing_fixture() -> (Game, IdentityHash) {
+        let (mut game, id) = damage_transaction_fixture(None);
+        let card_id = game.position.units[0].card.card_id;
+        let CardFacts::Minion(facts) = &mut Arc::get_mut(&mut game.rules)
+            .expect("unshared fixture rules")
+            .cards[usize::from(card_id.0)]
+        .facts
+        else {
+            panic!("minion fixture");
+        };
+        facts.heals_controller_for_strike_damage = true;
+        game.position.players[seat_index(Seat::South)].avatar.life = 15;
+        (game, id)
+    }
+
     fn assert_mixed_terminal_rollback_modes(
         game: &Game,
         action: &IssuedAction,
@@ -32219,6 +32301,7 @@ mod tests {
             !result.avatar_defeated,
             "protected turn still prevents remaining damage"
         );
+        assert_eq!(result.dealt_by_source, [0]);
         game.position.turn_number += 1;
         for amount in [1, 2, 3] {
             let result = game
@@ -32231,6 +32314,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(result.avatar_defeated, amount == 3);
+            assert_eq!(result.dealt_by_source, [amount.saturating_sub(2)]);
         }
         assert_eq!(
             events
@@ -32251,15 +32335,18 @@ mod tests {
         };
         let sources = [(1, source), (2, source), (3, source)];
         let mut events = Vec::new();
-        game.apply_simultaneous_unit_damage(
-            UnitKind::Minion,
-            Seat::South,
-            &minion_id,
-            &sources,
-            &mut OutcomeLog::Record(&mut events),
-        )
-        .unwrap();
+        let result = game
+            .apply_simultaneous_unit_damage(
+                UnitKind::Minion,
+                Seat::South,
+                &minion_id,
+                &sources,
+                &mut OutcomeLog::Record(&mut events),
+            )
+            .unwrap();
         assert_eq!(game.position.units[0].damage, 1);
+        assert_eq!(result.dealt_by_source, [0, 0, 1]);
+        assert_eq!(events[0].1["amount"], 1);
         let avatar = &game.position.players[seat_index(Seat::South)].avatar;
         let avatar_id = avatar.card.instance_id.clone();
         let card_id = avatar.card.card_id;
@@ -32270,18 +32357,467 @@ mod tests {
             panic!("avatar fixture");
         };
         facts.damage_prevention = Some(DamagePrevention::TakesLessDamage(2));
-        game.apply_simultaneous_unit_damage(
-            UnitKind::Avatar,
-            Seat::South,
-            &avatar_id,
-            &sources,
-            &mut OutcomeLog::Record(&mut events),
-        )
-        .unwrap();
+        let result = game
+            .apply_simultaneous_unit_damage(
+                UnitKind::Avatar,
+                Seat::South,
+                &avatar_id,
+                &sources,
+                &mut OutcomeLog::Record(&mut events),
+            )
+            .unwrap();
+        assert_eq!(result.dealt_by_source, [0, 0, 1]);
         assert_eq!(
             game.position.players[seat_index(Seat::South)].avatar.life,
             old_life - 1
         );
+    }
+
+    #[test]
+    fn avatar_overkill_remains_dealt_damage_for_each_source() {
+        let (mut game, _) = damage_transaction_fixture(None);
+        let avatar = &mut game.position.players[seat_index(Seat::South)].avatar;
+        avatar.life = 1;
+        let id = avatar.card.instance_id.clone();
+        let sources = [
+            (
+                3,
+                UnitDamageSource {
+                    origin: DamageOrigin::Other,
+                    current_power: 3,
+                    lethal: false,
+                },
+            ),
+            (
+                4,
+                UnitDamageSource {
+                    origin: DamageOrigin::Other,
+                    current_power: 4,
+                    lethal: false,
+                },
+            ),
+        ];
+        let result = game
+            .apply_simultaneous_unit_damage(
+                UnitKind::Avatar,
+                Seat::South,
+                &id,
+                &sources,
+                &mut OutcomeLog::Ignore,
+            )
+            .expect("simultaneous overkill");
+        assert_eq!(
+            game.position.players[seat_index(Seat::South)].avatar.life,
+            0
+        );
+        assert_eq!(result.dealt_by_source, [3, 4]);
+    }
+
+    #[test]
+    fn effective_strike_healing_fact_tracks_current_controller_and_suppression() {
+        let (mut game, id) = strike_healing_fixture();
+        assert!(
+            game.combatant_strike_stats(UnitKind::Minion, Seat::South, &id)
+                .unwrap()
+                .heals_controller_for_strike_damage
+        );
+        game.position.units[0].temporary_modifiers.grant(
+            TemporaryModifierKind::Silence,
+            1,
+            id.clone(),
+        );
+        assert!(
+            !game
+                .combatant_strike_stats(UnitKind::Minion, Seat::South, &id)
+                .unwrap()
+                .heals_controller_for_strike_damage
+        );
+        game.position.units[0].temporary_modifiers = TemporaryModifiers::default();
+        game.position.units[0].controller = Seat::North;
+        assert!(
+            game.combatant_strike_stats(UnitKind::Minion, Seat::North, &id)
+                .unwrap()
+                .heals_controller_for_strike_damage
+        );
+    }
+
+    #[test]
+    fn effect_strike_healing_uses_source_attributed_damage_and_current_controller() {
+        let (mut game, source_id) = strike_healing_fixture();
+        let strike = game
+            .combatant_strike_stats(UnitKind::Minion, Seat::South, &source_id)
+            .unwrap();
+        let target_id = game.position.players[seat_index(Seat::North)]
+            .avatar
+            .card
+            .instance_id
+            .clone();
+        let group = effect_strikes::EffectStrikes {
+            source: UnitTarget::Minion {
+                instance_id: source_id.clone(),
+                seat: Seat::South,
+            },
+            targets: vec![UnitTarget::Avatar {
+                instance_id: target_id,
+                seat: Seat::North,
+            }],
+            strike,
+            reveal_source: false,
+            return_phase: Phase::Main,
+            return_seat: Seat::North,
+        };
+        let mut events = Vec::new();
+        game.finish_effect_strikes(&group, None, &mut OutcomeLog::Record(&mut events))
+            .unwrap();
+        assert_eq!(
+            game.position.players[seat_index(Seat::South)].avatar.life,
+            20
+        );
+        assert!(events.iter().any(|(kind, payload)| {
+            kind == "avatar-healed"
+                && payload["sourceInstanceId"] == source_id.as_str()
+                && payload["attemptedAmount"] == 8
+                && payload["amount"] == 5
+        }));
+    }
+
+    fn wide_effect_strikes_fixture(
+        heals_controller: bool,
+    ) -> (Game, effect_strikes::EffectStrikes, IdentityHash) {
+        let (mut game, source_id) = strike_healing_fixture();
+        game.position.players[seat_index(Seat::South)].avatar.life = 15;
+        let source = game.position.units[0].clone();
+        let targets = ["wide-effect-target-a", "wide-effect-target-b"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, label)| {
+                let mut target = source.clone();
+                target.card.instance_id =
+                    identity_hash(&json!({ "fixture": label })).expect("synthetic target identity");
+                target.card.owner = Seat::North;
+                target.controller = Seat::North;
+                target.location =
+                    Cell::parse(if index == 0 { "C2" } else { "C4" }).expect("target cell");
+                target
+            })
+            .collect::<Vec<_>>();
+        let target_ids = targets
+            .iter()
+            .map(|target| target.card.instance_id.clone())
+            .collect::<Vec<_>>();
+        game.position.units.extend(targets);
+        let mut strike = game
+            .combatant_strike_stats(UnitKind::Minion, Seat::South, &source_id)
+            .expect("healing source strike snapshot");
+        strike.amount = 40_000;
+        strike.heals_controller_for_strike_damage = heals_controller;
+        let group = effect_strikes::EffectStrikes {
+            source: UnitTarget::Minion {
+                instance_id: source_id.clone(),
+                seat: Seat::South,
+            },
+            targets: target_ids
+                .into_iter()
+                .map(|instance_id| UnitTarget::Minion {
+                    instance_id,
+                    seat: Seat::North,
+                })
+                .collect(),
+            strike,
+            reveal_source: false,
+            return_phase: Phase::Main,
+            return_seat: Seat::South,
+        };
+        (game, group, source_id)
+    }
+
+    #[test]
+    fn effect_strike_healing_uses_exact_u64_aggregate_above_u16() {
+        let (mut game, group, source_id) = wide_effect_strikes_fixture(true);
+        let mut events = Vec::new();
+        game.finish_effect_strikes(&group, None, &mut OutcomeLog::Record(&mut events))
+            .expect("wide effect strike completes");
+        let heals: Vec<_> = events
+            .iter()
+            .filter(|(kind, _)| kind == "avatar-healed")
+            .map(|(_, payload)| payload)
+            .collect();
+        assert_eq!(heals.len(), 1);
+        assert_eq!(heals[0]["attemptedAmount"], 80_000);
+        assert_eq!(heals[0]["amount"], 5);
+        assert_eq!(heals[0]["seat"], json!(Seat::South));
+        assert_eq!(heals[0]["sourceInstanceId"], source_id.as_str());
+        assert_eq!(
+            game.position.players[seat_index(Seat::South)].avatar.life,
+            20
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|(kind, _)| kind == "minion-died")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn effect_strike_without_healing_fact_skips_wide_aggregate() {
+        let (mut game, group, _) = wide_effect_strikes_fixture(false);
+        let mut events = Vec::new();
+        game.finish_effect_strikes(&group, None, &mut OutcomeLog::Record(&mut events))
+            .expect("non-healing effect strike completes");
+        assert!(!events.iter().any(|(kind, _)| kind == "avatar-healed"));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|(kind, _)| kind == "minion-died")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn fight_healing_keeps_multiple_return_sources_attributed_independently() {
+        let (mut game, first_id) = strike_healing_fixture();
+        let second_card = game.position.players[seat_index(Seat::South)]
+            .hand_spellbook
+            .remove(0);
+        let second_id = second_card.instance_id.clone();
+        let second_card_id = second_card.card_id;
+        game.position.units.push(
+            SummonPlacement {
+                card: second_card,
+                controller: Seat::South,
+                lance_count: 0,
+                location: Cell::parse("C2").expect("second source cell"),
+                occupied_cells: None,
+                region: Region::Surface,
+                stealthed: false,
+                warded: false,
+            }
+            .into_unit(),
+        );
+        for (id, attack) in [
+            (game.position.units[0].card.card_id, 1),
+            (second_card_id, 2),
+        ] {
+            let CardFacts::Minion(facts) = &mut Arc::get_mut(&mut game.rules)
+                .expect("unshared fixture rules")
+                .cards[usize::from(id.0)]
+            .facts
+            else {
+                panic!("minion fixture");
+            };
+            facts.attack = attack;
+            facts.heals_controller_for_strike_damage = true;
+        }
+        game.position.players[seat_index(Seat::South)].avatar.life = 15;
+        let north_avatar_id = game.position.players[seat_index(Seat::North)]
+            .avatar
+            .card
+            .instance_id
+            .clone();
+        let pending = PendingCombat {
+            allocations: vec![
+                StrikeAllocation {
+                    amount: 1,
+                    target_instance_id: first_id.clone(),
+                },
+                StrikeAllocation {
+                    amount: 1,
+                    target_instance_id: second_id.clone(),
+                },
+            ],
+            attacker_instance_id: north_avatar_id,
+            attacker_kind: UnitKind::Avatar,
+            attacking_seat: Seat::North,
+            cell: Cell::parse("C3").expect("combat cell"),
+            combatants: vec![
+                UnitTarget::Minion {
+                    instance_id: first_id.clone(),
+                    seat: Seat::South,
+                },
+                UnitTarget::Minion {
+                    instance_id: second_id.clone(),
+                    seat: Seat::South,
+                },
+            ],
+            defenders: Vec::new(),
+            original_target: None,
+            region: Region::Surface,
+            target_removed: false,
+        };
+        let mut events = Vec::new();
+        game.resolve_fight_window_with_damage(
+            &pending,
+            true,
+            &[first_id.clone(), second_id.clone()],
+            None,
+            None,
+            &mut OutcomeLog::Record(&mut events),
+        )
+        .expect("simultaneous return damage");
+        let heals: Vec<_> = events
+            .iter()
+            .filter(|(kind, _)| kind == "avatar-healed")
+            .map(|(_, payload)| payload)
+            .collect();
+        assert_eq!(heals.len(), 2);
+        assert_eq!(heals[0]["sourceInstanceId"], first_id.as_str());
+        assert_eq!(heals[0]["attemptedAmount"], 1);
+        assert_eq!(heals[1]["sourceInstanceId"], second_id.as_str());
+        assert_eq!(heals[1]["attemptedAmount"], 2);
+        assert!(heals.iter().all(|heal| heal["seat"] == json!(Seat::South)));
+        assert_eq!(
+            game.position.players[seat_index(Seat::South)].avatar.life,
+            18
+        );
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one synthetic proof covers the ranged strike healing path"
+    )]
+    fn ranged_strike_healing_uses_source_attributed_damage() {
+        let (mut game, source_id) = strike_healing_fixture();
+        let strike = game
+            .combatant_strike_stats(UnitKind::Minion, Seat::South, &source_id)
+            .unwrap();
+        let target_id = game.position.players[seat_index(Seat::North)]
+            .avatar
+            .card
+            .instance_id
+            .clone();
+        let target = UnitTarget::Avatar {
+            instance_id: target_id,
+            seat: Seat::North,
+        };
+        let mut ignored = game.clone();
+        let mut events = Vec::new();
+        game.finish_ranged_damage(
+            &strike,
+            &target,
+            (Seat::South, &source_id),
+            Phase::Main,
+            2,
+            &mut OutcomeLog::Record(&mut events),
+        )
+        .unwrap();
+        ignored
+            .finish_ranged_damage(
+                &strike,
+                &target,
+                (Seat::South, &source_id),
+                Phase::Main,
+                2,
+                &mut OutcomeLog::Ignore,
+            )
+            .unwrap();
+        assert_eq!(game.position, ignored.position);
+        assert_eq!(
+            game.position.players[seat_index(Seat::South)].avatar.life,
+            17
+        );
+        assert!(events.iter().any(|(kind, payload)| {
+            kind == "avatar-healed"
+                && payload["sourceInstanceId"] == source_id.as_str()
+                && payload["attemptedAmount"] == 2
+                && payload["amount"] == 2
+        }));
+
+        let (mut controlled, source_id) = strike_healing_fixture();
+        controlled.position.units[0].controller = Seat::North;
+        controlled.position.units[0].stealthed = true;
+        controlled
+            .position
+            .temporary_controls
+            .push(TemporaryControl {
+                expiry: TemporaryControlExpiry::UntilStealthLost,
+                instance_id: source_id.clone(),
+                revert_to: Seat::South,
+                source_instance_id: source_id.clone(),
+            });
+        let strike = controlled
+            .combatant_strike_stats(UnitKind::Minion, Seat::North, &source_id)
+            .unwrap();
+        let target_id = controlled.position.players[seat_index(Seat::South)]
+            .avatar
+            .card
+            .instance_id
+            .clone();
+        controlled.position.players[seat_index(Seat::North)]
+            .avatar
+            .life = 15;
+        let target = UnitTarget::Avatar {
+            instance_id: target_id,
+            seat: Seat::South,
+        };
+        let mut events = Vec::new();
+        controlled
+            .finish_ranged_damage(
+                &strike,
+                &target,
+                (Seat::North, &source_id),
+                Phase::Main,
+                2,
+                &mut OutcomeLog::Record(&mut events),
+            )
+            .unwrap();
+        assert_eq!(controlled.position.units[0].controller, Seat::South);
+        assert_eq!(
+            controlled.position.players[seat_index(Seat::North)]
+                .avatar
+                .life,
+            17
+        );
+        let heal_at = events
+            .iter()
+            .position(|(kind, _)| kind == "avatar-healed")
+            .unwrap();
+        let revert_at = events
+            .iter()
+            .position(|(kind, payload)| {
+                kind == "minion-control-changed" && payload["seat"] == json!(Seat::South)
+            })
+            .unwrap();
+        assert!(heal_at < revert_at);
+        assert_eq!(events[heal_at].1["seat"], json!(Seat::North));
+        assert_eq!(events[heal_at].1["sourceInstanceId"], source_id.as_str());
+
+        let (mut at_deaths_door, source_id) = strike_healing_fixture();
+        let strike = at_deaths_door
+            .combatant_strike_stats(UnitKind::Minion, Seat::South, &source_id)
+            .unwrap();
+        let target_id = at_deaths_door.position.players[seat_index(Seat::North)]
+            .avatar
+            .card
+            .instance_id
+            .clone();
+        let source_avatar = &mut at_deaths_door.position.players[seat_index(Seat::South)].avatar;
+        source_avatar.life = 0;
+        source_avatar.death_door_turn = Some(at_deaths_door.position.turn_number);
+        let mut events = Vec::new();
+        at_deaths_door
+            .finish_ranged_damage(
+                &strike,
+                &UnitTarget::Avatar {
+                    instance_id: target_id,
+                    seat: Seat::North,
+                },
+                (Seat::South, &source_id),
+                Phase::Main,
+                2,
+                &mut OutcomeLog::Record(&mut events),
+            )
+            .unwrap();
+        assert_eq!(
+            at_deaths_door.position.players[seat_index(Seat::South)]
+                .avatar
+                .life,
+            0
+        );
+        assert!(!events.iter().any(|(kind, _)| kind == "avatar-healed"));
     }
 
     #[test]
@@ -32382,6 +32918,14 @@ mod tests {
                 2
             };
             assert_eq!(game.position.units[0].damage, expected);
+            assert_eq!(
+                result.dealt_by_source,
+                if prevention.0 == "takesLessDamage" {
+                    [0, 1]
+                } else {
+                    [0, 2]
+                }
+            );
             assert!(
                 !result.minion_died,
                 "the only Lethal source dealt no damage"
@@ -32434,6 +32978,7 @@ mod tests {
             1
         );
         assert_eq!(events[0].1["amount"], 0);
+        assert_eq!(result.dealt_by_source, [0, 0]);
         assert_eq!(events[0].1["attemptedAmount"], 5);
         let result = game
             .apply_simple_damage(

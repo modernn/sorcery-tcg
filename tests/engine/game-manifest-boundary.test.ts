@@ -57,6 +57,7 @@ type SpellFacts = Readonly<{
   immobile?: boolean;
   lanceCount?: 1 | 2 | 3;
   lethal?: boolean;
+  healsControllerForStrikeDamage?: boolean;
   manaCost: number;
   mayRangedStrikeOnceDuringBasicMovement?: true;
   mayStepAfterRangedStrike?: true;
@@ -268,6 +269,9 @@ function cardsFor(
         immobile: facts.immobile ?? false,
         ...(facts.lanceCount ? { lanceCount: facts.lanceCount } : {}),
         lethal: facts.lethal ?? false,
+        ...(facts.healsControllerForStrikeDamage === true
+          ? { healsControllerForStrikeDamage: true as const }
+          : {}),
         manaCost: facts.manaCost,
         ...(facts.mayRangedStrikeOnceDuringBasicMovement === true
           ? { mayRangedStrikeOnceDuringBasicMovement: true as const }
@@ -374,6 +378,46 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
         .gainsStealthAtEndOfTurnIfNoEnemiesNearby,
     true,
   );
+  const strikeHealingManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        healsControllerForStrikeDamage: true,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    (strikeHealingManifest.cards[firstSpell] as unknown as Readonly<Record<string, unknown>>)
+      .healsControllerForStrikeDamage,
+    true,
+  );
+  assert.equal(
+    Object.hasOwn(cards[firstSpell]!, 'healsControllerForStrikeDamage'),
+    false,
+  );
+  const explicitFalseStrikeHealingManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        healsControllerForStrikeDamage: false,
+      } as GameCardDefinition,
+    },
+  });
+  assert.deepEqual(explicitFalseStrikeHealingManifest, validManifest);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        healsControllerForStrikeDamage: 'yes',
+      } as unknown as GameCardDefinition,
+    },
+  }), /healsControllerForStrikeDamage must be boolean/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {

@@ -63,6 +63,46 @@ fn manifest(first: &str, bonuses: usize, step_after: bool) -> String {
     canonical_json(&value).unwrap()
 }
 
+fn pending_with_strike_healing() -> Session {
+    let encoded = (71..2000)
+        .map(|seed| {
+            let mut value: Value = serde_json::from_str(&manifest("north", 2, true)).unwrap();
+            value["seed"] = json!(seed);
+            value["cards"]["shooter"]["healsControllerForStrikeDamage"] = json!(true);
+            value["cards"]["wound"] = json!({
+                "cardType":"magic",
+                "damageTargetUnit":1,
+                "manaCost":0,
+                "payLifeAsAdditionalCost":1,
+                "thresholds":{"air":0,"earth":0,"fire":0,"water":0},
+            });
+            value["decks"]["north"]["spellbook"] = json!([
+                "shooter", "shooter", "shooter", "shooter", "shooter", "shooter", "shooter",
+                "wound"
+            ]);
+            value.as_object_mut().unwrap().remove("manifestId");
+            value["manifestId"] = json!(identity_hash(&value).unwrap());
+            canonical_json(&value).unwrap()
+        })
+        .find(|encoded| {
+            let session = Session::new(encoded).unwrap();
+            let cards =
+                session.replay_value().unwrap()["state"]["players"]["north"]["hand"]["spellbook"]
+                    .as_array()
+                    .unwrap()
+                    .clone();
+            cards.iter().any(|card| card["cardId"] == "shooter")
+                && cards.iter().any(|card| card["cardId"] == "wound")
+        })
+        .expect("seed with shooter and life-cost spell in opening hand");
+    let session = pending_from_manifest("north", &encoded);
+    assert_eq!(
+        session.replay_value().unwrap()["state"]["players"]["north"]["avatar"]["life"],
+        19
+    );
+    session
+}
+
 fn pending(first: &str, bonuses: usize, step_after: bool) -> Session {
     pending_from_manifest(first, &manifest(first, bonuses, step_after))
 }
@@ -110,10 +150,32 @@ fn pending_from_manifest(first: &str, encoded: &str) -> Session {
     act(&mut session, |a| {
         a["kind"] == "draw" && a["zone"] == "atlas"
     });
+    let manifest: Value = serde_json::from_str(encoded).unwrap();
+    if manifest["cards"]["shooter"]["healsControllerForStrikeDamage"] == true {
+        let shooter_id =
+            session.replay_value().unwrap()["state"]["realm"]["units"][0]["instanceId"].clone();
+        act(&mut session, |a| {
+            a["kind"] == "cast-magic"
+                && a["cardId"] == "wound"
+                && a["target"]["instanceId"] == shooter_id
+        });
+        assert_eq!(
+            session.replay_value().unwrap()["state"]["players"][first]["avatar"]["life"],
+            19
+        );
+    }
     let enemy = if first == "north" { "south" } else { "north" };
     let receipt = act(&mut session, |a| {
         a["kind"] == "shoot-projectile" && a["hit"]["kind"] == "avatar" && a["hit"]["seat"] == enemy
     });
+    if manifest["cards"]["shooter"]["healsControllerForStrikeDamage"] == true {
+        assert!(
+            !receipt
+                .events
+                .iter()
+                .any(|event| event.event_type == "avatar-healed")
+        );
+    }
     assert!(
         !receipt
             .events
@@ -350,13 +412,28 @@ fn both_orderings_survive_checkpoint_and_replay_for_both_seats() {
 
 #[test]
 fn intermediate_order_checkpoint_retains_sources_and_resumes_ranged_step() {
-    let mut session = pending("north", 2, true);
+    let default = pending("north", 2, true).replay_value().unwrap();
+    assert!(
+        default["state"]["pendingDamageOrder"]["continuation"]["strike"]
+            .get("healsControllerForStrikeDamage")
+            .is_none()
+    );
+    let mut session = pending_with_strike_healing();
+    let before = session.replay_value().unwrap();
+    assert_eq!(
+        before["state"]["pendingDamageOrder"]["continuation"]["strike"]["healsControllerForStrikeDamage"],
+        true
+    );
     act(&mut session, |a| {
         a["kind"] == "choose-damage-modifier" && a["modifierIndex"] == 0
     });
     let state = session.replay_value().unwrap();
     assert_eq!(state["state"]["phase"], "damage-order");
     assert_eq!(state["state"]["pendingDamageOrder"]["amount"], 3);
+    assert_eq!(
+        state["state"]["pendingDamageOrder"]["continuation"]["strike"]["healsControllerForStrikeDamage"],
+        true
+    );
     assert_eq!(
         state["state"]["realm"]["artifacts"]
             .as_array()
@@ -369,6 +446,7 @@ fn intermediate_order_checkpoint_retains_sources_and_resumes_ranged_step() {
         &parse_game_checkpoint(&serialize_game_checkpoint(&checkpoint).unwrap()).unwrap(),
     )
     .unwrap();
+    assert_eq!(resumed.replay_value().unwrap(), state);
     let receipt = act(&mut resumed, |a| {
         a["kind"] == "choose-damage-modifier" && a["modifierIndex"] == 1
     });
@@ -387,6 +465,20 @@ fn intermediate_order_checkpoint_retains_sources_and_resumes_ranged_step() {
         1
     );
     assert_eq!(state["state"]["phase"], "ranged-step");
+    let healing: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "avatar-healed")
+        .collect();
+    assert_eq!(healing.len(), 1);
+    assert_eq!(healing[0].payload["seat"], "north");
+    assert_eq!(
+        healing[0].payload["sourceInstanceId"],
+        state["state"]["realm"]["units"][0]["instanceId"]
+    );
+    assert_eq!(healing[0].payload["attemptedAmount"], 7);
+    assert_eq!(healing[0].payload["amount"], 1);
+    assert_eq!(state["state"]["players"]["north"]["avatar"]["life"], 20);
     act(&mut resumed, |a| {
         a["kind"] == "resolve-ranged-step" && a["choice"] == "decline"
     });

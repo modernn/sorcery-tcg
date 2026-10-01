@@ -16,11 +16,16 @@ pub(super) struct EffectStrikes {
 
 impl EffectStrikes {
     pub(super) fn value(&self) -> Value {
+        let mut strike = json!({"amount": self.strike.amount, "additiveBonus": self.strike.additive_bonus,
+            "currentPower": self.strike.current_power, "lethal": self.strike.lethal,
+            "lanceCount": self.strike.lance_count,
+            "consumedArtifacts": self.strike.consumed_artifacts.iter().map(RealmReference::value).collect::<Vec<_>>()});
+        if self.strike.heals_controller_for_strike_damage {
+            strike["healsControllerForStrikeDamage"] = json!(true);
+        }
         json!({"kind": "effect-strikes", "source": self.source, "targets": self.targets,
             "revealSource": self.reveal_source, "returnPhase": self.return_phase.as_str(), "returnSeat": self.return_seat,
-            "strike": {"amount": self.strike.amount, "additiveBonus": self.strike.additive_bonus,
-                "currentPower": self.strike.current_power, "lethal": self.strike.lethal, "lanceCount": self.strike.lance_count,
-                "consumedArtifacts": self.strike.consumed_artifacts.iter().map(RealmReference::value).collect::<Vec<_>>()}})
+            "strike": strike})
     }
 }
 
@@ -48,6 +53,10 @@ impl Game {
         self.finish_effect_strikes(group, None, outcomes)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "strike damage, healing, and death ordering share one transaction"
+    )]
     pub(super) fn finish_effect_strikes(
         &mut self,
         group: &EffectStrikes,
@@ -93,6 +102,7 @@ impl Game {
         }
         let mut dead_minions = Vec::new();
         let mut defeated_avatars = Vec::new();
+        let mut dealt = 0_u64;
         for (target, (status, amount)) in group.targets.iter().zip(targets) {
             let target_kind = match target {
                 UnitTarget::Avatar { .. } => UnitKind::Avatar,
@@ -111,12 +121,27 @@ impl Game {
                 status,
                 outcomes,
             )?;
+            if group.strike.heals_controller_for_strike_damage {
+                dealt = dealt
+                    .checked_add(u64::from(
+                        result.dealt_by_source.first().copied().unwrap_or(0),
+                    ))
+                    .ok_or(GameError::IllegalAction)?;
+            }
             if result.minion_died {
                 dead_minions.push(target.instance_id().clone());
             }
             if result.avatar_defeated && !defeated_avatars.contains(&target.seat()) {
                 defeated_avatars.push(target.seat());
             }
+        }
+        if group.strike.heals_controller_for_strike_damage {
+            self.heal_avatar(
+                group.source.seat(),
+                dealt,
+                group.source.instance_id(),
+                outcomes,
+            )?;
         }
         if lost_stealth {
             outcomes.push(

@@ -763,6 +763,7 @@ export type GameCardDefinition =
     lanceCount?: 1 | 2 | 3;
     landbound?: boolean;
     lethal?: boolean;
+    healsControllerForStrikeDamage?: boolean;
     manaCost: number | null;
     elements?: readonly GameElement[];
     subtypes?: readonly string[];
@@ -1737,7 +1738,7 @@ const SUPPORTED_CARD_FIELDS = {
     genesisDisableSelfUntilDamaged genesisDrawSite genesisDrawSpells genesisEachPlayerControlledByPreviousPlayerNextTurn genesisGainControlOfTappedMinionsHereUntilThisLeaves genesisHealController
     genesisLoseControllerLife genesisMayDamageTargetAdjacentUnit genesisProgram genesisStrikeEachEnemyHere genesisUntapAdjacentAllies
     gainsPowerRangedAndSpellcasterAtopTower gainsStealthAtEndOfTurn
-    entersCarrying gainsStealthAtEndOfTurnIfNoEnemiesNearby immobile lanceCount landbound lethal elements subtypes
+    entersCarrying gainsStealthAtEndOfTurnIfNoEnemiesNearby immobile lanceCount landbound lethal healsControllerForStrikeDamage elements subtypes
     manaCost mayRangedStrikeOnceDuringBasicMovement mayStepAfterRangedStrike demon mortal undead movementBonus
     movesOnlyForward movesOnlySideways mustAttackAUnitIfAble
     mustBeCastBurrowed mustBeCastSubmerged mustBeCastToOuterColumn mustBeCastToWaterSite
@@ -3040,6 +3041,10 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
   if (card.lethal !== undefined && typeof card.lethal !== 'boolean') {
     throw new RangeError(`${path}.lethal must be boolean`);
   }
+  if (card.healsControllerForStrikeDamage !== undefined
+    && typeof card.healsControllerForStrikeDamage !== 'boolean') {
+    throw new RangeError(`${path}.healsControllerForStrikeDamage must be boolean`);
+  }
   if (card.burrowing !== undefined && typeof card.burrowing !== 'boolean') {
     throw new RangeError(`${path}.burrowing must be boolean`);
   }
@@ -4073,6 +4078,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.lanceCount !== undefined ? { lanceCount: card.lanceCount } : {}),
             ...(card.landbound === true ? { landbound: true } : {}),
             ...(card.lethal === true ? { lethal: true } : {}),
+            ...(card.healsControllerForStrikeDamage === true ? { healsControllerForStrikeDamage: true } : {}),
             manaCost: card.manaCost,
             ...(card.mayRangedStrikeOnceDuringBasicMovement === true
               ? { mayRangedStrikeOnceDuringBasicMovement: true as const }

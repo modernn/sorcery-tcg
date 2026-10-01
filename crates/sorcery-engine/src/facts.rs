@@ -519,6 +519,7 @@ pub struct MinionFacts {
     pub lance_count: Option<u8>,
     pub landbound: bool,
     pub lethal: bool,
+    pub heals_controller_for_strike_damage: bool,
     /// Printed cost; explicit absence is admitted only for noncastable tokens.
     pub mana_cost: Option<u64>,
     pub may_ranged_strike_once_during_basic_movement: bool,
@@ -1208,6 +1209,7 @@ const MINION_FIELDS: &[&str] = &[
     "lanceCount",
     "landbound",
     "lethal",
+    "healsControllerForStrikeDamage",
     "manaCost",
     "mayRangedStrikeOnceDuringBasicMovement",
     "mayStepAfterRangedStrike",
@@ -2687,6 +2689,11 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         lance_count: optional_bounded_integer(object, "lanceCount", 1, 3, path)?.map(compact_u8),
         landbound,
         lethal: optional_bool(object, "lethal", path)?,
+        heals_controller_for_strike_damage: optional_bool(
+            object,
+            "healsControllerForStrikeDamage",
+            path,
+        )?,
         mana_cost: match object.get("manaCost") {
             Some(Value::Null) if token => None,
             _ => Some(required_nonnegative_integer(

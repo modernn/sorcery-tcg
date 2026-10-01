@@ -149,14 +149,18 @@ impl PendingDamageOrder {
             DamageContinuation::Effect(group) => group.value(),
             DamageContinuation::Ranged(continuation) => {
                 let strike = &continuation.strike;
+                let mut strike_value = json!({"amount": strike.amount, "additiveBonus": strike.additive_bonus,
+                    "currentPower": strike.current_power, "lethal": strike.lethal,
+                    "lanceCount": strike.lance_count,
+                    "consumedArtifacts": strike.consumed_artifacts.iter().map(RealmReference::value).collect::<Vec<_>>()});
+                if strike.heals_controller_for_strike_damage {
+                    strike_value["healsControllerForStrikeDamage"] = json!(true);
+                }
                 json!({
                     "kind": "ranged-strike", "shooterInstanceId": continuation.shooter,
                     "seat": continuation.seat, "target": continuation.target,
                     "returnPhase": continuation.return_phase.as_str(), "stepAfter": continuation.step_after,
-                    "strike": {"amount": strike.amount, "additiveBonus": strike.additive_bonus,
-                        "currentPower": strike.current_power, "lethal": strike.lethal,
-                        "lanceCount": strike.lance_count,
-                        "consumedArtifacts": strike.consumed_artifacts.iter().map(RealmReference::value).collect::<Vec<_>>()},
+                    "strike": strike_value,
                 })
             }
             DamageContinuation::Fight(fight) => json!({

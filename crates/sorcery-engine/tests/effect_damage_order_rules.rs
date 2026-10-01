@@ -48,8 +48,45 @@ fn manifest(first: &str) -> String {
     canonical_json(&value).unwrap()
 }
 
+fn manifest_with_strike_healing(first: &str) -> String {
+    (91..4096)
+        .map(|seed| {
+            let mut value: Value = serde_json::from_str(&manifest(first)).unwrap();
+            value["seed"] = json!(seed);
+            value["cards"]["genesis"]["healsControllerForStrikeDamage"] = json!(true);
+            value["cards"]["wound"] = json!({
+                "cardType":"magic",
+                "damageTargetUnit":1,
+                "manaCost":0,
+                "payLifeAsAdditionalCost":1,
+                "thresholds":{"air":0,"earth":0,"fire":0,"water":0},
+            });
+            value["decks"][first]["spellbook"] = json!([
+                "genesis", "genesis", "genesis", "genesis", "genesis", "genesis", "genesis",
+                "wound"
+            ]);
+            value.as_object_mut().unwrap().remove("manifestId");
+            value["manifestId"] = json!(identity_hash(&value).unwrap());
+            canonical_json(&value).unwrap()
+        })
+        .find(|encoded| {
+            let session = Session::new(encoded).unwrap();
+            let replay = session.replay_value().unwrap();
+            let hand = replay["state"]["players"][first]["hand"]["spellbook"]
+                .as_array()
+                .unwrap();
+            hand.iter().any(|card| card["cardId"] == "genesis")
+                && hand.iter().any(|card| card["cardId"] == "wound")
+        })
+        .expect("seed with Genesis and life-cost Magic in opening hand")
+}
+
 fn pending(first: &str) -> Session {
-    let mut session = Session::new(&manifest(first)).expect("manifest");
+    pending_from_manifest(first, &manifest(first))
+}
+
+fn pending_from_manifest(first: &str, encoded: &str) -> Session {
+    let mut session = Session::new(encoded).expect("manifest");
     for _ in 0..2 {
         act(&mut session, |a| {
             a["kind"] == "mulligan"
@@ -73,6 +110,20 @@ fn pending(first: &str) -> Session {
     act(&mut session, |a| {
         a["kind"] == "draw" && a["zone"] == "atlas"
     });
+    let manifest: Value = serde_json::from_str(encoded).unwrap();
+    if manifest["cards"]["genesis"]["healsControllerForStrikeDamage"] == true {
+        let target_seat = if first == "north" { "south" } else { "north" };
+        act(&mut session, |a| {
+            a["kind"] == "cast-magic"
+                && a["cardId"] == "wound"
+                && a["target"]["kind"] == "avatar"
+                && a["target"]["seat"] == target_seat
+        });
+        assert_eq!(
+            session.replay_value().unwrap()["state"]["players"][first]["avatar"]["life"],
+            19
+        );
+    }
     act(&mut session, |a| {
         a["kind"] == "summon-minion" && a["cardId"] == "genesis" && a["cell"] == enemy_home
     });
@@ -81,6 +132,83 @@ fn pending(first: &str) -> Session {
         "damage-order"
     );
     session
+}
+
+#[test]
+fn effect_damage_order_checkpoint_retains_strike_healing_fact() {
+    let ordinary = pending("north").replay_value().unwrap();
+    assert!(
+        ordinary["state"]["pendingDamageOrder"]["continuation"]["strike"]
+            .get("healsControllerForStrikeDamage")
+            .is_none()
+    );
+    let original = pending_from_manifest("north", &manifest_with_strike_healing("north"));
+    let before = original.replay_value().unwrap();
+    assert_eq!(
+        before["state"]["pendingDamageOrder"]["continuation"]["strike"]["healsControllerForStrikeDamage"],
+        true
+    );
+    assert_eq!(before["state"]["players"]["north"]["avatar"]["life"], 19);
+    assert!(
+        !original
+            .transcript()
+            .iter()
+            .flat_map(|receipt| &receipt.events)
+            .any(|event| { event.event_type == "avatar-healed" })
+    );
+    let checkpoint = create_game_checkpoint(&original).unwrap();
+    let mut resumed = resume_game_checkpoint(
+        &parse_game_checkpoint(&serialize_game_checkpoint(&checkpoint).unwrap()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(resumed.replay_value().unwrap(), before);
+    let mut branch = original.clone();
+    let index = resumed
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .find_map(|action| {
+            (action.descriptor["kind"] == "choose-damage-modifier")
+                .then(|| action.descriptor["modifierIndex"].as_u64().unwrap())
+        })
+        .unwrap();
+    let resumed_receipt = act(&mut resumed, |a| {
+        a["kind"] == "choose-damage-modifier" && a["modifierIndex"] == index
+    });
+    let healing: Vec<_> = resumed_receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "avatar-healed")
+        .collect();
+    let allocated = resumed_receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "strike-damage-allocated")
+        .expect("effect strike allocation");
+    assert_eq!(healing.len(), 1);
+    assert_eq!(healing[0].payload["seat"], "north");
+    assert_eq!(
+        healing[0].payload["sourceInstanceId"],
+        before["state"]["realm"]["units"][0]["instanceId"]
+    );
+    assert_eq!(
+        healing[0].payload["attemptedAmount"],
+        allocated.payload["amount"]
+    );
+    assert_eq!(healing[0].payload["amount"], 1);
+    assert_eq!(
+        resumed.replay_value().unwrap()["state"]["players"]["north"]["avatar"]["life"],
+        20
+    );
+    let branch_receipt = act(&mut branch, |a| {
+        a["kind"] == "choose-damage-modifier" && a["modifierIndex"] == index
+    });
+    assert_eq!(resumed_receipt, branch_receipt);
+    assert_eq!(
+        resumed.replay_value().unwrap(),
+        branch.replay_value().unwrap()
+    );
+    assert!(resumed.verify_replay().unwrap());
 }
 
 fn leap_pending(first: &str) -> Session {
