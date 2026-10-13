@@ -217,6 +217,7 @@ pub struct SiteFacts {
     pub genesis_gain_mana_if_only_controlled_copy: bool,
     pub genesis_heal_nearby_avatars: bool,
     pub genesis_immobilize_nearby_until_next_turn: bool,
+    pub genesis_cast_minions_up_to_power_two_to_any_site_this_turn: bool,
     pub genesis_may_bottom_next_spell: bool,
     pub genesis_pay_one_mana_to_summon_token: Option<String>,
     pub genesis_reorder_next_spells: bool,
@@ -1002,6 +1003,7 @@ const SITE_FIELDS: &[&str] = &[
     "genesisGainManaIfOnlyControlledCopy",
     "genesisHealNearbyAvatars",
     "genesisImmobilizeNearbyUntilNextTurn",
+    "genesisCastMinionsUpToPowerTwoToAnySiteThisTurn",
     "genesisMayBottomNextSpell",
     "genesisPayOneManaToSummonToken",
     "genesisReorderNextSpells",
@@ -1445,6 +1447,11 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
 
     let genesis_enemies_lose_stealth = true_only(object, "genesisEnemiesLoseStealth", path)?;
     let genesis_heal_nearby_avatars = fixed_integer(object, "genesisHealNearbyAvatars", 3, path)?;
+    let genesis_cast_minions_up_to_power_two_to_any_site_this_turn = optional_bool(
+        object,
+        "genesisCastMinionsUpToPowerTwoToAnySiteThisTurn",
+        path,
+    )?;
     let genesis_immobilize_nearby_until_next_turn =
         true_only(object, "genesisImmobilizeNearbyUntilNextTurn", path)?;
     let genesis_may_bottom_next_spell = true_only(object, "genesisMayBottomNextSpell", path)?;
@@ -1512,6 +1519,7 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
         genesis_gain_mana_if_only_controlled_copy,
         genesis_heal_nearby_avatars,
         genesis_immobilize_nearby_until_next_turn,
+        genesis_cast_minions_up_to_power_two_to_any_site_this_turn,
         genesis_may_bottom_next_spell,
         genesis_pay_one_mana_to_summon_token,
         genesis_reorder_next_spells,

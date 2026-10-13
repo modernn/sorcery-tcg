@@ -454,6 +454,7 @@ struct AvatarPosition {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PlayerPosition {
     air_thresholds_cast_this_turn: Option<u16>,
+    cast_minions_up_to_power_two_to_any_site_turn: Option<u64>,
     atlas: Vec<CardInstance>,
     avatar: AvatarPosition,
     cemetery: Vec<CardInstance>,
@@ -1740,6 +1741,7 @@ fn account_for_selfplay_site_fields(facts: &SiteFacts) {
         genesis_gain_mana_if_only_controlled_copy: _,
         genesis_heal_nearby_avatars: _,
         genesis_immobilize_nearby_until_next_turn: _,
+        genesis_cast_minions_up_to_power_two_to_any_site_this_turn: _,
         genesis_may_bottom_next_spell: _,
         genesis_pay_one_mana_to_summon_token: _,
         genesis_reorder_next_spells: _,
@@ -10079,7 +10081,11 @@ impl Game {
                 return None;
             }
             let site = self.position.sites[cell.index()].as_ref()?;
-            if !minion.summon_to_any_site && site.controller != seat {
+            if site.controller != seat
+                && !minion.summon_to_any_site
+                && !(self.temporary_low_power_cast_permission_active(seat)
+                    && minion_cast_power(minion) <= 2)
+            {
                 return None;
             }
             let CardFacts::Site(site_facts) =
@@ -10306,6 +10312,11 @@ impl Game {
             offer(Some(LowerRegion::Underwater));
         }
         destinations
+    }
+
+    fn temporary_low_power_cast_permission_active(&self, seat: Seat) -> bool {
+        self.position.players[seat_index(seat)].cast_minions_up_to_power_two_to_any_site_turn
+            == Some(self.position.turn_number)
     }
 
     /// Enumerates the placements a free summon grants: any existing surface location, ignoring
@@ -15622,6 +15633,18 @@ impl Game {
             return Err(GameError::IllegalAction);
         };
         let abilities_lost = self.fate_covers_cell(cell) && !facts.ordinary;
+        if !abilities_lost && facts.genesis_cast_minions_up_to_power_two_to_any_site_this_turn {
+            let turn_number = self.position.turn_number;
+            self.position.players[seat_index(seat)].cast_minions_up_to_power_two_to_any_site_turn =
+                Some(turn_number);
+            outcomes.push("cast-destination-permission-granted", || {
+                json!({
+                    "seat": seat,
+                    "sourceInstanceId": card_instance_id,
+                    "turnNumber": turn_number,
+                })
+            });
+        }
         // Count on resolution, after the incoming site and any entry settlement.
         let genesis_gain_mana =
             if let Some(query) = facts.genesis_gain_mana_per_site.filter(|_| !abilities_lost) {
@@ -25298,6 +25321,15 @@ impl Game {
         // After-turn Storyline choices still belong to the ending turn's players.
         // Activate the incoming turn and its player control only once those events finish.
         self.position.turn_number += 1;
+        let turn_number = self.position.turn_number;
+        for player in &mut self.position.players {
+            if player
+                .cast_minions_up_to_power_two_to_any_site_turn
+                .is_some_and(|granted_turn| granted_turn != turn_number)
+            {
+                player.cast_minions_up_to_power_two_to_any_site_turn = None;
+            }
+        }
         self.position.active_seat = next_seat;
         self.position.decision_seat = next_seat;
         self.activate_pending_player_control(next_seat, outcomes);
@@ -26027,6 +26059,15 @@ impl Game {
         {
             object.insert("airThresholdsCastThisTurn".to_owned(), json!(count));
         }
+        if let (Some(turn), Value::Object(object)) = (
+            player.cast_minions_up_to_power_two_to_any_site_turn,
+            &mut value,
+        ) {
+            object.insert(
+                "castMinionsUpToPowerTwoToAnySiteTurn".to_owned(),
+                json!(turn),
+            );
+        }
         if let Some(avatar) = value.get_mut("avatar").and_then(Value::as_object_mut) {
             for (key, turn) in [
                 (
@@ -26506,6 +26547,10 @@ pub fn recompose_manifest_json(
     Ok(crate::canonical::canonical_json(&raw)?)
 }
 
+fn minion_cast_power(facts: &MinionFacts) -> u8 {
+    facts.attack.midpoint(facts.defense)
+}
+
 fn create_player(
     rules: &RulesContext,
     deck: &Deck,
@@ -26559,6 +26604,7 @@ fn create_player(
         air_thresholds_cast_this_turn: avatar_facts
             .tap_damage_random_other_unit_at_nearby_location_per_air_threshold_cast_this_turn
             .then_some(0),
+        cast_minions_up_to_power_two_to_any_site_turn: None,
         atlas: remaining_atlas,
         avatar,
         cemetery: Vec::new(),
@@ -39597,6 +39643,305 @@ mod tests {
         assert_eq!(
             owned_root.public_view(Seat::South).unwrap(),
             parent_south_view
+        );
+    }
+}
+
+#[cfg(test)]
+mod temporary_cast_destination_tests {
+    use super::*;
+
+    fn game_with_cast_permission_fact() -> Game {
+        let manifest = crate::synthetic::selfplay_manifest_with(73, |manifest| {
+            for ordinal in 1..=30 {
+                manifest["cards"][format!("south-site-{ordinal}")]["genesisCastMinionsUpToPowerTwoToAnySiteThisTurn"] =
+                    json!(true);
+            }
+            for (card_id, power) in [("north-spell-1", 2), ("north-spell-2", 3)] {
+                manifest["cards"][card_id]["attack"] = json!(power);
+                manifest["cards"][card_id]["defense"] = json!(power);
+                manifest["cards"][card_id]["manaCost"] =
+                    json!(if card_id == "north-spell-1" { 2 } else { 0 });
+                manifest["cards"][card_id]["thresholds"] = json!({
+                    "air": 0,
+                    "earth": u8::from(card_id == "north-spell-1"),
+                    "fire": 0,
+                    "water": 0,
+                });
+            }
+            manifest["cards"]["north-spell-3"]["thresholds"] = json!({
+                "air": 1,
+                "earth": 0,
+                "fire": 0,
+                "water": 0,
+            });
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("cast permission fixture");
+        let north_site = {
+            let player = &mut game.position.players[seat_index(Seat::North)];
+            player.atlas.remove(0)
+        };
+        let south_site = {
+            let player = &mut game.position.players[seat_index(Seat::South)];
+            player.atlas.remove(0)
+        };
+        let mut north_site = north_site;
+        north_site.enter_realm().expect("North Site enters play");
+        let mut south_site = south_site;
+        south_site.enter_realm().expect("South Site enters play");
+        for (cell, card, controller) in [
+            (Cell::parse("C4").expect("C4"), north_site, Seat::North),
+            (Cell::parse("C1").expect("C1"), south_site, Seat::South),
+        ] {
+            game.position.sites[cell.index()] = Some(SitePosition {
+                card,
+                controller,
+                last_flight_turn: None,
+                warded: false,
+            });
+        }
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        for wanted_card in ["north-spell-1", "north-spell-2", "north-spell-3"] {
+            let card_index = north
+                .spellbook
+                .iter()
+                .position(|card| game.rules.cards[usize::from(card.card_id.0)].id == wanted_card)
+                .expect("synthetic minion in Spellbook");
+            north
+                .hand_spellbook
+                .push(north.spellbook.remove(card_index));
+        }
+        north.domain_established = true;
+        north.mana = 20;
+        game.position.phase = Phase::Main;
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.turn_controller = None;
+        game.position.turn_number = 1;
+        game.position.state_version = 1;
+        game
+    }
+
+    fn summon_action(game: &Game, card_id: &str, cell: Cell) -> IssuedAction {
+        game.legal_actions()
+            .expect("legal actions")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::SummonMinion {
+                        card_id: offered_card_id,
+                        cell: offered_cell,
+                        ..
+                    } if offered_card_id == card_id && *offered_cell == cell
+                )
+            })
+            .expect("engine-issued paid summon")
+    }
+
+    #[test]
+    fn paid_summon_revalidation_rejects_expired_and_above_cap_destinations() {
+        let cross_site = Cell::parse("C1").expect("cross-seat Site");
+        let own_site = Cell::parse("C4").expect("own Site");
+
+        let mut active = game_with_cast_permission_fact();
+        active.position.players[seat_index(Seat::North)]
+            .cast_minions_up_to_power_two_to_any_site_turn = Some(1);
+        let actions = active.legal_actions().expect("active permission actions");
+        assert!(
+            !actions.iter().any(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::SummonMinion {
+                        card_id,
+                        region: Some(LowerRegion::Void),
+                        ..
+                    } if card_id == "north-spell-1"
+                )
+            }),
+            "any Site permission does not extend to the Void"
+        );
+        assert!(
+            !actions.iter().any(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::SummonMinion { card_id, .. }
+                        if card_id == "north-spell-3"
+                )
+            }),
+            "the existing Air threshold still blocks casting"
+        );
+        let mut eligible = summon_action(&active, "north-spell-1", own_site);
+        if let ActionDescriptor::SummonMinion { cell, .. } = &mut eligible.descriptor {
+            *cell = cross_site;
+        } else {
+            unreachable!("summon_action returns a paid summon");
+        }
+        active
+            .apply_action(&eligible)
+            .expect("active permission revalidates low-power cross-Site cast");
+        assert_eq!(
+            active.position.players[seat_index(Seat::North)].mana,
+            18,
+            "permission keeps the ordinary two-mana payment"
+        );
+
+        let mut insufficient_mana = game_with_cast_permission_fact();
+        insufficient_mana.position.players[seat_index(Seat::North)]
+            .cast_minions_up_to_power_two_to_any_site_turn = Some(1);
+        insufficient_mana.position.players[seat_index(Seat::North)].mana = 1;
+        assert!(
+            !insufficient_mana
+                .legal_actions()
+                .expect("insufficient-mana actions")
+                .iter()
+                .any(|action| {
+                    matches!(
+                        &action.descriptor,
+                        ActionDescriptor::SummonMinion { card_id, .. }
+                            if card_id == "north-spell-1"
+                    )
+                }),
+            "permission does not waive insufficient mana"
+        );
+
+        let mut over_cap = game_with_cast_permission_fact();
+        over_cap.position.players[seat_index(Seat::North)]
+            .cast_minions_up_to_power_two_to_any_site_turn = Some(1);
+        let mut forged = summon_action(&over_cap, "north-spell-2", own_site);
+        if let ActionDescriptor::SummonMinion { cell, .. } = &mut forged.descriptor {
+            *cell = cross_site;
+        } else {
+            unreachable!("summon_action returns a paid summon");
+        }
+        let before_over_cap = over_cap.position.clone();
+        assert!(matches!(
+            over_cap.apply_action(&forged),
+            Err(GameError::IllegalAction)
+        ));
+        assert_eq!(over_cap.position, before_over_cap);
+
+        let mut expired = game_with_cast_permission_fact();
+        expired.position.players[seat_index(Seat::North)]
+            .cast_minions_up_to_power_two_to_any_site_turn = Some(1);
+        let mut prior_turn = summon_action(&expired, "north-spell-1", cross_site);
+        expired.position.turn_number = 2;
+        expired.position.players[seat_index(Seat::North)]
+            .cast_minions_up_to_power_two_to_any_site_turn = None;
+        expired.position.state_version += 1;
+        prior_turn.state_version = expired.position.state_version;
+        let before_expired = expired.position.clone();
+        assert!(matches!(
+            expired.apply_action(&prior_turn),
+            Err(GameError::IllegalAction)
+        ));
+        assert_eq!(expired.position, before_expired);
+    }
+
+    #[test]
+    fn duplicate_genesis_grants_for_the_other_seat_share_one_global_turn_stamp() {
+        let manifest = crate::synthetic::selfplay_manifest_with(79, |manifest| {
+            for ordinal in 1..=30 {
+                manifest["cards"][format!("south-site-{ordinal}")]["genesisCastMinionsUpToPowerTwoToAnySiteThisTurn"] =
+                    json!(true);
+            }
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("cast permission fixture");
+        let source_cards = {
+            let south = &mut game.position.players[seat_index(Seat::South)];
+            [south.atlas.remove(0), south.atlas.remove(0)]
+        };
+        let source_cells = [
+            Cell::parse("C1").expect("C1"),
+            Cell::parse("C2").expect("C2"),
+        ];
+        let source_site_id = source_cards[0].instance_id.clone();
+        let second_source_site_id = source_cards[1].instance_id.clone();
+        for (cell, source) in source_cells.into_iter().zip(&source_cards) {
+            let mut card = source.clone();
+            card.enter_realm().expect("source Site enters play");
+            game.position.sites[cell.index()] = Some(SitePosition {
+                card,
+                controller: Seat::South,
+                last_flight_turn: None,
+                warded: false,
+            });
+        }
+        let north_turn = game.position.turn_number;
+        assert_eq!(game.position.active_seat, Seat::North);
+        let mut outcomes = Vec::new();
+        for (cell, source) in source_cells.into_iter().zip(source_cards) {
+            game.finish_site_genesis(
+                SiteGenesisContinuation {
+                    card_id: source.card_id,
+                    card_instance_id: source.instance_id,
+                    cell,
+                    create_rubble_at: None,
+                    defer_token: false,
+                    from_top_atlas: true,
+                    genesis_gain_mana: None,
+                    genesis_spell_draw_count: 0,
+                    genesis_token_choice: None,
+                    origin_state_version: game.position.state_version,
+                    seat: Seat::South,
+                },
+                &mut OutcomeLog::Record(&mut outcomes),
+            )
+            .expect("resolved Site Genesis");
+        }
+        let south = &game.position.players[seat_index(Seat::South)];
+        assert_eq!(
+            south.cast_minions_up_to_power_two_to_any_site_turn,
+            Some(north_turn)
+        );
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|(kind, _)| kind == "cast-destination-permission-granted")
+                .map(|(_, payload)| payload.clone())
+                .collect::<Vec<_>>(),
+            [source_site_id, second_source_site_id].map(|source| json!({
+                "seat": "south", "turnNumber": north_turn, "sourceInstanceId": source,
+            })),
+            "each source emits one grant for the captured receiver and current turn"
+        );
+
+        // Site control has no engine-issued transition yet. This mutation proves only
+        // the stored permission's independence from its source's current controller.
+        game.position.sites[source_cells[0].index()]
+            .as_mut()
+            .expect("source Site")
+            .controller = Seat::North;
+        assert_eq!(
+            game.position.players[seat_index(Seat::South)]
+                .cast_minions_up_to_power_two_to_any_site_turn,
+            Some(north_turn),
+            "source control change does not revoke the captured receiver's permission"
+        );
+        assert_eq!(
+            game.position.players[seat_index(Seat::North)]
+                .cast_minions_up_to_power_two_to_any_site_turn,
+            None,
+            "source control change does not transfer permission"
+        );
+        assert!(game.temporary_low_power_cast_permission_active(Seat::South));
+        assert!(!game.temporary_low_power_cast_permission_active(Seat::North));
+
+        game.finish_end_turn_start(
+            EndTurnStartContinuation {
+                expired_disable_effects: Vec::new(),
+                seat: Seat::South,
+            },
+            &mut OutcomeLog::Ignore,
+        )
+        .expect("next global turn starts");
+        assert_eq!(game.position.active_seat, Seat::South);
+        assert_eq!(game.position.turn_number, north_turn + 1);
+        assert_eq!(
+            game.position.players[seat_index(Seat::South)]
+                .cast_minions_up_to_power_two_to_any_site_turn,
+            None,
+            "the other-seat grant expires before its receiver's turn"
         );
     }
 }

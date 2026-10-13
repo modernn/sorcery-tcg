@@ -112,6 +112,7 @@ type SiteFacts = Readonly<{
   flyToNearbyVoidOncePerTurnAtAirThreshold?: 3;
   genesisDiscardTopSpells?: 2;
   genesisDrawSpellPerAdjacentSameCard?: boolean;
+  genesisCastMinionsUpToPowerTwoToAnySiteThisTurn?: boolean;
   genesisGainMana?: number;
   genesisGainManaIfOnlyControlledCopy?: 1;
   genesisHealNearbyAvatars?: 3;
@@ -173,6 +174,12 @@ function cardsFor(
         ...(site.genesisDiscardTopSpells === 2 ? { genesisDiscardTopSpells: 2 as const } : {}),
         genesisDrawSpellPerAdjacentSameCard:
           site.genesisDrawSpellPerAdjacentSameCard ?? false,
+        ...(site.genesisCastMinionsUpToPowerTwoToAnySiteThisTurn !== undefined
+          ? {
+            genesisCastMinionsUpToPowerTwoToAnySiteThisTurn:
+              site.genesisCastMinionsUpToPowerTwoToAnySiteThisTurn,
+          }
+          : {}),
         ...(site.genesisGainMana ? { genesisGainMana: site.genesisGainMana } : {}),
         ...(site.genesisGainManaIfOnlyControlledCopy
           ? { genesisGainManaIfOnlyControlledCopy: site.genesisGainManaIfOnlyControlledCopy }
@@ -330,6 +337,66 @@ function cardsFor(
   }
   return cards;
 }
+
+test('Site Genesis cast permission validates and omits explicit false at the manifest boundary', () => {
+  const decks = { north: deck('north-site-permission'), south: deck('south-site-permission') };
+  const cards = cardsFor(decks);
+  const siteId = decks.north.atlas[0]!;
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-site-permission-boundary-v1',
+    },
+    decks,
+    firstSeat: 'north' as const,
+    seed: 17,
+  };
+  const withoutPermission = createGameManifest({ ...input, cards });
+  const explicitFalseCards = {
+    ...cards,
+    [siteId]: {
+      ...cards[siteId]!,
+      genesisCastMinionsUpToPowerTwoToAnySiteThisTurn: false,
+    } as GameCardDefinition,
+  };
+  assert.equal(
+    Object.hasOwn(
+      explicitFalseCards[siteId]!,
+      'genesisCastMinionsUpToPowerTwoToAnySiteThisTurn',
+    ),
+    true,
+    'explicit false reaches createGameManifest before projection',
+  );
+  const explicitFalse = createGameManifest({ ...input, cards: explicitFalseCards });
+  assert.deepEqual(explicitFalse, withoutPermission);
+
+  const explicitTrue = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [siteId]: {
+        ...cards[siteId]!,
+        genesisCastMinionsUpToPowerTwoToAnySiteThisTurn: true,
+      } as GameCardDefinition,
+    },
+  });
+  const projectedSite = explicitTrue.cards[siteId];
+  assert.ok(
+    projectedSite?.cardType === 'site'
+      && projectedSite.genesisCastMinionsUpToPowerTwoToAnySiteThisTurn === true,
+  );
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [siteId]: {
+        ...cards[siteId]!,
+        genesisCastMinionsUpToPowerTwoToAnySiteThisTurn: 'yes',
+      } as unknown as GameCardDefinition,
+    },
+  }), /genesisCastMinionsUpToPowerTwoToAnySiteThisTurn must be boolean/);
+});
 
 // Retained original whole test ordinal 1; body is copied from the pinned AST statement.
 test('RULE-06 the manifest accepts only exact deck-scoped supported card facts', () => {

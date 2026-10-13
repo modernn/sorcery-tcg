@@ -523,6 +523,7 @@ export type GameCardDefinition =
     flyToNearbyVoidOncePerTurnAtAirThreshold?: 3;
     genesisDiscardTopSpells?: 2;
     genesisDrawSpellPerAdjacentSameCard?: boolean;
+    genesisCastMinionsUpToPowerTwoToAnySiteThisTurn?: boolean;
     genesisEnemiesLoseStealth?: true;
     genesisGainMana?: number;
     genesisGainManaPerSite?: SiteCountQuery;
@@ -1189,6 +1190,7 @@ type PendingRangedStep = Readonly<{
 
 type PlayerState = Readonly<{
   airThresholdsCastThisTurn?: number;
+  castMinionsUpToPowerTwoToAnySiteTurn?: number;
   atlas: readonly CardInstance[];
   avatar: Readonly<{
     card: CardInstance;
@@ -1753,7 +1755,7 @@ const SUPPORTED_CARD_FIELDS = {
     airborneMinionsAtopMoveFreelyAway blocksGroundMinionEntryWhileMinionAtop
     cannotBeMovedDestroyedOrModified cardType connectsBurrowedAllies elements siteAffinity
     flyToNearbyVoidOncePerTurnAtAirThreshold
-    genesisDiscardTopSpells genesisDrawSpellPerAdjacentSameCard genesisEnemiesLoseStealth
+    genesisDiscardTopSpells genesisDrawSpellPerAdjacentSameCard genesisCastMinionsUpToPowerTwoToAnySiteThisTurn genesisEnemiesLoseStealth
     genesisGainMana genesisGainManaIfOnlyControlledCopy genesisGainManaPerSite genesisHealNearbyAvatars
     genesisImmobilizeNearbyUntilNextTurn genesisMayBottomNextSpell genesisPayOneManaToSummonToken
     genesisReorderNextSpells
@@ -2090,6 +2092,10 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
     return;
   }
   if (card.cardType === 'site') {
+    if (card.genesisCastMinionsUpToPowerTwoToAnySiteThisTurn !== undefined
+      && typeof card.genesisCastMinionsUpToPowerTwoToAnySiteThisTurn !== 'boolean') {
+      throw new RangeError(`${path}.genesisCastMinionsUpToPowerTwoToAnySiteThisTurn must be boolean`);
+    }
     if (card.airborneMinionsAtopMoveFreelyAway !== undefined
       && card.airborneMinionsAtopMoveFreelyAway !== true) {
       throw new RangeError(
@@ -3651,6 +3657,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : {}),
             ...(card.genesisDrawSpellPerAdjacentSameCard === true
               ? { genesisDrawSpellPerAdjacentSameCard: true }
+              : {}),
+            ...(card.genesisCastMinionsUpToPowerTwoToAnySiteThisTurn === true
+              ? { genesisCastMinionsUpToPowerTwoToAnySiteThisTurn: true }
               : {}),
             ...(card.genesisEnemiesLoseStealth === true
               ? { genesisEnemiesLoseStealth: true as const }
