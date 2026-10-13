@@ -1,8 +1,12 @@
 import { syncPrivateCardTracker, writeTrackerExport } from '../catalog/card-tracker.ts';
+import { auditCardReadiness } from '../catalog/card-readiness.ts';
 
 const mode = process.argv[2];
 
-if (mode === 'sync') {
+if (mode === 'audit') {
+  if (process.argv.length > 4) throw new Error('usage: cards:tracker-audit [authority-relative-packet-path]');
+  console.log(JSON.stringify(await auditCardReadiness(process.cwd(), process.argv[3] ?? 'catalog/readiness-packet.json'), null, 2));
+} else if (mode === 'sync') {
   const result = await syncPrivateCardTracker(process.cwd());
   console.log(JSON.stringify({
     cards: result.cardCount,
@@ -22,5 +26,5 @@ if (mode === 'sync') {
   const path = await writeTrackerExport(process.cwd(), mode === 'export-json' ? 'json' : 'csv');
   console.log(path);
 } else {
-  throw new Error('usage: cards:tracker-sync | cards:tracker-export-json | cards:tracker-export-csv');
+  throw new Error('usage: cards:tracker-sync | cards:tracker-export-json | cards:tracker-export-csv | cards:tracker-audit [authority-relative-packet-path]');
 }

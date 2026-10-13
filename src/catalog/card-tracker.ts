@@ -280,7 +280,7 @@ export type TrackerSyncResult = Readonly<{
   engineHash: string;
 }>;
 
-async function engineSourceHash(repositoryRoot: string): Promise<string> {
+export async function engineSourceHash(repositoryRoot: string): Promise<string> {
   const { readdir } = await import('node:fs/promises');
   const paths = [
     join(repositoryRoot, 'Cargo.lock'),

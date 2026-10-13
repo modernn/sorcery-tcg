@@ -26,6 +26,7 @@
     "cards:tracker-export": "node src/commands/card-tracker.ts export-json",
     "cards:tracker-export-json": "node src/commands/card-tracker.ts export-json",
     "cards:tracker-export-csv": "node src/commands/card-tracker.ts export-csv",
+    "cards:tracker-audit": "node src/commands/card-tracker.ts audit",
     "decks:import-topdeck": "node src/commands/import-topdeck-candidates.ts",
     "game:meta-deck-gauntlet": "node src/commands/run-meta-deck-gauntlet.ts",
     "authority:validate": "node src/commands/validate-authority.ts",

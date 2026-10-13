@@ -105,8 +105,17 @@ function pathError(code: string, message: string): AuthorityValidationError {
   return new AuthorityValidationError([{ path: '', code, message }]);
 }
 
+export type BoundedFileIdentity = Readonly<{
+  dev: bigint; ino: bigint; size: bigint; mode: bigint; mtimeNs: bigint; ctimeNs: bigint;
+}>;
+
+export function sameBoundedFileIdentity(expected: BoundedFileIdentity, actual: BoundedFileIdentity): boolean {
+  return expected.dev === actual.dev && expected.ino === actual.ino && expected.size === actual.size
+    && expected.mode === actual.mode && expected.mtimeNs === actual.mtimeNs && expected.ctimeNs === actual.ctimeNs;
+}
+
 type BoundedReadResult =
-  | Readonly<{ status: 'ok'; bytes: Uint8Array; resolvedPath: string }>
+  | Readonly<{ status: 'ok'; bytes: Uint8Array; resolvedPath: string; identity: BoundedFileIdentity }>
   | Readonly<{ status: 'not-file' }>
   | Readonly<{ status: 'too-large' }>
   | Readonly<{ status: 'unreadable' }>;
@@ -257,14 +266,15 @@ export async function readBoundedWithinAuthorityRoot(
     requireIdentity(afterPathMetadata);
     if (
       afterPathMetadata.isSymbolicLink() ||
-      !sameIdentity(openedMetadata, afterOpenMetadata) ||
-      !sameIdentity(openedMetadata, afterPathMetadata) ||
-      openedMetadata.size !== afterOpenMetadata.size ||
+      !sameBoundedFileIdentity(openedMetadata, afterOpenMetadata) ||
+      !sameBoundedFileIdentity(openedMetadata, afterPathMetadata) ||
       openedMetadata.size !== BigInt(total)
     ) {
       throw pathError('file_changed', 'authority file changed during verification');
     }
-    return { status: 'ok', bytes: Buffer.concat(chunks, total), resolvedPath: resolvedCandidate };
+    return { status: 'ok', bytes: Buffer.concat(chunks, total), resolvedPath: resolvedCandidate,
+      identity: { dev: afterOpenMetadata.dev, ino: afterOpenMetadata.ino, size: afterOpenMetadata.size,
+        mode: afterOpenMetadata.mode, mtimeNs: afterOpenMetadata.mtimeNs, ctimeNs: afterOpenMetadata.ctimeNs } };
   } catch (error: unknown) {
     if (error instanceof AuthorityValidationError) throw error;
     return { status: 'unreadable' };

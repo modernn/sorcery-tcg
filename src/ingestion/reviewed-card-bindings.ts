@@ -16,7 +16,7 @@ const characteristicSupplement = z.strictObject({
   sources: z.array(z.strictObject({ contentHash: hash, locator: z.string().min(1).max(512) })).min(1).max(16),
 }).refine((value) => value.elements !== undefined || value.subtypes !== undefined || value.rarity !== undefined,
   'a characteristic supplement must supply elements, subtypes, or rarity');
-const bindingFile = z.strictObject({
+export const reviewedCardBindingsSchema = z.strictObject({
   schemaVersion: z.literal(1),
   authorityHash: hash,
   revisionId: z.string().min(1).max(128),
@@ -43,7 +43,7 @@ export function mergeReviewedCardBindings(
   authority: PrivateCardSnapshot,
   existing: ReadonlyMap<string, PresetCardBinding>,
 ): ReadonlyMap<string, PresetCardBinding> {
-  const file = bindingFile.parse(input);
+  const file = reviewedCardBindingsSchema.parse(input);
   if (file.authorityHash !== authority.authorityHash || file.revisionId !== authority.revisionId) {
     throw new Error('reviewed binding authority does not match');
   }
