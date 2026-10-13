@@ -47901,7 +47901,7 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "With two this-turn enemy-control spells in hand, a second cast on the already-stolen burrowing minion is a paid no-op. Distinct from 0735, which proves admission only, and from 0513, which steals once on the same turn.",
+      "plainLanguage": "After stealing a burrowing enemy, another enemy-control spell cannot target that now-allied minion, even though its original owner is still the opponent. A different enemy remains a legal target before and after checkpoint restoration.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "gainControlOfTargetEnemyMinionThisTurn",
@@ -47915,7 +47915,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/control_admission_rules.rs",
-        "testName": "rule_catalog_2584_second_betrayal_on_the_stolen_burrower_is_a_paid_noop"
+        "testName": "rule_catalog_2584_second_betrayal_omits_the_stolen_allied_burrower"
       }
     },
     {

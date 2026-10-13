@@ -5429,6 +5429,7 @@ impl Game {
             let origin = self.artifact_location(artifact)?;
             for pusher in &pushers {
                 if !self.unit_target_is_ready(pusher)?
+                    || !self.granted_unit_ability_available(pusher)?
                     || self.unit_target_region(pusher)? != origin.region
                     || !self
                         .unit_target_occupied_cells(pusher)?
@@ -5468,7 +5469,7 @@ impl Game {
             let Some(bearer) = artifact.bearer() else {
                 continue;
             };
-            if bearer.seat() != seat || !self.granted_bearer_ability_available(bearer)? {
+            if bearer.seat() != seat || !self.granted_unit_ability_available(bearer)? {
                 continue;
             }
             for target in self.enemy_minions_sharing_unit_footprint(bearer, seat)? {
@@ -5481,7 +5482,7 @@ impl Game {
         Ok(descriptors)
     }
 
-    fn granted_bearer_ability_available(&self, bearer: &UnitTarget) -> Result<bool, GameError> {
+    fn granted_unit_ability_available(&self, bearer: &UnitTarget) -> Result<bool, GameError> {
         match bearer {
             UnitTarget::Avatar { instance_id, seat } => {
                 let avatar = &self.position.players[seat_index(*seat)].avatar;
@@ -5495,7 +5496,7 @@ impl Game {
                 .units
                 .iter()
                 .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
-                .map(|unit| !self.minion_is_disabled(unit))
+                .map(|unit| !self.minion_abilities_lost(unit))
                 .ok_or(GameError::IllegalAction),
         }
     }
@@ -7770,7 +7771,7 @@ impl Game {
                             .units
                             .iter()
                             .find(|unit| unit.card.instance_id == *instance_id)
-                            .is_some_and(|unit| unit.card.owner != seat),
+                            .is_some_and(|unit| unit.controller != seat),
                     })
                 })
                 .collect(),

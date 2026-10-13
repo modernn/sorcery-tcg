@@ -1085,42 +1085,38 @@ fn rule_catalog_2583_burrowing_enemy_still_offered_for_betrayal_after_turns_pass
 }
 
 #[test]
-fn rule_catalog_2584_second_betrayal_on_the_stolen_burrower_is_a_paid_noop() {
-    let encoded = (2584..2584 + 8192)
-        .chain(513..513 + 8192)
-        .chain(735..735 + 8192)
-        .find_map(|seed| {
-            let candidate = control_admission_supplemental_manifest(seed);
-            if !seed_has_control_admission_spells(&candidate) {
-                return None;
-            }
-            let mut session = opening_main_supplemental(&candidate);
-            let minion_id = stage_enemies(&mut session, 1)[0].clone();
-            let first = cast_betrayal_on(&mut session, &minion_id);
-            if !event_types(&first).contains(&"minion-control-changed") {
-                return None;
-            }
-            if unit(&state(&session), &minion_id)["controller"] != "north" {
-                return None;
-            }
-            (betrayal_spells_in_hand(&state(&session)) >= 1
-                && betrayal_targets(&session).contains(&minion_id))
-            .then_some(candidate)
-        })
-        .expect("bounded seed with two Betrayal casts after stealing the burrower");
+fn rule_catalog_2584_second_betrayal_omits_the_stolen_allied_burrower() {
+    use sorcery_engine::checkpoint::{
+        create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+        serialize_game_checkpoint,
+    };
+    let encoded = control_admission_supplemental_manifest(2584);
     let mut session = opening_main_supplemental(&encoded);
-    let minion_id = stage_enemies(&mut session, 1)[0].clone();
-    let first = cast_betrayal_on(&mut session, &minion_id);
+    let enemies = stage_enemies(&mut session, 2);
+    let minion_id = &enemies[0];
+    let other_enemy_id = &enemies[1];
+    assert!(betrayal_spells_in_hand(&state(&session)) >= 2);
+    let first = cast_betrayal_on(&mut session, minion_id);
     assert!(event_types(&first).contains(&"minion-control-changed"));
-    assert_eq!(unit(&state(&session), &minion_id)["controller"], "north");
+    assert_eq!(unit(&state(&session), minion_id)["controller"], "north");
+    assert_eq!(unit(&state(&session), minion_id)["owner"], "south");
     assert!(betrayal_spells_in_hand(&state(&session)) >= 1);
-    assert!(betrayal_targets(&session).contains(&minion_id));
-    let second = cast_betrayal_on(&mut session, &minion_id);
-    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
-    assert!(!event_types(&second).contains(&"minion-control-changed"));
-    assert_eq!(unit(&state(&session), &minion_id)["controller"], "north");
-    assert_eq!(unit(&state(&session), &minion_id)["owner"], "south");
+    assert!(!betrayal_targets(&session).contains(minion_id));
+    assert!(betrayal_targets(&session).contains(other_enemy_id));
+    let before = session.replay_value().expect("replay value");
+    let checkpoint = serialize_game_checkpoint(&create_game_checkpoint(&session).unwrap()).unwrap();
+    let mut resumed = resume_game_checkpoint(&parse_game_checkpoint(&checkpoint).unwrap()).unwrap();
+    assert_eq!(resumed.replay_value().unwrap(), before);
+    assert!(!betrayal_targets(&resumed).contains(minion_id));
+    assert!(betrayal_targets(&resumed).contains(other_enemy_id));
+    let second = cast_betrayal_on(&mut resumed, other_enemy_id);
+    assert!(event_types(&second).contains(&"minion-control-changed"));
+    for id in &enemies {
+        assert_eq!(unit(&state(&resumed), id)["controller"], "north");
+        assert_eq!(unit(&state(&resumed), id)["owner"], "south");
+    }
     assert_exact_replay(&session);
+    assert_exact_replay(&resumed);
 }
 
 #[test]

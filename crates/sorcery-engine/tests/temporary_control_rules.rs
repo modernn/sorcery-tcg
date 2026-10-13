@@ -3347,3 +3347,360 @@ fn rule_catalog_1162_activate_discard_to_gain_control_withheld_during_pending_de
     );
     assert_exact_replay(session);
 }
+
+// Synthetic regressions for granted abilities and current-controller targeting.
+fn correction_magic(effect: &str) -> Value {
+    let mut facts = betrayal();
+    facts
+        .as_object_mut()
+        .unwrap()
+        .remove("gainControlOfTargetEnemyMinionThisTurn");
+    facts[effect] = json!(true);
+    facts
+}
+
+fn correction_manifest(
+    actor: &str,
+    cards: Value,
+    own: &[&str],
+    other: &[&str],
+    seed: u32,
+) -> String {
+    let opponent = if actor == "north" { "south" } else { "north" };
+    let mut cards = cards;
+    cards["avatar"] = avatar();
+    cards["site"] = site();
+    let mut decks = json!({});
+    for (seat, spells) in [(actor, own), (opponent, other)] {
+        decks[seat] = json!({"avatar":"avatar", "atlas":vec!["site";12], "spellbook":spells});
+    }
+    finish_manifest(json!({
+        "authority":{"contentHash":identity_hash(&json!({"fixture":"helper-corrections"})).unwrap(),
+            "mode":"synthetic", "revisionId":"synthetic-helper-corrections-v1"},
+        "cards":cards, "decks":decks, "engineVersion":"sorcery-core-v1",
+        "firstSeat":actor, "schemaVersion":1, "seed":seed
+    }))
+}
+
+fn correction_checkpoint(session: &mut Session) {
+    use sorcery_engine::checkpoint::{
+        create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+        serialize_game_checkpoint,
+    };
+    assert_exact_replay(session);
+    let before = session.replay_value().unwrap();
+    let checkpoint = serialize_game_checkpoint(&create_game_checkpoint(session).unwrap()).unwrap();
+    *session = resume_game_checkpoint(&parse_game_checkpoint(&checkpoint).unwrap()).unwrap();
+    assert_eq!(before, session.replay_value().unwrap());
+}
+
+fn correction_site(session: &mut Session, cell: &str) {
+    accept_where(session, |d| d["kind"] == "play-site" && d["cell"] == cell);
+}
+
+fn correction_summon(session: &mut Session, card: &str, cell: &str) -> String {
+    accept_where(session, |d| {
+        d["kind"] == "summon-minion" && d["cardId"] == card && d["cell"] == cell
+    })
+    .0["cardInstanceId"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+fn correction_cast(session: &mut Session, card: &str, target: &str) {
+    accept_where(session, |d| {
+        d["kind"] == "cast-magic"
+            && d["cardId"] == card
+            && d["target"]["instanceId"] == target
+            && d["drawZone"].is_null()
+    });
+}
+
+fn correction_minion() -> Value {
+    let mut facts = far();
+    facts["defense"] = json!(10);
+    facts["summonToAnySite"] = json!(true);
+    facts["spellcaster"] = json!(true);
+    facts
+}
+
+fn correction_artifact_opening(
+    actor: &str,
+    artifact: &Value,
+    blocker: &str,
+    followup: &str,
+) -> (Session, String, String) {
+    let cards = json!({"bearer":correction_minion(), "enemy":correction_minion(),
+        "artifact":artifact, "blocker":correction_magic(blocker),
+        "followup":correction_magic(followup)});
+    let mut session = (1..=256)
+        .find_map(|seed| {
+            let manifest = correction_manifest(
+                actor,
+                cards.clone(),
+                &["bearer", "artifact", "blocker", "followup"],
+                &["enemy", "enemy", "enemy"],
+                seed,
+            );
+            let session = Session::new(&manifest).unwrap();
+            let hand = opening_spell_ids(&session, actor);
+            ["bearer", "artifact", "blocker"]
+                .iter()
+                .all(|id| hand.iter().any(|card| card == id))
+                .then_some(session)
+        })
+        .expect("bounded opening");
+    keep(&mut session);
+    keep(&mut session);
+    let (home, away) = if actor == "north" {
+        ("C4", "C1")
+    } else {
+        ("C1", "C4")
+    };
+    correction_site(&mut session, home);
+    let bearer = correction_summon(&mut session, "bearer", home);
+    accept_where(&mut session, |d| {
+        d["kind"] == "cast-artifact" && d["bearer"]["instanceId"] == bearer
+    });
+    end_then_draw(&mut session, "atlas");
+    correction_site(&mut session, away);
+    let enemy = correction_summon(&mut session, "enemy", home);
+    end_then_draw(&mut session, "spellbook");
+    (session, bearer, enemy)
+}
+
+fn correction_activation(session: &Session, kind: &str, bearer: &str) -> bool {
+    session.legal_actions().unwrap().iter().any(|a| {
+        a.descriptor["kind"] == kind
+            && (kind != "activate-artifact-roll-damage"
+                || a.descriptor["pusher"]["instanceId"] == bearer)
+    })
+}
+
+#[test]
+fn granted_abilities_respect_silence_while_artifact_owned_tap_costs_remain_available() {
+    let cases = [
+        (
+            "sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves",
+            json!(true),
+            "activate-artifact-sacrifice-control",
+            true,
+        ),
+        (
+            "tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath",
+            json!(4),
+            "activate-artifact-roll-damage",
+            true,
+        ),
+        (
+            "tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps",
+            json!(3),
+            "activate-artifact-damage",
+            false,
+        ),
+        (
+            "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps",
+            json!(true),
+            "activate-artifact-discard-area-damage",
+            false,
+        ),
+    ];
+    for actor in ["north", "south"] {
+        for (field, value, kind, granted) in &cases {
+            for blocker in [
+                "silenceAndTapNearbyMinionThenMayDrawSpell",
+                "disableTargetNearbyMinionUntilNextTurn",
+            ] {
+                let mut artifact = potion();
+                artifact
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves");
+                artifact[*field] = value.clone();
+                let (mut session, bearer, _) =
+                    correction_artifact_opening(actor, &artifact, blocker, "untapTargetMinion");
+                assert!(
+                    correction_activation(&session, kind, &bearer),
+                    "baseline {actor} {field}"
+                );
+                correction_cast(&mut session, "blocker", &bearer);
+                correction_cast(&mut session, "followup", &bearer);
+                assert_eq!(unit(&state(&session), &bearer)["tapped"], false);
+                let silenced = blocker.starts_with("silence");
+                assert_eq!(
+                    correction_activation(&session, kind, &bearer),
+                    silenced && !granted,
+                    "suppression boundary {actor} {field} {blocker}"
+                );
+                correction_checkpoint(&mut session);
+                if silenced && !granted {
+                    accept_where(&mut session, |d| d["kind"] == *kind);
+                    assert_eq!(unit(&state(&session), &bearer)["tapped"], true);
+                    correction_checkpoint(&mut session);
+                }
+                end_then_draw(&mut session, "atlas");
+                end_then_draw(&mut session, "atlas");
+                assert!(
+                    correction_activation(&session, kind, &bearer),
+                    "restored {field}"
+                );
+                accept_where(&mut session, |d| {
+                    d["kind"] == *kind
+                        && (*kind != "activate-artifact-roll-damage"
+                            || d["pusher"]["instanceId"] == bearer)
+                });
+                correction_checkpoint(&mut session);
+            }
+        }
+    }
+}
+
+#[test]
+fn enemy_control_magic_uses_current_controller_in_both_owner_divergence_directions() {
+    for actor in ["north", "south"] {
+        for effect in [
+            "gainControlOfTargetEnemyMinionThisTurn",
+            "gainControlOfTargetEnemyMinionUntilStealthLost",
+        ] {
+            let opponent = if actor == "north" { "south" } else { "north" };
+            let cards = json!({"own":correction_minion(), "enemy":correction_minion(),
+                "test":correction_magic(effect), "take":correction_magic("gainControlOfTargetNearbyMinion")});
+            let manifest = correction_manifest(
+                actor,
+                cards,
+                &["own", "test", "take"],
+                &["enemy", "enemy", "take"],
+                1,
+            );
+            let mut session = Session::new(&manifest).unwrap();
+            keep(&mut session);
+            keep(&mut session);
+            let (home, away) = if actor == "north" {
+                ("C4", "C1")
+            } else {
+                ("C1", "C4")
+            };
+            correction_site(&mut session, home);
+            let own = correction_summon(&mut session, "own", home);
+            end_then_draw(&mut session, "atlas");
+            correction_site(&mut session, away);
+            let enemy = correction_summon(&mut session, "enemy", home);
+            let ordinary_enemy = correction_summon(&mut session, "enemy", home);
+            correction_cast(&mut session, "take", &own);
+            end_then_draw(&mut session, "atlas");
+            correction_cast(&mut session, "take", &enemy);
+            let before = state(&session);
+            assert_eq!(unit(&before, &own)["owner"], actor);
+            assert_eq!(unit(&before, &own)["controller"], opponent);
+            assert_eq!(unit(&before, &enemy)["owner"], opponent);
+            assert_eq!(unit(&before, &enemy)["controller"], actor);
+            let targets: Vec<Value> = session
+                .legal_actions()
+                .unwrap()
+                .into_iter()
+                .filter(|a| {
+                    a.descriptor["kind"] == "cast-magic" && a.descriptor["cardId"] == "test"
+                })
+                .map(|a| a.descriptor["target"]["instanceId"].clone())
+                .collect();
+            assert!(
+                targets.contains(&json!(own)),
+                "owned but enemy-controlled target missing: {actor} {effect}"
+            );
+            assert!(
+                !targets.contains(&json!(enemy)),
+                "opponent-owned ally offered: {actor} {effect}"
+            );
+            assert!(targets.contains(&json!(ordinary_enemy)));
+            correction_checkpoint(&mut session);
+            correction_cast(&mut session, "test", &own);
+            assert_eq!(unit(&state(&session), &own)["controller"], actor);
+            assert_eq!(unit(&state(&session), &own)["owner"], actor);
+            correction_checkpoint(&mut session);
+            end_then_draw(&mut session, "atlas");
+            let expected = if effect.ends_with("ThisTurn") {
+                opponent
+            } else {
+                actor
+            };
+            assert_eq!(unit(&state(&session), &own)["controller"], expected);
+            correction_checkpoint(&mut session);
+        }
+    }
+}
+
+#[test]
+fn established_artifact_control_survives_bearer_suppression_until_realm_departure() {
+    for actor in ["north", "south"] {
+        for blocker in [
+            "silenceAndTapNearbyMinionThenMayDrawSpell",
+            "disableTargetNearbyMinionUntilNextTurn",
+        ] {
+            let opponent = if actor == "north" { "south" } else { "north" };
+            let (mut session, bearer, enemy) = correction_artifact_opening(
+                actor,
+                &potion(),
+                blocker,
+                "returnTargetMinionToOwnerHand",
+            );
+            accept_where(&mut session, |d| {
+                d["kind"] == "activate-artifact-sacrifice-control"
+                    && d["target"]["instanceId"] == enemy
+            });
+            correction_cast(&mut session, "blocker", &bearer);
+            assert_eq!(unit(&state(&session), &enemy)["controller"], actor);
+            correction_checkpoint(&mut session);
+            correction_cast(&mut session, "followup", &bearer);
+            assert_eq!(unit(&state(&session), &enemy)["controller"], opponent);
+            assert_eq!(unit(&state(&session), &enemy)["owner"], opponent);
+            correction_checkpoint(&mut session);
+        }
+    }
+}
+
+#[test]
+fn sacrifice_only_grant_does_not_require_untapped_or_nonsick_bearer() {
+    for actor in ["north", "south"] {
+        let cards = json!({"bearer":correction_minion(), "enemy":correction_minion(),
+            "artifact":potion(), "tap":correction_magic("tapTargetMinion")});
+        let manifest = correction_manifest(
+            actor,
+            cards,
+            &["bearer", "artifact", "tap"],
+            &["enemy", "enemy", "enemy"],
+            1,
+        );
+        let mut session = Session::new(&manifest).unwrap();
+        keep(&mut session);
+        keep(&mut session);
+        let (home, away) = if actor == "north" {
+            ("C4", "C1")
+        } else {
+            ("C1", "C4")
+        };
+        correction_site(&mut session, home);
+        end_then_draw(&mut session, "atlas");
+        correction_site(&mut session, away);
+        let enemy = correction_summon(&mut session, "enemy", home);
+        end_then_draw(&mut session, "atlas");
+        let bearer = correction_summon(&mut session, "bearer", home);
+        accept_where(&mut session, |d| {
+            d["kind"] == "cast-artifact" && d["bearer"]["instanceId"] == bearer
+        });
+        assert_eq!(unit(&state(&session), &bearer)["summoningSickness"], true);
+        assert!(correction_activation(
+            &session,
+            "activate-artifact-sacrifice-control",
+            &bearer
+        ));
+        correction_cast(&mut session, "tap", &bearer);
+        assert_eq!(unit(&state(&session), &bearer)["tapped"], true);
+        correction_checkpoint(&mut session);
+        accept_where(&mut session, |d| {
+            d["kind"] == "activate-artifact-sacrifice-control" && d["target"]["instanceId"] == enemy
+        });
+        assert_eq!(unit(&state(&session), &enemy)["controller"], actor);
+        correction_checkpoint(&mut session);
+    }
+}
