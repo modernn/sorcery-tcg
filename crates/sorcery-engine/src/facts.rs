@@ -202,6 +202,8 @@ pub enum SiteEntryUsage {
     reason = "named rule facts are clearer and safer than positional bits"
 )]
 pub struct SiteFacts {
+    /// Complete printed subtype characteristics when supplied by a binding.
+    pub subtypes: Option<Box<[String]>>,
     pub affinity: [u8; 4],
     pub airborne_minions_atop_move_freely_away: bool,
     pub blocks_ground_minion_entry_while_minion_atop: bool,
@@ -993,6 +995,7 @@ const SITE_FIELDS: &[&str] = &[
     "cardType",
     "connectsBurrowedAllies",
     "elements",
+    "subtypes",
     "siteAffinity",
     "flyToNearbyVoidOncePerTurnAtAirThreshold",
     "genesisDiscardTopSpells",
@@ -1487,6 +1490,7 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
         ));
     }
     Ok(SiteFacts {
+        subtypes: parse_subtypes(object, path)?,
         affinity,
         airborne_minions_atop_move_freely_away: true_only(
             object,

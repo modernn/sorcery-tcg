@@ -28,6 +28,9 @@ export function assertPrintedCardFacts(
       : source.cardType === 'minion' ? ['attack', 'defense', 'manaCost', 'thresholds']
         : ['manaCost', 'thresholds'])];
   const facts = definition as unknown as Record<string, JsonValue>;
+  if (source.cardType === 'site' && (source.subtypes.length > 0 || facts.subtypes !== undefined)) {
+    fields.push('subtypes');
+  }
   if (definition.cardType === 'artifact') {
     fields.push(...(['elements', 'subtypes', 'rarity'] as const).filter((key) => definition[key] !== undefined));
   }

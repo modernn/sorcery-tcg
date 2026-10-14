@@ -4782,6 +4782,7 @@ function gameDefinition(
         ? { cannotBeMovedDestroyedOrModified: true as const }
         : {}),
       cardType: 'site',
+      ...(card.subtypes.length ? { subtypes: [...card.subtypes] } : {}),
       ...(connectsBurrowedAllies ? { connectsBurrowedAllies: true } : {}),
       elements: card.elements,
       ...(Object.values(card.thresholds).some((count) => count > 1)

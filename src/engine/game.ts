@@ -518,6 +518,7 @@ export type GameCardDefinition =
     cannotBeMovedDestroyedOrModified?: true;
     cardType: 'site';
     connectsBurrowedAllies?: boolean;
+    subtypes?: readonly string[];
     elements: readonly GameElement[];
     siteAffinity?: GameThresholds;
     flyToNearbyVoidOncePerTurnAtAirThreshold?: 3;
@@ -1339,6 +1340,7 @@ export type GameObservation = Readonly<{
         cardId: string;
         controller: GameSeat;
         elements: readonly GameElement[];
+        subtypes?: readonly string[];
         instanceId: StateHash;
         owner: GameSeat;
       }>>>>;
@@ -1759,7 +1761,7 @@ const SUPPORTED_CARD_FIELDS = {
     genesisGainMana genesisGainManaIfOnlyControlledCopy genesisGainManaPerSite genesisHealNearbyAvatars
     genesisImmobilizeNearbyUntilNextTurn genesisMayBottomNextSpell genesisPayOneManaToSummonToken
     genesisReorderNextSpells
-    isTower ordinary ordinaryMinionManaDiscount rangedUnitsHereRangeBonus sacrificeToDestroyNearbySite
+    isTower ordinary ordinaryMinionManaDiscount rangedUnitsHereRangeBonus sacrificeToDestroyNearbySite subtypes
     siteEntryEffect siteEntryUsage
     minionsHereGainVoidwalkUntilLeavingVoid
     preventsUnitsWithPowerAtLeastFromEntering uniqueOrLegendary
@@ -2092,6 +2094,7 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
     return;
   }
   if (card.cardType === 'site') {
+    validateCardCharacteristics(card, path, elements);
     if (card.genesisCastMinionsUpToPowerTwoToAnySiteThisTurn !== undefined
       && typeof card.genesisCastMinionsUpToPowerTwoToAnySiteThisTurn !== 'boolean') {
       throw new RangeError(`${path}.genesisCastMinionsUpToPowerTwoToAnySiteThisTurn must be boolean`);
@@ -3645,6 +3648,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? { blocksGroundMinionEntryWhileMinionAtop: true as const }
               : {}),
             cardType: 'site' as const,
+            ...(card.subtypes !== undefined ? { subtypes: [...card.subtypes] } : {}),
             ...(card.connectsBurrowedAllies === true ? { connectsBurrowedAllies: true } : {}),
             elements: [...card.elements],
             ...(card.siteAffinity !== undefined ? { siteAffinity: { ...card.siteAffinity } } : {}),

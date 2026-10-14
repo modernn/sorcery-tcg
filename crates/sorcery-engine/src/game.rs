@@ -1726,6 +1726,7 @@ fn account_for_selfplay_avatar_fields(facts: AvatarFacts) {
 
 fn account_for_selfplay_site_fields(facts: &SiteFacts) {
     let SiteFacts {
+        subtypes: _,
         affinity: _,
         airborne_minions_atop_move_freely_away: _,
         blocks_ground_minion_entry_while_minion_atop: _,
@@ -2243,6 +2244,9 @@ impl Game {
                         "instanceId": site.card.instance_id,
                         "owner": site.card.owner,
                     });
+                    if let Some(subtypes) = &facts.subtypes {
+                        site_value["subtypes"] = json!(subtypes);
+                    }
                     if site.warded {
                         site_value["warded"] = json!(true);
                     }
@@ -6040,6 +6044,14 @@ impl Game {
         unit.stealthed && !self.minion_abilities_lost(unit)
     }
 
+    /// Printed Tower is a characteristic; legacy qualification is an ability.
+    fn site_qualifies_as_tower(site: &SiteFacts, abilities_lost: bool) -> bool {
+        site.subtypes
+            .as_deref()
+            .is_some_and(|names| names.iter().any(|name| name == "Tower"))
+            || (site.is_tower && !abilities_lost)
+    }
+
     /// Reports whether an active surface minion stands on a Tower it can draw from.
     fn minion_atop_tower(&self, unit: &UnitPosition) -> bool {
         let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
@@ -6055,8 +6067,9 @@ impl Game {
                     .is_some_and(|site| {
                         matches!(
                             &self.rules.cards[usize::from(site.card.card_id.0)].facts,
-                            CardFacts::Site(site_facts) if site_facts.is_tower
-                        ) && !self.site_abilities_lost(*cell)
+                            CardFacts::Site(site_facts)
+                                if Self::site_qualifies_as_tower(site_facts, self.site_abilities_lost(*cell))
+                        )
                     })
             })
     }
@@ -9013,6 +9026,7 @@ impl Game {
         seat: Seat,
         facts: &MinionFacts,
         cells: &[Cell],
+        incoming_site: Option<(Cell, &SiteFacts)>,
     ) -> u8 {
         let mut bonus = 0_u16;
         for source in &self.position.units {
@@ -9036,13 +9050,22 @@ impl Game {
         }
         if facts.gains_power_ranged_and_spellcaster_atop_tower
             && cells.iter().any(|cell| {
+                if let Some((incoming_cell, site)) = incoming_site
+                    && *cell == incoming_cell
+                {
+                    return Self::site_qualifies_as_tower(
+                        site,
+                        self.fate_covers_cell(*cell) && !site.ordinary,
+                    );
+                }
                 self.position.sites[cell.index()]
                     .as_ref()
                     .is_some_and(|site| {
                         matches!(
                             &self.rules.cards[usize::from(site.card.card_id.0)].facts,
-                            CardFacts::Site(site_facts) if site_facts.is_tower
-                        ) && !self.site_abilities_lost(*cell)
+                            CardFacts::Site(site_facts)
+                                if Self::site_qualifies_as_tower(site_facts, self.site_abilities_lost(*cell))
+                        )
                     })
             })
         {
@@ -9091,7 +9114,7 @@ impl Game {
             {
                 return Ok(false);
             }
-            let power = self.prospective_minion_entry_power(seat, facts, &area);
+            let power = self.prospective_minion_entry_power(seat, facts, &area, None);
             return Ok(self.square_allows_power_entry(area, power));
         }
         if facts.occupies_square_area_two {
@@ -9099,7 +9122,7 @@ impl Game {
         }
         Ok(!self.site_prevents_power_entry(
             cell,
-            self.prospective_minion_entry_power(seat, facts, std::slice::from_ref(&cell)),
+            self.prospective_minion_entry_power(seat, facts, std::slice::from_ref(&cell), None),
         ))
     }
 
@@ -9139,49 +9162,31 @@ impl Game {
         site: &SiteFacts,
     ) -> Result<bool, GameError> {
         let facts = self.token_minion_facts(token_card_id)?;
-        if let Some(area) = Self::token_anchor_footprint(facts, cell) {
-            if !area
-                .iter()
-                .all(|candidate| *candidate == cell || self.surface_location_exists(*candidate))
-            {
-                return Ok(false);
-            }
-            let mut power = self.prospective_minion_entry_power(seat, facts, &area);
-            let abilities_lost = self.fate_covers_cell(cell) && !site.ordinary;
-            if facts.gains_power_ranged_and_spellcaster_atop_tower
-                && site.is_tower
-                && !abilities_lost
-            {
-                power = u8::try_from(u16::from(power).saturating_add(2)).unwrap_or(u8::MAX);
-            }
-            if abilities_lost {
-                return Ok(true);
-            }
-            if !self.square_allows_power_entry(area, power) {
-                return Ok(false);
-            }
-            return Ok(site
-                .prevents_units_with_power_at_least_from_entering
-                .is_none_or(|threshold| power < threshold));
-        }
-        if facts.occupies_square_area_two {
+        let area = Self::token_anchor_footprint(facts, cell);
+        if facts.occupies_square_area_two && area.is_none() {
             return Ok(false);
         }
-        let mut power =
-            self.prospective_minion_entry_power(seat, facts, std::slice::from_ref(&cell));
+        let cells = area
+            .as_ref()
+            .map_or(std::slice::from_ref(&cell), |area| area.as_slice());
+        if !cells
+            .iter()
+            .all(|candidate| *candidate == cell || self.surface_location_exists(*candidate))
+        {
+            return Ok(false);
+        }
+        let power = self.prospective_minion_entry_power(seat, facts, cells, Some((cell, site)));
         let abilities_lost = self.fate_covers_cell(cell) && !site.ordinary;
-        if facts.gains_power_ranged_and_spellcaster_atop_tower && site.is_tower && !abilities_lost {
-            power = u8::try_from(u16::from(power).saturating_add(2)).unwrap_or(u8::MAX);
-        }
-        if abilities_lost {
-            return Ok(true);
-        }
-        if self.site_prevents_power_entry(cell, power) {
-            return Ok(false);
-        }
-        Ok(site
-            .prevents_units_with_power_at_least_from_entering
-            .is_none_or(|threshold| power < threshold))
+        Ok(cells.iter().all(|candidate| {
+            if *candidate == cell {
+                abilities_lost
+                    || site
+                        .prevents_units_with_power_at_least_from_entering
+                        .is_none_or(|threshold| power < threshold)
+            } else {
+                !self.site_prevents_power_entry(*candidate, power)
+            }
+        }))
     }
 
     fn site_prevents_power_entry(&self, cell: Cell, entry_power: u8) -> bool {
@@ -10099,7 +10104,12 @@ impl Game {
             }
             if self.site_prevents_power_entry(
                 cell,
-                self.prospective_minion_entry_power(seat, minion, std::slice::from_ref(&cell)),
+                self.prospective_minion_entry_power(
+                    seat,
+                    minion,
+                    std::slice::from_ref(&cell),
+                    None,
+                ),
             ) {
                 return None;
             }
@@ -10116,7 +10126,7 @@ impl Game {
                     (!minion.must_be_cast_to_outer_column || cells[0].in_outer_file())
                         && self.square_allows_power_entry(
                             *cells,
-                            self.prospective_minion_entry_power(seat, minion, cells),
+                            self.prospective_minion_entry_power(seat, minion, cells, None),
                         )
                 })
                 .flat_map(|cells| {
@@ -10330,7 +10340,7 @@ impl Game {
                 .filter(|cells| {
                     self.square_allows_power_entry(
                         *cells,
-                        self.prospective_minion_entry_power(seat, minion, cells),
+                        self.prospective_minion_entry_power(seat, minion, cells, None),
                     )
                 })
                 .flat_map(|cells| {
@@ -10350,6 +10360,7 @@ impl Game {
                             seat,
                             minion,
                             std::slice::from_ref(&cell),
+                            None,
                         ),
                     )
             };
@@ -15482,14 +15493,11 @@ impl Game {
             {
                 return Err(GameError::IllegalAction);
             }
-            self.create_token_unit(
+            self.create_token_card(
                 seat,
                 token_card_id,
                 card_instance_id,
-                Location {
-                    cell,
-                    region: Region::Surface,
-                },
+                cell,
                 0,
                 origin_state_version,
             )?;
@@ -15922,8 +15930,10 @@ impl Game {
             return Err(GameError::IllegalAction);
         }
         let entry_power = match occupied_cells {
-            Some(area) => self.prospective_minion_entry_power(owner, facts, area.as_slice()),
-            None => self.prospective_minion_entry_power(owner, facts, std::slice::from_ref(&cell)),
+            Some(area) => self.prospective_minion_entry_power(owner, facts, area.as_slice(), None),
+            None => {
+                self.prospective_minion_entry_power(owner, facts, std::slice::from_ref(&cell), None)
+            }
         };
         if location.region == Region::Surface
             && (occupied_cells
@@ -39944,5 +39954,46 @@ mod temporary_cast_destination_tests {
             None,
             "the other-seat grant expires before its receiver's turn"
         );
+    }
+}
+
+#[cfg(test)]
+mod site_subtype_contract_tests {
+    use super::Game;
+    use crate::facts::{CardFacts, parse_card_definition};
+    use serde_json::json;
+
+    #[test]
+    fn printed_tower_and_legacy_qualification_have_independent_suppression_contracts() {
+        for names in [
+            None,
+            Some(json!([])),
+            Some(json!(["River"])),
+            Some(json!(["Tower"])),
+        ] {
+            for legacy in [false, true] {
+                for lost in [false, true] {
+                    let mut card = json!({"cardType":"site","elements":[]});
+                    if let Some(names) = &names {
+                        card["subtypes"] = names.clone();
+                    }
+                    if legacy {
+                        card["isTower"] = json!(true);
+                    }
+                    let CardFacts::Site(facts) = parse_card_definition("site", &card).unwrap()
+                    else {
+                        panic!("Site")
+                    };
+                    let expected = if names == Some(json!(["Tower"])) {
+                        true
+                    } else if lost {
+                        false
+                    } else {
+                        legacy
+                    };
+                    assert_eq!(Game::site_qualifies_as_tower(&facts, lost), expected);
+                }
+            }
+        }
     }
 }

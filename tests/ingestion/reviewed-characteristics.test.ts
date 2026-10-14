@@ -105,3 +105,25 @@ test('artifact supplements cannot overwrite rarity, invent unreviewed characteri
     characteristicSupplement: { ...row.characteristicSupplement, rarity: 'ordinary' },
   }), authority, new Map()), /only fill absent artifact rarity/);
 });
+
+test('both Site ingestion paths require exact printed subtypes without inventing empty-source traits', () => {
+  for (const printed of [[], ['River']]) {
+    const siteSource = { ...source, cardType: 'site' as const, attack: null, defense: null,
+      manaCost: null, elements: ['water'] as const, subtypes: printed };
+    const siteAuthority = { ...authority, cards: [siteSource] };
+    const originalHash = identityHash(siteSource as unknown as JsonValue);
+    for (const supplied of [undefined, [], ['River'], ['Tower'], ['River', 'River'], ['Tower', 'River']]) {
+      const siteFacts = { cardType: 'site', elements: ['water'], ordinary: true,
+        ...(supplied !== undefined ? { subtypes: supplied } : {}) };
+      const accept = supplied === undefined ? printed.length === 0 : JSON.stringify(supplied) === JSON.stringify(printed);
+      const preset = () => assertPrintedCardFacts(siteSource, siteFacts as GameCardDefinition, 'preset binding');
+      const reviewed = () => mergeReviewedCardBindings(binding({ cardId: siteSource.stableId,
+        sourceCardHash: originalHash, facts: siteFacts, review: row.review }), siteAuthority, new Map());
+      if (accept) { preset(); reviewed(); } else { assert.throws(preset); assert.throws(reviewed); }
+    }
+    assert.throws(() => mergeReviewedCardBindings(binding({ cardId: siteSource.stableId,
+      sourceCardHash: originalHash, facts: { cardType: 'site', elements: ['water'], ordinary: true, subtypes: printed },
+      characteristicSupplement: row.characteristicSupplement, review: row.review }), siteAuthority, new Map()), /supplements require/);
+    assert.equal(identityHash(siteSource as unknown as JsonValue), originalHash);
+  }
+});
