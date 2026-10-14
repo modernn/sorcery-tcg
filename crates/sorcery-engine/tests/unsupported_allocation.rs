@@ -274,17 +274,21 @@ fn unsupported_allocation_aborts_atomically_and_never_certifies() {
             .unwrap()
             .contains(DOUBLE_UNSUPPORTED)
     );
+    assert_eq!(failed["error"]["sessionEffect"], "unsupported");
+    let mut legacy_error = failed["error"].clone();
+    legacy_error
+        .as_object_mut()
+        .unwrap()
+        .remove("sessionEffect");
     for seat in ["north", "south"] {
-        assert_eq!(
-            rpc(&mut service, "legalActions", &json!({"seat":seat}))["error"],
-            failed["error"]
-        );
+        let error = rpc(&mut service, "legalActions", &json!({"seat":seat}))["error"].clone();
+        assert!(error.get("sessionEffect").is_none());
+        assert_eq!(error, legacy_error);
     }
     for method in ["checkpoint", "exportSession", "verifyReplay", "replaySteps"] {
-        assert_eq!(
-            rpc(&mut service, method, &json!({}))["error"],
-            failed["error"]
-        );
+        let error = rpc(&mut service, method, &json!({}))["error"].clone();
+        assert!(error.get("sessionEffect").is_none());
+        assert_eq!(error, legacy_error);
     }
 }
 

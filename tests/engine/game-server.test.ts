@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
+import { createContext, runInContext } from 'node:vm';
 
 import {
   createSyntheticDemoManifest,
   runGameDemo,
   runGameRecord,
 } from '../../src/commands/run-game-demo.ts';
+import { identityHash } from '../../src/authority/hash.ts';
 import { createGameManifest } from '../../src/engine/game.ts';
 import { withRustSession } from '../../src/engine/rust-session-helpers.ts';
 import { createGamePrototypeServer } from '../../src/prototype/game-server.ts';
@@ -31,6 +33,7 @@ async function json(path: string, init?: RequestInit, base = origin): Promise<Js
   const response = await fetch(`${base}${path}`, init);
   const body = await response.json() as JsonObject;
   assert.equal(response.status, 200, JSON.stringify(body));
+  assert.equal(body.recovery, undefined, "Recovery invalidates successful game evidence");
   return body;
 }
 
@@ -165,9 +168,10 @@ test('playable-core page renders the authoritative 5x4 checkpoint without artwor
   assert.match(page, /grounds airborne/);
   assert.doesNotMatch(page, /class=\"card\" title=/);
   assert.doesNotMatch(page, /button\.title=JSON\.stringify/);
-  assert.match(page, /clearActionResult\(\);seat=result\.view\.decisionSeat/);
-  assert.match(page, /clearActionResult\(\);seat=button\.dataset\.seat/);
-  assert.match(page, /\/api\/replay[\s\S]*clearActionResult\(\)/);
+  assert.match(page, /seat=result\.view\.decisionSeat/);
+  assert.doesNotMatch(page, /clearActionResult\(\);seat=result\.view\.decisionSeat/);
+  assert.match(page, /guarded\(async function\(\)\{seat=button\.dataset\.seat/);
+  assert.match(page, /function guarded/);
   assert.match(page, /id="replay-prev" disabled>Previous step/);
   assert.match(page, /id="replay-next" disabled>Next step/);
   assert.match(page, /id="replay-step" role="status" aria-live="polite"/);
@@ -583,6 +587,7 @@ test('browser API lets North play a deterministic South opponent through termina
   let opponentSummaryCount = 0;
   let combatObserved = false;
   for (let count = 0; count < 500; count += 1) {
+    assert.equal(current.recovery, undefined, "Recovery invalidates game outcomes");
     const view = current.view as JsonObject;
     const north = ((view.players as JsonObject).north as JsonObject);
     combatObserved ||= Number((north.avatar as JsonObject).life) < 20
@@ -642,6 +647,7 @@ test('WEB-06 seed-31 hashes match through headless and browser adapters', async 
   for (const receipt of record.transcript) {
     const action = recordedAction(receipt);
     current = await submit(action);
+    assert.equal(current.recovery, undefined, "Recovery invalidates game outcomes");
     assert.equal(current.accepted, true);
     assert.equal(current.stateHash, action.postStateHash);
   }
@@ -655,4 +661,291 @@ test('WEB-06 seed-31 hashes match through headless and browser adapters', async 
   assert.equal(steps.chained, true);
   assert.equal(steps.stepCount, 230);
   assert.equal(steps.finalStateHash, record.finalStateHash);
+});
+
+function embeddedBrowser(script: string) {
+  const context = createContext({ console });
+  runInContext(String.raw`
+    var elements={},requests=[],keyHandlers={},buttons=[];
+    function element(id){if(!elements[id])elements[id]={id:id,value:'',options:[],textContent:'',innerHTML:'',disabled:false,dataset:{},events:{},classList:{remove:function(){},add:function(){},contains:function(){return false}},addEventListener:function(name,fn){this.events[name]=fn},setAttribute:function(){},removeAttribute:function(){},querySelectorAll:function(){return[]},querySelector:function(){return resetButton}};return elements[id]}
+    var resetButton=element('reset-button'),northButton=element('north-button'),southButton=element('south-button');northButton.dataset.seat='north';southButton.dataset.seat='south';buttons=[resetButton,northButton,southButton];
+    var document={getElementById:element,querySelectorAll:function(selector){if(selector==='[data-seat]')return[northButton,southButton];if(selector==='button')return buttons;return[]},querySelector:function(){return null},addEventListener:function(name,fn){keyHandlers[name]=fn}};
+    var localStorage={getItem:function(){return null},removeItem:function(){},setItem:function(){}};
+    function fetch(path,options){return new Promise(function(resolve,reject){requests.push({path:path,options:options,resolve:resolve,reject:reject})})}
+    function deliver(body,status){var next=requests.shift();next.resolve({ok:!status||status===200,status:status||200,json:async function(){return body}})}
+  `, context);
+  runInContext(script, context);
+  runInContext(`render=function(data){snapshot=data;syncControls()};focusFirstAction=function(){};`, context);
+  const evaluate = (code: string) => runInContext(code, context);
+  const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+  return { evaluate, flush };
+}
+
+function browserReceipt(actionId: string, stateVersion = 0) {
+  const body = { actionId, seat: 'north', stateVersion, nextStateVersion: stateVersion + 1,
+    receiptSequence: stateVersion + 1, preStateHash: identityHash({ stateVersion }),
+    postStateHash: identityHash({ stateVersion: stateVersion + 1 }), events: [], randomDraws: [] };
+  return { ...body, receiptId: identityHash(body) };
+}
+
+test('embedded browser owns every command guard and retains acceptance/replacement evidence across render, refresh and transport faults', async () => {
+  const page = await (await fetch(origin)).text();
+  const script = page.match(/<script>([\s\S]*?)<\/script>/)![1]!;
+  const { evaluate, flush } = embeddedBrowser(script);
+  const fireAll = () => evaluate(`savedPosition={checkpoint:'{}',opponent:'manual'};lastCommand={actionId:'old',seat:'north',stateVersion:0};element('reset-form').events.submit({preventDefault:function(){}});element('save').events.click();element('resume').events.click();element('replay').events.click();element('stale').events.click();southButton.events.click();submit('second');visibleActionButtons=function(){return [{click:function(){submit('shortcut')}}]};keyHandlers.keydown({key:'1',target:{tagName:'DIV'},preventDefault:function(){}});`);
+  assert.equal(evaluate('busy'), true);
+  fireAll();
+  assert.equal(evaluate('requests.length'), 1);
+  assert.equal(evaluate('seat'), 'north');
+  const ready = { opponent: 'manual', actions: [], presets: [], view: { stateVersion: 0, decisionSeat: 'north' } };
+  evaluate(`deliver(${JSON.stringify(ready)})`); await flush();
+  assert.equal(evaluate('busy'), false);
+  const actionId = identityHash({ fixture: 'browser-keep' });
+  const receipt = browserReceipt(actionId);
+  const accepted = { ...ready, accepted: true, playerAction: 'Confirmed keep', receipt, opponentActionCount: 0, opponentActions: [], view: { stateVersion: 1, decisionSeat: 'north' } };
+  evaluate(`render=function(){throw new Error('render failed')};submit(${JSON.stringify(actionId)})`);
+  fireAll();
+  assert.equal(evaluate('requests.length'), 1);
+  evaluate(`deliver(${JSON.stringify(accepted)})`); await flush();
+  assert.equal(evaluate("element('receipt').textContent"), JSON.stringify(receipt, null, 2));
+  assert.match(evaluate("element('notice').textContent") as string, /Action accepted.*render failed/);
+  assert.equal(evaluate('snapshotCurrent'), false);
+  assert.equal(evaluate('busy'), false);
+  // Follow-up seat refresh stays inside the action owner and cannot erase known acceptance.
+  evaluate(`render=function(data){snapshot=data};snapshotCurrent=true;sessionReady=true;actionsReady=true;submit(${JSON.stringify(actionId)})`);
+  evaluate(`deliver(${JSON.stringify({ ...accepted, view: { stateVersion: 2, decisionSeat: 'south' } })})`); await flush();
+  assert.equal(evaluate('busy'), true);
+  assert.equal(evaluate('requests[0].path'), '/api/view?seat=south');
+  evaluate(`requests.shift().reject(new Error('refresh failed'))`); await flush();
+  assert.equal(evaluate("element('receipt').textContent"), JSON.stringify(receipt, null, 2));
+  assert.match(evaluate("element('notice').textContent") as string, /Action accepted.*refresh failed/);
+  // A confirmed replacement retires old match evidence before fallible rendering.
+  const replacementReceipt = { manifestId: identityHash({ match: 'next' }), stateHash: identityHash({ state: 'next' }), stateVersion: 0 };
+  evaluate(`render=function(){throw new Error('replacement render failed')};element('reset-form').events.submit({preventDefault:function(){}})`);
+  evaluate(`deliver(${JSON.stringify({ ...ready, replacement: { status: 'confirmed', receipt: replacementReceipt } })})`); await flush();
+  assert.equal(evaluate("element('receipt').textContent"), JSON.stringify(replacementReceipt, null, 2));
+  assert.match(evaluate("element('notice').textContent") as string, /replacement confirmed.*replacement render failed/);
+  assert.equal(evaluate('snapshot'), undefined);
+  evaluate(`renderReplayStep=function(){throw new Error('replay cleanup failed')};element('reset-form').events.submit({preventDefault:function(){}})`);
+  evaluate(`deliver(${JSON.stringify({ ...ready, replacement: { status: 'confirmed', receipt: replacementReceipt } })})`); await flush();
+  assert.equal(evaluate("element('receipt').textContent"), JSON.stringify(replacementReceipt, null, 2));
+  assert.match(evaluate("element('notice').textContent") as string, /replacement confirmed.*replay cleanup failed/);
+  evaluate(`renderReplayStep=function(){}`);
+  // An unknown POST is never called a rejection, and stale/action/save/replay remain guarded.
+  evaluate(`snapshot=${JSON.stringify(ready)};snapshotCurrent=true;sessionReady=true;actionsReady=true;submit('uncertain')`);
+  evaluate(`requests.shift().reject(new Error('lost response'))`); await flush();
+  assert.match(evaluate("element('notice').textContent") as string, /Request outcome unknown/);
+  assert.doesNotMatch(evaluate("element('notice').textContent") as string, /Rejected:/);
+  assert.equal(evaluate('sessionReady'), false);
+  evaluate(`applyResponse(${JSON.stringify(ready)})`);
+  assert.equal(evaluate('sessionReady'), false, 'A successful GET cannot clear a lost POST outcome');
+  assert.equal(evaluate('snapshotCurrent'), false);
+  evaluate(`submit('retry');element('stale').events.click();element('save').events.click();element('replay').events.click()`);
+  assert.equal(evaluate('requests.length'), 0);
+  const unknown = { recovery: { sessionStatus: 'unknown', snapshotStatus: 'untrusted', message: 'Explicit replacement required' } };
+  evaluate(`applyResponse(${JSON.stringify(unknown)})`);
+  assert.equal(evaluate('sessionReady'), false);
+  assert.equal(evaluate("element('receipt').textContent"), JSON.stringify(replacementReceipt, null, 2));
+  // Replacement stays available under recovery, and replay's two requests share one guard.
+  evaluate(`render=function(data){snapshot=data};element('reset-form').events.submit({preventDefault:function(){}})`);
+  assert.equal(evaluate('requests.length'), 1);
+  evaluate(`deliver(${JSON.stringify({ ...ready, replacement: { status: 'confirmed', receipt: replacementReceipt } })})`); await flush();
+  evaluate(`element('replay').events.click()`);
+  assert.equal(evaluate('busy'), true);
+  evaluate(`deliver({verified:true})`); await flush();
+  assert.equal(evaluate('requests[0].path'), '/api/replay/steps');
+  fireAll(); assert.equal(evaluate('requests.length'), 1);
+  evaluate(`deliver({steps:[],chained:true})`); await flush();
+  assert.equal(evaluate('busy'), false);
+});
+
+test('exact embedded script treats missing or malformed mutation outcomes as unknown until an explicit valid confirmed replacement', async () => {
+  const script = (await (await fetch(origin)).text()).match(/<script>([\s\S]*?)<\/script>/)![1]!;
+  const priorId = identityHash({ browser: 'confirmed-prior' });
+  const nextId = identityHash({ browser: 'next-command' });
+  const priorReceipt = browserReceipt(priorId);
+  const checkpointHash = identityHash({ browser: 'saved-session' });
+  const ack = { manifestId: identityHash({ browser: 'explicit-replacement' }), stateHash: identityHash({ browser: 'fresh-state' }), stateVersion: 0 };
+  const ready = { opponent: 'manual', actions: [], presets: [], view: { stateVersion: 0, decisionSeat: 'north' } };
+  const prior = { ...ready, accepted: true, playerAction: 'Prior confirmed action', receipt: priorReceipt,
+    opponentActionCount: 0, opponentActions: [], view: { stateVersion: 1, decisionSeat: 'north' } };
+  const recovery = { stage: 'replacement', message: 'Replacement unchanged', snapshotStatus: 'unavailable',
+    actionsAvailable: false, sessionStatus: 'ready', metadataStatus: 'known' };
+  for (const operation of ['action', 'reset', 'resume'] as const) {
+    for (const fault of ['bare-json-503', 'bare-json-400', 'missing-outcome-200', 'malformed-outcome-200', 'malformed-recovery-503', 'contradictory-recovery-503']) {
+      const { evaluate, flush } = embeddedBrowser(script);
+      evaluate(`deliver(${JSON.stringify(ready)})`); await flush();
+      evaluate(`element('preset').value='synthetic';element('opponent').value='manual';element('seed').value='31';savedPosition={checkpoint:JSON.stringify({expectedSessionHash:${JSON.stringify(checkpointHash)}}),opponent:'manual'};submit(${JSON.stringify(priorId)})`);
+      evaluate(`deliver(${JSON.stringify(prior)})`); await flush();
+      assert.equal(evaluate('outcomeUnknown'), false);
+      assert.equal(evaluate("element('receipt').textContent"), JSON.stringify(priorReceipt, null, 2));
+      if (operation === 'action') evaluate(`submit(${JSON.stringify(nextId)})`);
+      if (operation === 'reset') evaluate(`element('reset-form').events.submit({preventDefault:function(){}})`);
+      if (operation === 'resume') evaluate(`element('resume').events.click()`);
+      assert.equal(evaluate('requests.length'), 1, `${operation}/${fault} entered exactly once`);
+      let body: JsonObject;
+      let status = 200;
+      if (fault === 'bare-json-503' || fault === 'bare-json-400') {
+        body = { error: 'Synthetic response lacks conclusive mutation evidence' };
+        status = fault === 'bare-json-503' ? 503 : 400;
+      } else if (fault === 'missing-outcome-200') body = ready;
+      else if (fault === 'malformed-recovery-503') {
+        body = { error: 'Synthetic invalid recovery', recovery: { sessionStatus: 'ready' } }; status = 503;
+      } else if (fault === 'contradictory-recovery-503') {
+        body = { error: 'Synthetic contradictory recovery', recovery: { ...recovery,
+          stage: 'player-presentation', metadataStatus: 'unknown' } }; status = 503;
+      } else if (operation === 'action') {
+        body = { ...prior, receipt: { ...browserReceipt(nextId, 1), events: null } };
+      } else {
+        body = { ...ready, replacement: { status: 'confirmed', receipt: operation === 'reset'
+          ? { ...ack, stateHash: 'invalid-hash' }
+          : { stateHash: ack.stateHash, stateVersion: 0, expectedSessionHash: identityHash({ browser: 'wrong-saved-session' }) } } };
+      }
+      evaluate(`deliver(${JSON.stringify(body)},${status})`); await flush();
+      assert.equal(evaluate('outcomeUnknown'), true, `${operation}/${fault}`);
+      assert.equal(evaluate('sessionReady'), false);
+      assert.equal(evaluate('snapshotCurrent'), false);
+      assert.equal(evaluate('actionsReady'), false);
+      assert.equal(evaluate("element('receipt').textContent"), JSON.stringify(priorReceipt, null, 2));
+      assert.match(evaluate("element('notice').textContent") as string, /Request outcome unknown/);
+      assert.doesNotMatch(evaluate("element('notice').textContent") as string, /Rejected:/);
+      evaluate(`northButton.events.click()`);
+      assert.equal(evaluate('requests.length'), 1);
+      evaluate(`deliver(${JSON.stringify({ ...ready, view: prior.view })})`); await flush();
+      assert.equal(evaluate('outcomeUnknown'), true);
+      assert.equal(evaluate('sessionReady'), false, 'GET cannot establish a missing POST outcome');
+      evaluate(`applyResponse(${JSON.stringify({ ...ready, replacement: { status: 'confirmed', receipt: ack } })})`);
+      assert.equal(evaluate('outcomeUnknown'), true, 'Uncorrelated replacement fields cannot clear uncertainty');
+      assert.equal(evaluate("element('receipt').textContent"), JSON.stringify(priorReceipt, null, 2));
+      evaluate(`submit(${JSON.stringify(nextId)});element('stale').events.click();element('save').events.click();element('replay').events.click()`);
+      assert.equal(evaluate('requests.length'), 0, 'No action, stale retry, save or either replay request');
+      // A conclusive unchanged replacement retains a previously uncertain binding.
+      evaluate(`element('reset-form').events.submit({preventDefault:function(){}})`);
+      evaluate(`deliver(${JSON.stringify({ error: 'Replacement unchanged', replacement: { status: 'unchanged' },
+        recovery: { ...recovery, sessionStatus: 'unknown', snapshotStatus: 'untrusted', metadataStatus: 'unknown' } })},400)`); await flush();
+      assert.equal(evaluate('outcomeUnknown'), true);
+      assert.equal(evaluate("element('receipt').textContent"), JSON.stringify(priorReceipt, null, 2));
+      // Only this explicitly requested, complete and valid acknowledgement clears it.
+      if (operation === 'resume') {
+        evaluate(`element('resume').events.click()`);
+        evaluate(`deliver(${JSON.stringify({ ...ready, replacement: { status: 'confirmed', receipt: {
+          stateHash: ack.stateHash, stateVersion: 0, expectedSessionHash: checkpointHash } } })})`);
+      } else {
+        evaluate(`element('reset-form').events.submit({preventDefault:function(){}})`);
+        evaluate(`deliver(${JSON.stringify({ ...ready, replacement: { status: 'confirmed', receipt: ack } })})`);
+      }
+      await flush();
+      assert.equal(evaluate('outcomeUnknown'), false);
+      assert.equal(evaluate('sessionReady'), true);
+      assert.equal(evaluate('snapshotCurrent'), true);
+      assert.equal(evaluate('lastCommand'), undefined);
+      assert.equal(evaluate('busy'), false);
+      assert.equal(evaluate('requests.length'), 0);
+    }
+  }
+});
+
+test('embedded script distinguishes conclusive preflight, native rejection, read-only presentation failure and unchanged replacement', async () => {
+  const script = (await (await fetch(origin)).text()).match(/<script>([\s\S]*?)<\/script>/)![1]!;
+  const actionId = identityHash({ browser: 'preflight-command' });
+  const ready = { opponent: 'manual', presetId: 'synthetic', actions: [], presets: [{ id: 'synthetic', label: 'Synthetic' }], view: { stateVersion: 0, decisionSeat: 'north' } };
+  const validRecovery = { stage: 'player-presentation', message: 'Action presentation unavailable', snapshotStatus: 'unavailable', actionsAvailable: false, sessionStatus: 'ready', metadataStatus: 'known' };
+  for (const refused of [
+    { operation: 'action', status: 400, body: { error: 'south is controlled by the deterministic opponent' } },
+    { operation: 'reset', status: 400, body: { error: 'seed must be an unsigned 32-bit integer' } },
+    { operation: 'reset', status: 400, body: { error: 'presetId must name an available preset' } },
+    { operation: 'resume', status: 403, body: { error: 'south is hidden while controlled by the deterministic opponent' } },
+    { operation: 'action', status: 200, body: { ...ready, accepted: false, opponentActionCount: 0, opponentActions: [], reason: { code: 'unknown_action', message: 'Action is not available', currentStateHash: identityHash({ state: 'unchanged' }), currentStateVersion: 0 } } },
+    { operation: 'action', status: 503, body: { error: 'Action presentation unavailable', recovery: validRecovery } },
+    { operation: 'reset', status: 400, body: { error: 'Replacement unchanged', replacement: { status: 'unchanged' }, recovery: { ...validRecovery, stage: 'replacement' } } },
+    { operation: 'resume', status: 400, body: { error: 'Replacement unchanged', replacement: { status: 'unchanged' }, recovery: { ...validRecovery, stage: 'replacement' } } },
+  ]) {
+    const { evaluate, flush } = embeddedBrowser(script);
+    const initial = refused.operation === 'action' && refused.body.error === 'south is controlled by the deterministic opponent'
+      ? { ...ready, opponent: 'south' } : ready;
+    evaluate(`deliver(${JSON.stringify(initial)})`); await flush();
+    evaluate(`savedPosition={checkpoint:JSON.stringify({expectedSessionHash:${JSON.stringify(identityHash({ saved: true }))}}),opponent:'manual'};element('receipt').textContent='Historical confirmed receipt'`);
+    if (refused.operation === 'action') evaluate(`seat=${JSON.stringify(initial.opponent === 'south' ? 'south' : 'north')};submit(${JSON.stringify(actionId)})`);
+    if (refused.operation === 'reset') {
+      if (refused.body.error === 'seed must be an unsigned 32-bit integer') evaluate(`element('seed').value='not-a-number'`);
+      if (refused.body.error === 'presetId must name an available preset') evaluate(`element('preset').value='unavailable-preset'`);
+      evaluate(`element('reset-form').events.submit({preventDefault:function(){}})`);
+    }
+    if (refused.operation === 'resume') evaluate(`seat='south';savedPosition.opponent='south';element('resume').events.click()`);
+    const body = refused.body.replacement ? { error: refused.body.error, replacement: refused.body.replacement,
+      recovery: refused.body.recovery } : refused.body;
+    evaluate(`deliver(${JSON.stringify(body)},${refused.status})`); await flush();
+    assert.equal(evaluate('outcomeUnknown'), false, `${refused.operation}/${refused.status}/${refused.body.error}`);
+    assert.equal(evaluate("element('receipt').textContent"), 'Historical confirmed receipt');
+    evaluate(`northButton.events.click()`);
+    evaluate(`deliver(${JSON.stringify(ready)})`); await flush();
+    assert.equal(evaluate('sessionReady'), true);
+    assert.equal(evaluate('snapshotCurrent'), true);
+  }
+});
+
+test('preset refusal is inconclusive without its catalog after confirmed replacement retires the snapshot', async () => {
+  const script = (await (await fetch(origin)).text()).match(/<script>([\s\S]*?)<\/script>/)![1]!;
+  const presetId = 'synthetic';
+  const actionId = identityHash({ browser: 'preset-catalog-unavailable' });
+  const ack = { manifestId: identityHash({ browser: 'replacement-ack' }), stateHash: identityHash({ browser: 'replacement-state' }), stateVersion: 0 };
+  const ready = { opponent: 'manual', presetId, presets: [{ id: presetId, label: 'Synthetic' }], actions: [], view: { stateVersion: 0, decisionSeat: 'north' } };
+  const { evaluate, flush } = embeddedBrowser(script);
+  evaluate(`deliver(${JSON.stringify(ready)})`); await flush();
+  evaluate(`element('preset').value=${JSON.stringify(presetId)};element('opponent').value='manual';element('seed').value='31';element('receipt').textContent='Previous evidence'`);
+  evaluate(`element('reset-form').events.submit({preventDefault:function(){}})`);
+  assert.equal(evaluate('requests.length'), 1);
+  evaluate(`deliver({replacement:{status:'confirmed',receipt:${JSON.stringify(ack)}},recovery:{stage:'snapshot',message:'Presentation unavailable',snapshotStatus:'unavailable',actionsAvailable:false,sessionStatus:'ready',metadataStatus:'known'}})`); await flush();
+  assert.equal(evaluate('outcomeUnknown'), false);
+  assert.equal(evaluate('snapshot'), undefined, 'The confirmed replacement retired the old presentation cache');
+  assert.equal(evaluate("element('receipt').textContent"), JSON.stringify(ack, null, 2));
+
+  evaluate(`element('preset').value=${JSON.stringify(presetId)};element('reset-form').events.submit({preventDefault:function(){}})`);
+  assert.equal(evaluate('requests.length'), 1, 'The valid preset can be submitted without a current snapshot');
+  assert.deepEqual(JSON.parse(evaluate('requests[0].options.body') as string), { opponent: 'manual', presetId, seed: 31 });
+  evaluate(`deliver({error:'presetId must name an available preset'},400)`); await flush();
+  assert.equal(evaluate('outcomeUnknown'), true);
+  assert.equal(evaluate('sessionReady'), false);
+  assert.equal(evaluate("element('receipt').textContent"), JSON.stringify(ack, null, 2), 'The last acknowledged replacement remains visible');
+
+  evaluate(`northButton.events.click()`);
+  assert.equal(evaluate('requests.length'), 1);
+  evaluate(`deliver(${JSON.stringify(ready)})`); await flush();
+  assert.equal(evaluate('outcomeUnknown'), true, 'An unrelated GET cannot resolve the second reset');
+  assert.equal(evaluate('sessionReady'), false);
+  evaluate(`submit(${JSON.stringify(actionId)});element('save').events.click();element('replay').events.click();element('stale').events.click()`);
+  assert.equal(evaluate('requests.length'), 0, 'Action, stale retry, save and replay remain blocked');
+  assert.equal(evaluate("element('receipt').textContent"), JSON.stringify(ack, null, 2));
+});
+
+test('browser only treats request-matched route refusals as conclusive and keeps post-ack resume fallback uncertain', async () => {
+  const script = (await (await fetch(origin)).text()).match(/<script>([\s\S]*?)<\/script>/)![1]!;
+  const ready = { opponent: 'manual', actions: [], presets: [{ id: 'synthetic' }], presetId: 'synthetic', view: { stateVersion: 0, decisionSeat: 'north' } };
+  const savedCheckpoint = (await post('/api/checkpoint')).checkpoint as string;
+  const cases = [
+    { operation: 'reset', status: 403, error: 'seed must be an unsigned 32-bit integer' },
+    { operation: 'action', status: 403, error: 'valid seat, stateVersion, and actionId are required' },
+    { operation: 'reset', status: 400, error: 'seed must be an unsigned 32-bit integer' },
+    { operation: 'action', status: 400, error: 'south is controlled by the deterministic opponent' },
+    { operation: 'resume', status: 400, error: 'Invalid checkpoint request' },
+  ] as const;
+  for (const fault of cases) {
+    const { evaluate, flush } = embeddedBrowser(script);
+    evaluate(`deliver(${JSON.stringify(ready)})`); await flush();
+    evaluate(`element('preset').value='synthetic';element('opponent').value='manual';element('seed').value='31';savedPosition={checkpoint:${JSON.stringify(savedCheckpoint)},opponent:'manual'};element('receipt').textContent='Historical confirmed receipt'`);
+    if (fault.operation === 'action') evaluate(`submit(${JSON.stringify(identityHash({ browser: 'request-correlation' }))})`);
+    if (fault.operation === 'reset') evaluate(`element('reset-form').events.submit({preventDefault:function(){}})`);
+    if (fault.operation === 'resume') evaluate(`element('resume').events.click()`);
+    if (fault.operation === 'resume') assert.equal(evaluate('requests[0].options.body') as string, savedCheckpoint, 'The ambiguous fallback follows a real checkpoint request');
+    assert.equal(evaluate('requests.length'), 1);
+    evaluate(`deliver({error:${JSON.stringify(fault.error)}},${fault.status})`); await flush();
+    assert.equal(evaluate('outcomeUnknown'), true, `${fault.operation}/${fault.status}/${fault.error}`);
+    assert.equal(evaluate('sessionReady'), false);
+    assert.equal(evaluate("element('receipt').textContent"), 'Historical confirmed receipt');
+    evaluate(`northButton.events.click()`);
+    evaluate(`deliver(${JSON.stringify({ ...ready, view: { stateVersion: 0, decisionSeat: 'north' } })})`); await flush();
+    assert.equal(evaluate('outcomeUnknown'), true, 'A later checked GET cannot clear the uncertain response');
+    assert.equal(evaluate('sessionReady'), false);
+    assert.equal(evaluate('requests.length'), 0);
+  }
 });

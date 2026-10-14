@@ -10,10 +10,11 @@ use crate::checkpoint::{
     GameCheckpoint, create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
 };
 use crate::contract::{ActionRequest, Seat};
+use crate::game::GameError;
 use crate::novelty::NoveltyStep;
 use crate::novelty_dispatch::ForcedNoveltyInput;
 use crate::policy::{LEGACY_POLICY_BEHAVIOR_VERSION, MOVEMENT_PROGRESS_POLICY_BEHAVIOR_VERSION};
-use crate::session::{Session, StepResult};
+use crate::session::{Session, SessionError, StepResult};
 
 const SCHEMA_VERSION: u8 = 1;
 const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
@@ -45,6 +46,17 @@ pub struct RpcResponse {
 #[serde(rename_all = "camelCase")]
 struct RpcError {
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_effect: Option<SessionEffect>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum SessionEffect {
+    Unchanged,
+    Capacity,
+    Unsupported,
+    Unknown,
 }
 
 /// Stateful handler for one persistent session-json process.
@@ -154,16 +166,16 @@ impl SessionJsonService {
 
     fn new_session(&mut self, id: u64, params: &Value) -> RpcResponse {
         let Some(manifest_json) = params.get("manifestJson").and_then(Value::as_str) else {
-            return error_response(id, "new requires manifestJson");
+            return unchanged_response(id, "new requires manifestJson");
         };
         if manifest_json.len() > MAX_LINE_BYTES {
-            return error_response(id, "manifestJson exceeds 16 MiB");
+            return unchanged_response(id, "manifestJson exceeds 16 MiB");
         }
         match Session::new(manifest_json) {
             Ok(session) => {
                 let state_hash = match session.state_hash() {
                     Ok(state_hash) => state_hash,
-                    Err(error) => return error_response(id, &error.to_string()),
+                    Err(error) => return unchanged_response(id, &error.to_string()),
                 };
                 let state_version = session.state_version();
                 let manifest_id = session.manifest_id().clone();
@@ -177,7 +189,7 @@ impl SessionJsonService {
                     }),
                 )
             }
-            Err(error) => error_response(id, &error.to_string()),
+            Err(error) => unchanged_response(id, &error.to_string()),
         }
     }
 
@@ -209,7 +221,16 @@ impl SessionJsonService {
         };
         match session.step(request) {
             Ok(result) => ok_response(id, step_result_value(result)),
-            Err(error) => error_response(id, &error.to_string()),
+            Err(error) => {
+                let effect = match &error {
+                    SessionError::AttemptLimitReached => SessionEffect::Capacity,
+                    SessionError::Game(GameError::UnsupportedMechanic(_)) => {
+                        SessionEffect::Unsupported
+                    }
+                    _ => SessionEffect::Unknown,
+                };
+                effect_response(id, &error.to_string(), effect)
+            }
         }
     }
 
@@ -456,21 +477,21 @@ impl SessionJsonService {
 
     fn resume(&mut self, id: u64, params: &Value) -> RpcResponse {
         let Some(checkpoint_value) = params.get("checkpoint") else {
-            return error_response(id, "resume requires checkpoint");
+            return unchanged_response(id, "resume requires checkpoint");
         };
         let checkpoint_text = match canonical_json(checkpoint_value) {
             Ok(text) => text,
-            Err(error) => return error_response(id, &error.to_string()),
+            Err(error) => return unchanged_response(id, &error.to_string()),
         };
         let checkpoint = match parse_game_checkpoint(&checkpoint_text) {
             Ok(checkpoint) => checkpoint,
-            Err(error) => return error_response(id, &error.to_string()),
+            Err(error) => return unchanged_response(id, &error.to_string()),
         };
         match resume_game_checkpoint(&checkpoint) {
             Ok(session) => {
                 let state_hash = match session.state_hash() {
                     Ok(state_hash) => state_hash,
-                    Err(error) => return error_response(id, &error.to_string()),
+                    Err(error) => return unchanged_response(id, &error.to_string()),
                 };
                 let state_version = session.state_version();
                 let expected_session_hash = checkpoint.expected_session_hash.clone();
@@ -484,7 +505,7 @@ impl SessionJsonService {
                     }),
                 )
             }
-            Err(error) => error_response(id, &error.to_string()),
+            Err(error) => unchanged_response(id, &error.to_string()),
         }
     }
 }
@@ -675,8 +696,21 @@ fn error_response(id: u64, message: &str) -> RpcResponse {
         schema_version: SCHEMA_VERSION,
         error: Some(RpcError {
             message: message.to_owned(),
+            session_effect: None,
         }),
     }
+}
+
+fn effect_response(id: u64, message: &str, effect: SessionEffect) -> RpcResponse {
+    let mut response = error_response(id, message);
+    if let Some(error) = response.error.as_mut() {
+        error.session_effect = Some(effect);
+    }
+    response
+}
+
+fn unchanged_response(id: u64, message: &str) -> RpcResponse {
+    effect_response(id, message, SessionEffect::Unchanged)
 }
 
 fn parse_policy_behavior_version(params: &Value) -> Result<u8, String> {

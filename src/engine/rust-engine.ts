@@ -443,7 +443,23 @@ export function runRustSyntheticRecord(seed: number): RustGameRecord {
   return parseRustRecord(runRustEngineCommand(['record', String(seed)]));
 }
 
+export type RustSessionEffect = 'unchanged' | 'capacity' | 'unsupported' | 'unknown';
+
+/** Effect belongs only to the correlated failing RPC, never to a later read. */
+export class RustSessionRpcError extends Error {
+  readonly method: string;
+  readonly sessionEffect: RustSessionEffect;
+
+  constructor(message: string, method: string, sessionEffect: RustSessionEffect) {
+    super(message);
+    this.name = 'RustSessionRpcError';
+    this.method = method;
+    this.sessionEffect = sessionEffect;
+  }
+}
+
 type PendingRpc = {
+  method: string;
   reject: (error: Error) => void;
   resolve: (value: unknown) => void;
 };
@@ -724,7 +740,7 @@ export class RustSessionClient {
       schemaVersion: 1,
     } as JsonValue);
     return await new Promise((resolve, reject) => {
-      this.pending.set(id, { reject, resolve });
+      this.pending.set(id, { method, reject, resolve });
       this.child.stdin.write(`${request}\n`, (error) => {
         if (error) {
           this.pending.delete(id);
@@ -750,11 +766,20 @@ export class RustSessionClient {
     const waiter = this.pending.get(parsed.id as number);
     if (!waiter) return;
     this.pending.delete(parsed.id as number);
+    if (parsed.schemaVersion !== 1 || (parsed.error !== undefined && parsed.result !== undefined)) {
+      waiter.reject(new Error('Invalid session-json response envelope'));
+      return;
+    }
     if (parsed.error !== undefined) {
       const message = isRecord(parsed.error) && typeof parsed.error.message === 'string'
         ? parsed.error.message
         : 'Rust session-json request failed';
-      waiter.reject(new Error(message));
+      const effect = isRecord(parsed.error) && typeof parsed.error.message === 'string'
+        ? parsed.error.sessionEffect : undefined;
+      waiter.reject(typeof effect === 'string'
+        && ['unchanged', 'capacity', 'unsupported', 'unknown'].includes(effect)
+        ? new RustSessionRpcError(message, waiter.method, effect as RustSessionEffect)
+        : new Error(message));
       return;
     }
     waiter.resolve(parsed.result);

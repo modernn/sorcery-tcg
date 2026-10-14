@@ -29,6 +29,10 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) {
 }
 
 fn warded_reduction_session() -> Session {
+    warded_reduction_session_for(false)
+}
+
+fn warded_reduction_session_for(south_damage: bool) -> Session {
     let avatar = json!({
         "attack": 1, "defense": 1, "cardType": "avatar", "drawSpell": false, "life": 20,
     });
@@ -73,6 +77,21 @@ fn warded_reduction_session() -> Session {
         "engineVersion": "sorcery-core-v1", "firstSeat": "north",
         "schemaVersion": 1, "seed": 31,
     });
+    if south_damage {
+        manifest["firstSeat"] = json!("south");
+        manifest["cards"]["south-rain"] = manifest["cards"]["north-rain"].clone();
+        manifest["decks"]["north"]["spellbook"] =
+            json!(["north-minion", "north-ward", "north-ward"]);
+        manifest["decks"]["south"]["spellbook"] = json!(vec!["south-rain"; 5]);
+        manifest["cards"]
+            .as_object_mut()
+            .unwrap()
+            .remove("north-rain");
+        manifest["cards"]
+            .as_object_mut()
+            .unwrap()
+            .remove("south-minion");
+    }
     manifest["manifestId"] = json!(identity_hash(&manifest).unwrap());
     let mut session = Session::new(&canonical_json(&manifest).unwrap()).unwrap();
     for _ in 0..2 {
@@ -82,6 +101,15 @@ fn warded_reduction_session() -> Session {
                 && action["spellbookOrder"] == json!([])
         });
     }
+    if south_damage {
+        accept_where(&mut session, |action| {
+            action["kind"] == "play-site" && action["cell"] == "C1"
+        });
+        accept_where(&mut session, |action| action["kind"] == "end-turn");
+        accept_where(&mut session, |action| {
+            action["kind"] == "draw" && action["zone"] == "atlas"
+        });
+    }
     accept_where(&mut session, |action| {
         action["kind"] == "play-site" && action["cell"] == "C4"
     });
@@ -89,6 +117,12 @@ fn warded_reduction_session() -> Session {
     accept_where(&mut session, |action| {
         action["kind"] == "cast-magic" && action["cardId"] == "north-ward"
     });
+    if south_damage {
+        accept_where(&mut session, |action| action["kind"] == "end-turn");
+        accept_where(&mut session, |action| {
+            action["kind"] == "draw" && action["zone"] == "spellbook"
+        });
+    }
     session
 }
 
@@ -174,12 +208,13 @@ fn session_json_cannot_continue_or_export_after_unsupported_transition() {
             .unwrap()
             .contains(UNSUPPORTED)
     );
+    assert_eq!(failed["error"]["sessionEffect"], "unsupported");
     let continued = rpc(&mut service, "step", &json!(end_turn));
     assert_eq!(continued["error"], failed["error"]);
     for seat in ["north", "south"] {
         assert_eq!(
-            rpc(&mut service, "legalActions", &json!({ "seat": seat }))["error"],
-            failed["error"]
+            rpc(&mut service, "legalActions", &json!({ "seat": seat }))["error"]["message"],
+            failed["error"]["message"]
         );
     }
     for method in [
@@ -190,8 +225,8 @@ fn session_json_cannot_continue_or_export_after_unsupported_transition() {
         "replaySteps",
     ] {
         assert_eq!(
-            rpc(&mut service, method, &json!({}))["error"],
-            failed["error"]
+            rpc(&mut service, method, &json!({}))["error"]["message"],
+            failed["error"]["message"]
         );
     }
     assert_eq!(
@@ -200,4 +235,41 @@ fn session_json_cannot_continue_or_export_after_unsupported_transition() {
     );
     assert!(rpc(&mut service, "resume", &resume)["error"].is_null());
     assert!(rpc(&mut service, "step", &json!(end_turn))["error"].is_null());
+}
+
+#[test]
+fn actual_south_issued_damage_preserves_last_valid_journals_and_aborts_certification() {
+    let mut session = warded_reduction_session_for(true);
+    let before = session.replay_value().unwrap();
+    let transcript = session.transcript().to_vec();
+    let attempts = session.attempts().to_vec();
+    let hash = session.state_hash().unwrap();
+    let view = session.public_view(Seat::North).unwrap();
+    assert_eq!(transcript.len(), 10);
+    assert_eq!(attempts.len(), 10);
+    assert_eq!(session.acting_controller(), Seat::South);
+    let request = request_where(&session, |action| {
+        action["kind"] == "cast-magic" && action["cardId"] == "south-rain"
+    });
+    let checkpoint = create_game_checkpoint(&session).unwrap();
+    let mut service = SessionJsonService::new();
+    assert!(rpc(&mut service, "resume", &json!({ "checkpoint": checkpoint }))["error"].is_null());
+    let failure = rpc(&mut service, "step", &json!(request));
+    assert_eq!(failure["error"]["sessionEffect"], "unsupported");
+    unsupported(session.step(request));
+    assert_eq!(session.transcript(), transcript);
+    assert_eq!(session.attempts(), attempts);
+    assert_eq!(session.state_hash().unwrap(), hash);
+    assert_eq!(session.public_view(Seat::North).unwrap(), view);
+    let checked = rpc(&mut service, "publicView", &json!({ "seat": "north" }));
+    assert_eq!(checked["result"]["stateHash"], json!(hash));
+    assert_eq!(checked["result"]["view"], view);
+    unsupported(session.verify_replay());
+    unsupported(session.session_hash());
+    assert!(create_game_checkpoint(&session).is_err());
+    assert_eq!(session.transcript(), transcript);
+    assert_eq!(session.attempts(), attempts);
+    let branch = resume_game_checkpoint(&checkpoint).unwrap();
+    assert_eq!(branch.replay_value().unwrap(), before);
+    assert!(branch.verify_replay().unwrap());
 }

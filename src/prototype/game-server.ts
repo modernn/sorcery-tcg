@@ -14,7 +14,8 @@ import {
   type GameManifest,
   type GameSession,
 } from '../engine/game.ts';
-import { RustSessionClient, type RustLegalAction, type Sha256Hash } from '../engine/rust-engine.ts';
+import { identityHash } from '../authority/hash.ts';
+import { RustSessionRpcError, RustSessionClient, type RustLegalAction, type Sha256Hash } from '../engine/rust-engine.ts';
 
 const HOST = '127.0.0.1';
 const DEFAULT_PORT = 4174;
@@ -61,8 +62,59 @@ const PAGE = String.raw`<!doctype html>
     </aside>
   </main>
   <script>
-    var seat='north',snapshot,lastCommand,savedPosition,replaySteps=[],replayIndex=0,replayChained=false;var byId=function(id){return document.getElementById(id)},saveKey='sorcery-playable-core-checkpoint-v1';try{savedPosition=JSON.parse(localStorage.getItem(saveKey)||'null')}catch(_error){localStorage.removeItem(saveKey)}if(!savedPosition||typeof savedPosition.checkpoint!=='string'||!['manual','south'].includes(savedPosition.opponent))savedPosition=undefined;
-    async function request(path,options){var response=await fetch(path,options);var body=await response.json();if(!response.ok)throw new Error(body.error||('HTTP '+response.status));return body}
+    var busy=false,sessionReady=false,snapshotCurrent=false,actionsReady=false,outcomeUnknown=false;var seat='north',snapshot,lastCommand,savedPosition,replaySteps=[],replayIndex=0,replayChained=false;var byId=function(id){return document.getElementById(id)},saveKey='sorcery-playable-core-checkpoint-v1';try{savedPosition=JSON.parse(localStorage.getItem(saveKey)||'null')}catch(_error){localStorage.removeItem(saveKey)}if(!savedPosition||typeof savedPosition.checkpoint!=='string'||!['manual','south'].includes(savedPosition.opponent))savedPosition=undefined;
+    function record(value){return value!==null&&typeof value==='object'&&!Array.isArray(value)}
+    function hash(value){return typeof value==='string'&&/^sha256:[0-9a-f]{64}$/.test(value)}
+    function version(value){return Number.isSafeInteger(value)&&value>=0}
+    function validRecovery(value){return record(value)&&['player-presentation','opponent-budget','opponent-policy','opponent-step','snapshot','replacement'].includes(value.stage)&&typeof value.message==='string'&&['current','unavailable','untrusted'].includes(value.snapshotStatus)&&typeof value.actionsAvailable==='boolean'&&['ready','blocked','unknown'].includes(value.sessionStatus)&&['known','unknown'].includes(value.metadataStatus)&&(!value.actionsAvailable||value.snapshotStatus==='current')&&(value.sessionStatus==='unknown'?value.snapshotStatus==='untrusted':value.snapshotStatus!=='untrusted'&&value.metadataStatus==='known')}
+    function actionReceipt(value,command){return record(value)&&record(command)&&hash(value.actionId)&&value.actionId===command.actionId&&value.seat===command.seat&&['north','south'].includes(value.seat)&&version(value.stateVersion)&&value.stateVersion===command.stateVersion&&value.nextStateVersion===value.stateVersion+1&&version(value.nextStateVersion)&&hash(value.preStateHash)&&hash(value.postStateHash)&&hash(value.receiptId)&&version(value.receiptSequence)&&value.receiptSequence>0&&Array.isArray(value.events)&&value.events.every(function(event){return record(event)&&record(event.cause)&&event.cause.actionId===value.actionId&&event.cause.receiptSequence===value.receiptSequence&&version(event.eventSequence)&&hash(event.eventId)&&typeof event.type==='string'&&'payload' in event})&&Array.isArray(value.randomDraws)&&value.randomDraws.every(function(draw){return record(draw)&&version(draw.drawSequence)&&typeof draw.purpose==='string'&&hash(draw.prePrngStateHash)&&hash(draw.postPrngStateHash)&&'domain' in draw&&'result' in draw})}
+    function mutationResult(operation,body,status,command,path){
+      if(!record(body)||(body.recovery!==undefined&&!validRecovery(body.recovery)))return false;
+      if(body.recovery&&body.recovery.snapshotStatus!=='current'&&['view','stateHash','actions','cardFacts','cardNames'].some(function(key){return body[key]!==undefined}))return false;
+      if(status===200){
+        if(operation==='action'){
+          if(!version(body.opponentActionCount)||!Array.isArray(body.opponentActions)||body.opponentActions.length!==body.opponentActionCount||!body.opponentActions.every(function(item){return record(item)&&typeof item.kind==='string'&&Array.isArray(item.events)&&item.events.every(function(event){return typeof event==='string'})}))return false;
+          if(body.accepted===true)return typeof body.playerAction==='string'&&actionReceipt(body.receipt,command);
+          var reason=body.reason;return body.accepted===false&&body.receipt===undefined&&body.opponentActionCount===0&&record(reason)&&['stale_version','terminal_state','unknown_action','wrong_seat'].includes(reason.code)&&typeof reason.message==='string'&&version(reason.currentStateVersion)&&hash(reason.currentStateHash);
+        }
+        var replacement=body.replacement,ack=replacement&&replacement.receipt;
+        return record(replacement)&&replacement.status==='confirmed'&&record(ack)&&hash(ack.stateHash)&&version(ack.stateVersion)&&(operation==='reset'?hash(ack.manifestId):hash(ack.expectedSessionHash)&&record(command)&&ack.expectedSessionHash===command.expectedSessionHash);
+      }
+      if(typeof body.error!=='string'||body.accepted!==undefined)return false;
+      if(body.recovery){
+        if(body.recovery.sessionStatus==='unknown')return body.recovery.snapshotStatus==='untrusted';
+        if(operation==='action')return (status===503&&body.recovery.stage==='player-presentation')||(status===400&&body.recovery.sessionStatus==='blocked'&&['snapshot','opponent-step'].includes(body.recovery.stage));
+        return status===400&&body.recovery.stage==='replacement'&&record(body.replacement)&&body.replacement.status==='unchanged'&&body.replacement.receipt===undefined;
+      }
+      // Trust a legacy refusal only when this exact request could have failed
+      // that route's preflight. Broad handler fallbacks can also catch failures
+      // after a native acknowledgement, so they stay inconclusive.
+      var querySeat=(path.match(/[?&]seat=([^&]*)/)||[])[1]||'',queryOpponent=(path.match(/[?&]opponent=([^&]*)/)||[])[1]||'';
+      if(body.replacement!==undefined)return false;
+      if(operation==='reset'&&status===400){
+        if(body.error==='seed must be an unsigned 32-bit integer')return !Number.isInteger(command.seed)||command.seed<0||command.seed>4294967295;
+        if(body.error==='presetId must name an available preset'){
+          var presets=snapshot&&snapshot.presets;
+          return typeof command.presetId==='string'&&Array.isArray(presets)&&presets.length>0
+            &&presets.every(function(item){return record(item)&&typeof item.id==='string'&&item.id.length>0})
+            &&presets.some(function(item){return item.id===snapshot.presetId})
+            &&!presets.some(function(item){return item.id===command.presetId});
+        }
+        if(body.error==='opponent must be manual or south')return !['manual','south'].includes(command.opponent);
+      }
+      if(operation==='resume'){
+        if(body.error==='seat and opponent are required'&&status===400)return !['north','south'].includes(querySeat)||!['manual','south'].includes(queryOpponent);
+        if(body.error==='south is hidden while controlled by the deterministic opponent'&&status===403)return querySeat==='south'&&queryOpponent==='south';
+      }
+      if(operation==='action'&&body.error==='south is controlled by the deterministic opponent'&&status===400){
+        return command.seat==='south'&&snapshot&&snapshot.opponent==='south';
+      }
+      return false;
+    }
+    async function request(path,options){var operation=options&&options.method==='POST'&&(/^\/api\/(action|reset|resume)(?:\?|$)/.exec(path)||[])[1];try{var response=await fetch(path,options);var body=await response.json();if(operation&&!mutationResult(operation,body,response.status,JSON.parse(options.body),path))throw new Error('Inconclusive mutation result');if(!response.ok){var failure=new Error(body.error||('HTTP '+response.status));failure.body=body;throw failure}return body}catch(error){if(operation&&!error.body){outcomeUnknown=true;sessionReady=false;snapshotCurrent=false;actionsReady=false;error.message='Request outcome unknown; explicitly replace the match to recover'}throw error}}
+    function syncControls(){document.querySelectorAll('button').forEach(function(button){if(button.classList.contains('action'))button.disabled=busy||!sessionReady||!snapshotCurrent||!actionsReady});byId('save').disabled=busy||!sessionReady||!snapshotCurrent;byId('replay').disabled=busy||!sessionReady||!snapshotCurrent;byId('stale').disabled=busy||!sessionReady||!snapshotCurrent||!actionsReady||!lastCommand;byId('resume').disabled=busy||!savedPosition;byId('reset-form').querySelector('button').disabled=busy;syncSeatButtons()}
+    async function guarded(operation,requiresReady){if(busy||(requiresReady&&(!sessionReady||!snapshotCurrent)))return;busy=true;syncControls();try{await operation()}catch(error){showError(error)}finally{busy=false;syncControls()}}
+    function applyResponse(data,operation){if(['reset','resume'].includes(operation)&&data.replacement&&data.replacement.status==='confirmed'){outcomeUnknown=false;snapshot=undefined;lastCommand=undefined;byId('notice').className='ok';byId('notice').textContent='Match replacement confirmed';byId('receipt').textContent=JSON.stringify(data.replacement.receipt,null,2);byId('opponent-summary').textContent='';clearReplaySteps();document.querySelectorAll('[data-cell]').forEach(function(cell){cell.innerHTML=''});['north','south'].forEach(function(owner){byId(owner+'-hand').innerHTML='';byId(owner+'-stats').textContent=''});['active','phase','version','hash'].forEach(function(id){byId(id).textContent='—'})}if(operation==='action'&&data.accepted===true){byId('notice').className='ok';byId('notice').textContent='Action accepted: '+data.playerAction;byId('receipt').textContent=JSON.stringify(data.receipt,null,2);byId('opponent-summary').textContent=data.opponentActions&&data.opponentActions.length?'South actions: '+data.opponentActions.map(function(item){return item.kind.replaceAll('-',' ')+(item.events.length?' — '+item.events.join(' → '):'')}).join('; '):''}else if(operation==='action'&&data.accepted===false){byId('notice').className='error';byId('notice').textContent='Rejected: '+data.reason.message}if(data.recovery&&data.recovery.sessionStatus==='unknown')outcomeUnknown=true;sessionReady=!outcomeUnknown&&(!data.recovery||data.recovery.sessionStatus==='ready');snapshotCurrent=!outcomeUnknown&&!!data.view&&(!data.recovery||data.recovery.snapshotStatus==='current');if(data.recovery){byId('notice').textContent+=(byId('notice').textContent?' · ':'')+data.recovery.message;if(!snapshotCurrent)byId('notice').textContent+=' · Displayed board is historical / stale'}actionsReady=snapshotCurrent&&(!data.recovery||data.recovery.actionsAvailable);if(snapshotCurrent){render(data)}else{byId('actions').innerHTML='<p class="empty">Current actions unavailable. Displayed match is historical / stale.</p>'}syncControls()}
     function clearActionResult(){byId('notice').textContent='';byId('opponent-summary').textContent='';byId('receipt').textContent=''}
     function escapeHtml(value){return String(value).replace(/[&<>"']/g,function(character){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]})}
     function cardName(cardId){return snapshot&&snapshot.cardNames&&snapshot.cardNames[cardId]||cardId}
@@ -92,28 +144,35 @@ const PAGE = String.raw`<!doctype html>
     function appendActionGroup(dock,label,items){if(items.length<=3){items.forEach(function(item){dock.appendChild(actionButton(item))});return}var details=document.createElement('details'),summary=document.createElement('summary'),list=document.createElement('div');summary.textContent=label+' · '+items.length+' choices';list.className='action-list';items.forEach(function(item){list.appendChild(actionButton(item))});details.append(summary,list);dock.appendChild(details)}
     function renderActions(actions,view){var dock=byId('actions');dock.innerHTML='';if(view.terminal.status==='finished'){var terminal=view.terminal,outcome=terminal.result==='draw'?'Draw':'Winner: '+escapeHtml(terminal.winner)+' · Loser: '+escapeHtml(terminal.loser);dock.innerHTML='<div class="ok" role="status" aria-live="polite"><strong>Game over</strong><p>'+outcome+' · Reason: '+escapeHtml(terminal.reason.replaceAll('_',' '))+'</p></div>';return}if(!actions.length){dock.innerHTML='<p class="empty">No legal actions for this observer.</p>';return}if(view.phase==='mulligan'){var keep=actions.filter(function(a){return a.descriptor.kind==='mulligan'&&!a.descriptor.atlasOrder.length&&!a.descriptor.spellbookOrder.length});keep.forEach(function(a){dock.appendChild(actionButton(a))});var rest=actions.filter(function(a){return keep.indexOf(a)<0});appendActionGroup(dock,'Mulligan alternatives',rest);markActionShortcuts();return}var groups=new Map(),order=['Draw','Play a site','Play a card','Use an ability','Move / attack','Combat','Resolve effect','End turn'];actions.forEach(function(action){var group=actionGroup(action.descriptor.kind);if(!groups.has(group))groups.set(group,[]);groups.get(group).push(action)});Array.from(groups).sort(function(left,right){return order.indexOf(left[0])-order.indexOf(right[0])}).forEach(function(group){appendActionGroup(dock,group[0],group[1])});markActionShortcuts()}
     function render(data){snapshot=data;var view=data.view,picker=byId('preset');if(picker.options.length!==data.presets.length){picker.innerHTML=data.presets.map(function(preset){return '<option value="'+escapeHtml(preset.id)+'">'+escapeHtml(preset.label)+'</option>'}).join('')}picker.value=data.presetId;byId('opponent').value=data.opponent;byId('seed').value=String(data.seed);byId('mode').textContent=(data.mode==='private-local'?'Private-local actual cards · unranked':'Synthetic fallback · unranked')+(data.opponent==='south'?' · vs computer':' · hot seat');byId('observer').textContent=seat;byId('active').textContent=view.activeSeat+(view.decisionSeat===view.activeSeat?'':' · '+view.decisionSeat+' deciding');byId('phase').textContent='Turn '+view.turnNumber+' · '+view.phase;byId('version').textContent=view.stateVersion;byId('hash').textContent=data.stateHash;renderPlayer(view,'north');renderPlayer(view,'south');renderRealm(view);renderActions(data.actions,view);syncSeatButtons()}
-    function syncSeatButtons(){document.querySelectorAll('[data-seat]').forEach(function(button){button.disabled=Boolean(snapshot&&snapshot.opponent==='south'&&button.dataset.seat==='south');button.setAttribute('aria-pressed',String(button.dataset.seat===seat))})}
-    async function refresh(){render(await request('/api/view?seat='+seat))}
-    async function submit(actionId,command){try{var next=command||{actionId:actionId,seat:seat,stateVersion:snapshot.view.stateVersion};if(!command)lastCommand=next;var result=await request('/api/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(next)});byId('notice').className=result.accepted?'ok':'error';byId('notice').textContent=result.accepted?'Action accepted: '+result.playerAction:'Rejected: '+result.reason.message;byId('opponent-summary').textContent=result.opponentActions&&result.opponentActions.length?'South actions: '+result.opponentActions.map(function(item){return item.kind.replaceAll('-',' ')+(item.events.length?' — '+item.events.join(' → '):'')}).join('; '):'';byId('receipt').textContent=JSON.stringify(result.receipt||result.reason,null,2);render(result);byId('stale').disabled=!lastCommand;if(result.accepted&&result.opponent==='manual'&&result.view.decisionSeat!==seat){clearActionResult();seat=result.view.decisionSeat;syncSeatButtons();await refresh()}}catch(error){showError(error)}}
-    function showError(error){byId('notice').className='error';byId('notice').textContent=error.message}
+    function syncSeatButtons(){document.querySelectorAll('[data-seat]').forEach(function(button){button.disabled=busy||Boolean(snapshot&&snapshot.opponent==='south'&&button.dataset.seat==='south');button.setAttribute('aria-pressed',String(button.dataset.seat===seat))})}
+    async function refresh(){applyResponse(await request('/api/view?seat='+seat))}
+    async function submit(actionId,command){if(!actionsReady)return;return guarded(async function(){var next=command||{actionId:actionId,seat:seat,stateVersion:snapshot.view.stateVersion};if(!command)lastCommand=next;var result=await request('/api/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(next)});applyResponse(result,'action');if(result.accepted&&snapshotCurrent&&sessionReady&&result.opponent==='manual'&&result.view.decisionSeat!==seat){seat=result.view.decisionSeat;syncSeatButtons();await refresh()}},true)}
+    function showError(error){if(error.body)applyResponse(error.body);else{snapshotCurrent=false;byId('actions').innerHTML='<p class="empty">Latest snapshot unavailable. Displayed board is historical / stale.</p>'}byId('notice').className='error';byId('notice').textContent+=(byId('notice').textContent?' · ':'')+error.message;syncControls()}
     function replayStepText(step){var events=step.eventTypes.length?step.eventTypes.join(' → '):'no events';return 'Step '+(replayIndex+1)+' of '+replaySteps.length+' · '+step.seat+' · '+events+' · chained hashes '+(replayChained?'match':'do not match')}
     function renderReplayStep(){byId('replay-prev').disabled=!replaySteps.length||replayIndex<=0;byId('replay-next').disabled=!replaySteps.length||replayIndex>=replaySteps.length-1;var step=replaySteps[replayIndex];byId('replay-step').className=step?'':'empty';byId('replay-step').textContent=step?replayStepText(step):'Verify replay to inspect committed steps.';byId('replay-detail').className=step?'receipt':'receipt hidden';byId('replay-detail').textContent=step?JSON.stringify({actionId:step.actionId,index:step.index,nextStateVersion:step.nextStateVersion,postStateHash:step.postStateHash,preStateHash:step.preStateHash,seat:step.seat,stateVersion:step.stateVersion},null,2):''}
     function clearReplaySteps(){replaySteps=[];replayIndex=0;replayChained=false;renderReplayStep()}
     function shiftReplay(delta){if(!replaySteps.length)return;replayIndex=Math.max(0,Math.min(replaySteps.length-1,replayIndex+delta));renderReplayStep()}
-    document.querySelectorAll('[data-seat]').forEach(function(button){button.addEventListener('click',function(){if(button.disabled)return;clearActionResult();seat=button.dataset.seat;syncSeatButtons();refresh().catch(showError)})});
-    byId('preset').addEventListener('change',function(){var selected=snapshot.presets.find(function(preset){return preset.id===byId('preset').value});if(selected)byId('seed').value=String(selected.seed)});
-    byId('reset-form').addEventListener('submit',async function(event){event.preventDefault();try{seat='north';lastCommand=undefined;syncSeatButtons();byId('stale').disabled=true;var data=await request('/api/reset',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({opponent:byId('opponent').value,presetId:byId('preset').value,seed:Number(byId('seed').value)})});clearActionResult();clearReplaySteps();byId('notice').className='ok';byId('notice').textContent='Match reset';byId('receipt').textContent=JSON.stringify({stateHash:data.stateHash},null,2);render(data);focusFirstAction()}catch(error){showError(error)}});
+    document.querySelectorAll('[data-seat]').forEach(function(button){button.addEventListener('click',function(){if(button.disabled)return;guarded(async function(){seat=button.dataset.seat;syncSeatButtons();await refresh()})})});
+    byId('preset').addEventListener('change',function(){if(busy)return;var selected=snapshot&&snapshot.presets.find(function(preset){return preset.id===byId('preset').value});if(selected)byId('seed').value=String(selected.seed)});
+    byId('reset-form').addEventListener('submit',function(event){event.preventDefault();guarded(async function(){seat='north';var data=await request('/api/reset',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({opponent:byId('opponent').value,presetId:byId('preset').value,seed:Number(byId('seed').value)})});applyResponse(data,'reset');focusFirstAction()})});
     byId('stale').addEventListener('click',function(){if(lastCommand)submit(lastCommand.actionId,lastCommand)});
-    byId('save').addEventListener('click',async function(){try{var data=await request('/api/checkpoint',{method:'POST'});savedPosition=data;localStorage.setItem(saveKey,JSON.stringify(data));byId('resume').disabled=false;clearActionResult();byId('notice').className='ok';byId('notice').textContent='Position saved in this browser at turn '+data.turnNumber;byId('receipt').textContent=JSON.stringify({checkpointId:data.checkpointId,stateHash:data.stateHash,turnNumber:data.turnNumber},null,2)}catch(error){showError(error)}});
-    byId('resume').addEventListener('click',async function(){if(!savedPosition)return;try{var data=await request('/api/resume?seat='+encodeURIComponent(seat)+'&opponent='+encodeURIComponent(savedPosition.opponent),{method:'POST',headers:{'content-type':'application/json'},body:savedPosition.checkpoint});lastCommand=undefined;byId('stale').disabled=true;clearActionResult();clearReplaySteps();byId('notice').className='ok';byId('notice').textContent='Saved position restored';byId('receipt').textContent=JSON.stringify({checkpointId:savedPosition.checkpointId,stateHash:data.stateHash},null,2);render(data)}catch(error){showError(error)}});
+    byId('save').addEventListener('click',function(){guarded(async function(){var data=await request('/api/checkpoint',{method:'POST'});savedPosition=data;localStorage.setItem(saveKey,JSON.stringify(data));byId('notice').textContent+=' · Position saved in this browser at turn '+data.turnNumber},true)});
+    byId('resume').addEventListener('click',function(){if(!savedPosition)return;guarded(async function(){var data=await request('/api/resume?seat='+encodeURIComponent(seat)+'&opponent='+encodeURIComponent(savedPosition.opponent),{method:'POST',headers:{'content-type':'application/json'},body:savedPosition.checkpoint});applyResponse(data,'resume')})});
     byId('replay-prev').addEventListener('click',function(){shiftReplay(-1)});
     byId('replay-next').addEventListener('click',function(){shiftReplay(1)});
     document.addEventListener('keydown',function(event){var tag=(event.target&&event.target.tagName||'').toLowerCase();if(tag==='input'||tag==='select'||tag==='textarea')return;if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();shiftReplay(event.key==='ArrowLeft'?-1:1);return}if(event.key==='ArrowDown'||event.key==='ArrowUp'){var buttons=visibleActionButtons();if(!buttons.length)return;event.preventDefault();var index=buttons.indexOf(document.activeElement);var next=event.key==='ArrowDown'?(index<0?0:index+1):(index<0?buttons.length-1:index-1);focusAction(buttons[Math.max(0,Math.min(buttons.length-1,next))]);return}if(/^[1-9]$/.test(event.key)){var chosen=visibleActionButtons()[Number(event.key)-1];if(!chosen)return;event.preventDefault();chosen.click()}});
-    byId('replay').addEventListener('click',async function(){try{var data=await request('/api/replay',{method:'POST'});var steps=await request('/api/replay/steps');replaySteps=Array.isArray(steps.steps)?steps.steps:[];replayIndex=replaySteps.length?replaySteps.length-1:0;replayChained=!!steps.chained;clearActionResult();byId('notice').className=data.verified?'ok':'error';byId('notice').textContent=data.verified?'Replay byte-identical':'Replay mismatch';byId('receipt').textContent=JSON.stringify(data,null,2);renderReplayStep()}catch(error){showError(error)}});
-    byId('resume').disabled=!savedPosition;refresh().then(focusFirstAction).catch(showError);
+    byId('replay').addEventListener('click',function(){guarded(async function(){var data=await request('/api/replay',{method:'POST'});var steps=await request('/api/replay/steps');replaySteps=Array.isArray(steps.steps)?steps.steps:[];replayIndex=replaySteps.length?replaySteps.length-1:0;replayChained=!!steps.chained;byId('notice').textContent+=' · '+(data.verified?'Replay byte-identical':'Replay mismatch');renderReplayStep()},true)});
+    guarded(async function(){await refresh();focusFirstAction()});
   </script>
 </body>
 </html>`;
+
+type RecoveryStage = 'player-presentation' | 'opponent-budget' | 'opponent-policy' | 'opponent-step' | 'snapshot' | 'replacement';
+type SnapshotStatus = 'current' | 'unavailable' | 'untrusted';
+
+function validHash(value: unknown): value is Sha256Hash {
+  return typeof value === 'string' && /^sha256:[0-9a-f]{64}$/.test(value);
+}
 
 type JsonRecord = Record<string, unknown>;
 
@@ -172,7 +231,7 @@ function visibleCardIds(observation: GameObservation): ReadonlySet<string> {
   ]);
 }
 
-function isSeat(value: string | null): value is GameSeat {
+function isSeat(value: unknown): value is GameSeat {
   return value === 'north' || value === 'south';
 }
 
@@ -358,15 +417,21 @@ function sendJson(response: ServerResponse, status: number, value: unknown): voi
   response.end(body);
 }
 
-function sendPage(response: ServerResponse): void {
+function sendPage(response: ServerResponse, presets: readonly GamePreset[]): void {
+  // Configuration choices remain available before the first trustworthy match view.
+  const escape = (text: string): string => text.replace(/[&<>"']/g, (character) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
+  const page = PAGE.replace('<select id="preset" aria-label="Starter matchup"></select>',
+    `<select id="preset" aria-label="Starter matchup">${presets.map(({ id, label }) =>
+      `<option value="${id}">${escape(label)}</option>`).join('')}</select>`);
   response.writeHead(200, {
     'cache-control': 'no-store',
-    'content-length': Buffer.byteLength(PAGE),
+    'content-length': Buffer.byteLength(page),
     'content-security-policy': "default-src 'self'; connect-src 'self'; img-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
     'content-type': 'text/html; charset=utf-8',
     'x-content-type-options': 'nosniff',
   });
-  response.end(PAGE);
+  response.end(page);
 }
 
 export function createGamePrototypeServer(
@@ -384,258 +449,320 @@ export function createGamePrototypeServer(
   }
   let selectedPreset = presets[0]!;
   let opponent = initialOpponent;
+  let manifest = reseedManifest(selectedPreset.manifest, initialSeed ?? selectedPreset.manifest.seed);
   const clientPromise = RustSessionClient.start();
-  const runtime = {
-    manifest: reseedManifest(
-      selectedPreset.manifest,
-      initialSeed ?? selectedPreset.manifest.seed,
-    ),
-    session: undefined as GameSession | undefined,
-    stateHash: undefined as Sha256Hash | undefined,
-  };
+  let binding: 'uninitialized' | 'bound' | 'unknown' = 'uninitialized';
+  let integrity: 'coherent' | 'unsupported' | 'unknown' = 'coherent';
+  let blocked = false;
+  let pair: { stateHash: Sha256Hash; stateVersion: number } | undefined;
+  let operationQueue: Promise<unknown> = Promise.resolve();
 
-  async function rustClient(): Promise<RustSessionClient> {
-    return clientPromise;
+  function queue<T>(operation: () => Promise<T>): Promise<T> {
+    const pending = operationQueue.then(operation);
+    operationQueue = pending.catch(() => undefined);
+    return pending;
   }
 
-  async function refreshSession(client: RustSessionClient): Promise<GameSession> {
-    runtime.session = parseExportedSession(await client.exportSession(), runtime.manifest);
-    const viewed = await client.publicView('north');
-    runtime.stateHash = viewed.stateHash;
-    return runtime.session;
+  function sessionStatus(): 'ready' | 'blocked' | 'unknown' {
+    return binding !== 'bound' || integrity === 'unknown'
+      ? 'unknown' : blocked || integrity === 'unsupported' ? 'blocked' : 'ready';
   }
 
-  async function startSession(client: RustSessionClient, manifest: GameManifest): Promise<GameSession> {
-    runtime.manifest = manifest;
-    await client.newSession(canonicalJson(manifest as unknown as JsonValue));
-    return refreshSession(client);
+  function recovery(stage: RecoveryStage, message: string, snapshotStatus: SnapshotStatus,
+    actionsAvailable = false): JsonRecord {
+    return { stage, message, snapshotStatus, actionsAvailable, sessionStatus: sessionStatus(),
+      metadataStatus: binding === 'bound' ? 'known' : 'unknown' };
   }
 
-  async function ensureSession(client: RustSessionClient): Promise<GameSession> {
-    if (!runtime.session) return startSession(client, runtime.manifest);
-    return runtime.session;
-  }
-
-  async function advanceOpponent(client: RustSessionClient): Promise<Readonly<{
-    count: number;
-    summaries: readonly Readonly<{
-      events: readonly string[];
-      kind: GameLegalAction['descriptor']['kind'];
-    }>[];
-  }>> {
-    let count = 0;
-    const summaries: Array<Readonly<{
-      events: readonly string[];
-      kind: GameLegalAction['descriptor']['kind'];
-    }>> = [];
-    while (true) {
-      const session = await refreshSession(client);
-      if (session.state.terminal.status !== 'active' || session.state.decisionSeat !== 'south') break;
-      if (count >= MAX_OPPONENT_ACTIONS) throw new Error('deterministic opponent exceeded action limit');
-      const [action] = asGameLegalActions([await client.selectPolicyAction()]);
-      if (!action) throw new Error('deterministic opponent has no policy action');
-      const result = await client.step(action);
-      if (!result.accepted) {
-        throw new Error(`deterministic opponent action rejected: ${
-          isRecord(result.rejection) && typeof result.rejection.code === 'string'
-            ? result.rejection.code
-            : 'unknown_action'
-        }`);
-      }
-      const receipt = result.receipt as GameSession['transcript'][number];
-      summaries.push(Object.freeze({
-        events: Object.freeze(receipt.events.map(({ type }) => type)),
-        kind: action.descriptor.kind,
-      }));
-      count += 1;
+  function stepFailure(error: unknown): string {
+    const effect = error instanceof RustSessionRpcError && error.method === 'step'
+      ? error.sessionEffect : 'unknown';
+    if (effect === 'capacity') {
+      blocked = true;
+      return 'session request limit of 1000 reached';
     }
-    return { count, summaries: Object.freeze(summaries) };
+    if (effect === 'unsupported') {
+      integrity = 'unsupported';
+      return 'An unsupported mechanic stopped this session';
+    }
+    integrity = 'unknown';
+    return 'The action outcome is unknown; explicitly replace the match to recover';
   }
 
-  async function view(client: RustSessionClient, seat: GameSeat): Promise<JsonRecord> {
-    await ensureSession(client);
-    const { view: observationValue, stateHash } = await client.publicView(seat);
-    runtime.stateHash = stateHash;
-    const observation = observationValue as GameObservation;
-    const visible = visibleCardIds(observation);
-    const cardNames = Object.fromEntries(Object.entries(selectedPreset.cardNames ?? {})
-      .filter(([cardId]) => visible.has(cardId)));
-    const cardFacts = Object.fromEntries(Object.entries(runtime.manifest.cards)
-      .filter(([cardId]) => visible.has(cardId))
-      .map(([cardId, card]) => [cardId, displayCardFacts(card)]));
-    const actions = asGameLegalActions(await client.legalActions(seat));
-    return {
-      actions: actions.map((action) => ({
-        ...action,
-        label: displayActionLabel(
-          action,
-          observation,
-          selectedPreset.cardNames ?? {},
-          runtime.manifest.cards,
-        ),
-      })),
-      cardFacts,
-      cardNames,
-      mode: runtime.manifest.authority.mode,
-      opponent,
-      presetId: selectedPreset.id,
-      presets: presets.map(({ id, label, manifest }) => ({ id, label, seed: manifest.seed })),
-      seed: runtime.manifest.seed,
-      stateHash,
-      view: observation,
-    };
+  function confirmReceipt(value: unknown, request: { actionId: string; seat: GameSeat; stateVersion: number }): GameSession['transcript'][number] {
+    const integer = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+    if (!pair || !isRecord(value) || !validHash(value.actionId) || value.actionId !== request.actionId || value.seat !== request.seat
+      || value.stateVersion !== request.stateVersion || value.stateVersion !== pair.stateVersion
+      || value.preStateHash !== pair.stateHash || !integer(value.nextStateVersion)
+      || value.nextStateVersion !== pair.stateVersion + 1 || !validHash(value.postStateHash)
+      || !validHash(value.receiptId) || !integer(value.receiptSequence) || value.receiptSequence < 1
+      || !Array.isArray(value.events) || !Array.isArray(value.randomDraws)) {
+      throw new Error('Incomplete native receipt');
+    }
+    for (const event of value.events) {
+      if (!isRecord(event) || !isRecord(event.cause) || event.cause.actionId !== value.actionId
+        || event.cause.receiptSequence !== value.receiptSequence || !integer(event.eventSequence)
+        || !validHash(event.eventId) || typeof event.type !== 'string' || event.payload === undefined) {
+        throw new Error('Incomplete native event');
+      }
+      const { eventId, ...body } = event;
+      if (identityHash(body as JsonValue) !== eventId) throw new Error('Invalid native event identity');
+    }
+    for (const draw of value.randomDraws) {
+      if (!isRecord(draw) || !integer(draw.drawSequence) || typeof draw.purpose !== 'string'
+        || draw.domain === undefined || draw.result === undefined
+        || !validHash(draw.prePrngStateHash) || !validHash(draw.postPrngStateHash)) {
+        throw new Error('Incomplete native random draw');
+      }
+    }
+    const { receiptId, ...body } = value;
+    if (identityHash(body as JsonValue) !== receiptId) throw new Error('Invalid native receipt identity');
+    pair = { stateHash: value.postStateHash, stateVersion: value.nextStateVersion };
+    return value as unknown as GameSession['transcript'][number];
+  }
+
+  async function observation(client: RustSessionClient, seat: GameSeat): Promise<GameObservation> {
+    if (binding !== 'bound' || integrity === 'unknown' || !pair) throw new Error('Untrusted session');
+    const viewed = await client.publicView(seat);
+    if (viewed.stateHash !== pair.stateHash
+      || (isRecord(viewed.view) && Number.isSafeInteger(viewed.view.stateVersion)
+        && (viewed.view.stateVersion as number) >= 0
+        && viewed.view.stateVersion !== pair.stateVersion)) {
+      integrity = 'unknown';
+      throw new Error('Incoherent session view');
+    }
+    if (!isRecord(viewed.view) || !Number.isSafeInteger(viewed.view.stateVersion)
+      || (viewed.view.stateVersion as number) < 0
+      || !isSeat(viewed.view.decisionSeat) || viewed.view.viewer !== seat
+      || !isRecord(viewed.view.terminal)
+      || (viewed.view.terminal.status !== 'active' && viewed.view.terminal.status !== 'finished')) {
+      throw new Error('Malformed session view');
+    }
+    return viewed.view as unknown as GameObservation;
+  }
+
+  async function snapshot(client: RustSessionClient, seat: GameSeat,
+    diagnostic?: { stage: RecoveryStage; message: string }): Promise<JsonRecord> {
+    if (binding !== 'bound' || integrity === 'unknown') {
+      return { recovery: recovery(diagnostic?.stage ?? 'snapshot', diagnostic?.message
+        ?? 'Current state is untrusted; explicitly replace the match to recover', 'untrusted') };
+    }
+    try {
+      const viewed = await observation(client, seat);
+      const visible = visibleCardIds(viewed);
+      const cardNames = Object.fromEntries(Object.entries(selectedPreset.cardNames ?? {})
+        .filter(([cardId]) => visible.has(cardId)));
+      const cardFacts = Object.fromEntries(Object.entries(manifest.cards)
+        .filter(([cardId]) => visible.has(cardId)).map(([id, card]) => [id, displayCardFacts(card)]));
+      let actions: readonly GameLegalAction[] = [];
+      let actionsAvailable = integrity === 'coherent';
+      if (actionsAvailable) {
+        try {
+          actions = asGameLegalActions(await client.legalActions(seat));
+          actions = actions.map((action) => ({ ...action,
+            label: displayActionLabel(action, viewed, selectedPreset.cardNames ?? {}, manifest.cards) }));
+        } catch {
+          actionsAvailable = false;
+          diagnostic ??= { stage: 'snapshot', message: 'Legal actions are unavailable' };
+        }
+      }
+      if (sessionStatus() === 'blocked') diagnostic ??= { stage: 'snapshot',
+        message: integrity === 'unsupported' ? 'An unsupported mechanic stopped this session'
+          : 'Further submissions are blocked for this session' };
+      return { actions, cardFacts, cardNames, mode: manifest.authority.mode, opponent,
+        presetId: selectedPreset.id, presets: presets.map(({ id, label, manifest }) => ({ id, label, seed: manifest.seed })),
+        seed: manifest.seed, stateHash: pair!.stateHash, view: viewed,
+        ...(diagnostic ? { recovery: recovery(diagnostic.stage, diagnostic.message, 'current', actionsAvailable) } : {}) };
+    } catch {
+      return { recovery: recovery(diagnostic?.stage ?? 'snapshot', diagnostic?.message
+        ?? 'The latest snapshot is unavailable', sessionStatus() === 'unknown' ? 'untrusted' : 'unavailable') };
+    }
+  }
+
+  async function replace(client: RustSessionClient, preset: GamePreset, nextOpponent: GameOpponent,
+    candidate: GameManifest, checkpoint?: ReturnType<typeof parseGameCheckpoint>): Promise<{ status: number; data: JsonRecord }> {
+    const method = checkpoint ? 'resume' : 'new';
+    try {
+      const receipt: JsonRecord = checkpoint
+        ? await client.resume(checkpoint as unknown as JsonValue)
+        : await client.newSession(canonicalJson(candidate as unknown as JsonValue));
+      if (!isRecord(receipt) || !validHash(receipt.stateHash) || !Number.isSafeInteger(receipt.stateVersion)
+        || (receipt.stateVersion as number) < 0
+        || (checkpoint ? receipt.expectedSessionHash !== checkpoint.expectedSessionHash
+          : receipt.manifestId !== candidate.manifestId)) throw new Error('Invalid replacement acknowledgement');
+      selectedPreset = preset;
+      opponent = nextOpponent;
+      manifest = candidate;
+      pair = { stateHash: receipt.stateHash, stateVersion: receipt.stateVersion as number };
+      binding = 'bound';
+      integrity = 'coherent';
+      blocked = false;
+      return { status: 200, data: { replacement: { status: 'confirmed', receipt } } };
+    } catch (error) {
+      if (error instanceof RustSessionRpcError && error.method === method && error.sessionEffect === 'unchanged') {
+        return { status: 400, data: { error: 'Replacement failed; the previous match is unchanged',
+          replacement: { status: 'unchanged' }, recovery: recovery('replacement',
+            'Replacement failed; the previous match is unchanged', binding === 'bound' && integrity !== 'unknown' ? 'unavailable' : 'untrusted') } };
+      }
+      binding = 'unknown';
+      return { status: 503, data: { error: 'Replacement outcome is unknown', replacement: { status: 'unknown' },
+        recovery: recovery('replacement', 'Replacement outcome is unknown; explicitly replace the match to recover', 'untrusted') } };
+    }
+  }
+
+  async function ensureSession(client: RustSessionClient): Promise<{ status: number; data: JsonRecord } | undefined> {
+    if (binding !== 'uninitialized') return undefined;
+    const result = await replace(client, selectedPreset, opponent, manifest);
+    return result.status === 200 ? undefined : result;
   }
 
   const server = createServer(async (request, response) => {
     try {
-      const client = await rustClient();
       const url = new URL(request.url ?? '/', `http://${HOST}`);
-      if (request.method === 'GET' && url.pathname === '/') return sendPage(response);
-      if (request.method === 'GET' && url.pathname === '/api/view') {
-        const seat = url.searchParams.get('seat');
-        if (!isSeat(seat)) return sendJson(response, 400, { error: 'seat must be north or south' });
-        if (opponent === 'south' && seat === 'south') {
-          return sendJson(response, 403, { error: 'south is hidden while controlled by the deterministic opponent' });
+      if (request.method === 'GET' && url.pathname === '/') return sendPage(response, presets);
+      // Bounded parsing is outside the session queue; all defaults and guards are inside it.
+      const body = request.method === 'POST' && ['/api/action', '/api/reset'].includes(url.pathname)
+        ? await readJson(request) : undefined;
+      const checkpoint = request.method === 'POST' && url.pathname === '/api/resume'
+        ? parseGameCheckpoint(await readText(request, GAME_CHECKPOINT_MAX_BYTES)) : undefined;
+      return await queue(async () => {
+        let client: RustSessionClient;
+        try { client = await clientPromise; }
+        catch {
+          binding = 'unknown';
+          return sendJson(response, 503, { error: 'Native session process is unavailable',
+            recovery: recovery('snapshot', 'Native session process is unavailable; restart is required', 'untrusted') });
         }
-        return sendJson(response, 200, await view(client, seat));
-      }
-      if (request.method === 'POST' && url.pathname === '/api/reset') {
-        const body = await readJson(request);
-        if (!Number.isInteger(body.seed) || (body.seed as number) < 0 || (body.seed as number) > 0xffff_ffff) {
-          return sendJson(response, 400, { error: 'seed must be an unsigned 32-bit integer' });
+        if (request.method === 'POST' && url.pathname === '/api/reset' && body) {
+          if (!Number.isInteger(body.seed) || (body.seed as number) < 0 || (body.seed as number) > 0xffff_ffff) {
+            return sendJson(response, 400, { error: 'seed must be an unsigned 32-bit integer' });
+          }
+          const presetId = body.presetId ?? (binding === 'unknown' ? undefined : selectedPreset.id);
+          const preset = presets.find(({ id }) => id === presetId);
+          const requestedOpponent = body.opponent ?? (binding === 'unknown' ? undefined : opponent);
+          if (!preset) return sendJson(response, 400, { error: 'presetId must name an available preset' });
+          if (requestedOpponent !== 'manual' && requestedOpponent !== 'south') {
+            return sendJson(response, 400, { error: 'opponent must be manual or south' });
+          }
+          const result = await replace(client, preset, requestedOpponent, reseedManifest(preset.manifest, body.seed as number));
+          return sendJson(response, result.status, { ...(result.status === 200 ? await snapshot(client, 'north') : {}), ...result.data });
         }
-        const presetId = body.presetId === undefined ? selectedPreset.id : body.presetId;
-        const preset = typeof presetId === 'string'
-          ? presets.find(({ id }) => id === presetId)
-          : undefined;
-        if (!preset) return sendJson(response, 400, { error: 'presetId must name an available preset' });
-        const requestedOpponent = body.opponent === undefined ? opponent : body.opponent;
-        if (requestedOpponent !== 'manual' && requestedOpponent !== 'south') {
-          return sendJson(response, 400, { error: 'opponent must be manual or south' });
+        if (request.method === 'POST' && url.pathname === '/api/resume' && checkpoint) {
+          const seat = url.searchParams.get('seat');
+          const requestedOpponent = url.searchParams.get('opponent');
+          if (!isSeat(seat) || (requestedOpponent !== 'manual' && requestedOpponent !== 'south')) {
+            return sendJson(response, 400, { error: 'seat and opponent are required' });
+          }
+          if (requestedOpponent === 'south' && seat === 'south') return sendJson(response, 403, { error: 'south is hidden while controlled by the deterministic opponent' });
+          const preset = presets.find(({ manifest }) => reseedManifest(manifest, checkpoint.manifest.seed).manifestId === checkpoint.manifest.manifestId);
+          if (!preset) return sendJson(response, 400, { error: 'saved position preset is unavailable' });
+          const result = await replace(client, preset, requestedOpponent, checkpoint.manifest, checkpoint);
+          return sendJson(response, result.status, { ...(result.status === 200 ? await snapshot(client, seat) : {}), ...result.data });
         }
-        selectedPreset = preset;
-        opponent = requestedOpponent;
-        await startSession(client, reseedManifest(selectedPreset.manifest, body.seed as number));
-        return sendJson(response, 200, await view(client, 'north'));
-      }
-      if (request.method === 'POST' && url.pathname === '/api/action') {
-        const body = await readJson(request);
-        const seat = typeof body.seat === 'string' ? body.seat : null;
-        if (!isSeat(seat)
-          || !Number.isSafeInteger(body.stateVersion)
-          || (body.stateVersion as number) < 0
-          || typeof body.actionId !== 'string'
-          || body.actionId.length === 0
-          || body.actionId.length > 256
-          || Object.keys(body).sort().join(',') !== 'actionId,seat,stateVersion') {
-          return sendJson(response, 400, { error: 'valid seat, stateVersion, and actionId are required' });
+        if (!['/api/view', '/api/action', '/api/checkpoint', '/api/replay', '/api/replay/steps'].includes(url.pathname)) return sendJson(response, 404, { error: 'not found' });
+        const initialized = await ensureSession(client);
+        if (initialized) return sendJson(response, initialized.status, initialized.data);
+        if (binding !== 'bound' || integrity === 'unknown') return sendJson(response, 503, {
+          error: 'Current session is untrusted', recovery: recovery('snapshot', 'Explicitly replace the match to recover', 'untrusted') });
+        if (request.method === 'GET' && url.pathname === '/api/view') {
+          const seat = url.searchParams.get('seat');
+          if (!isSeat(seat)) return sendJson(response, 400, { error: 'seat must be north or south' });
+          if (opponent === 'south' && seat === 'south') return sendJson(response, 403, { error: 'south is hidden while controlled by the deterministic opponent' });
+          const data = await snapshot(client, seat);
+          return sendJson(response, data.view ? 200 : 503, data.view ? data : { error: 'Current snapshot unavailable', ...data });
         }
-        if (opponent === 'south' && seat === 'south') {
-          return sendJson(response, 400, { error: 'south is controlled by the deterministic opponent' });
+        if (request.method === 'POST' && url.pathname === '/api/action' && body) {
+          const seat = body.seat;
+          if (!isSeat(seat) || !Number.isSafeInteger(body.stateVersion) || (body.stateVersion as number) < 0
+            || typeof body.actionId !== 'string' || !body.actionId || body.actionId.length > 256
+            || Object.keys(body).sort().join(',') !== 'actionId,seat,stateVersion') {
+            return sendJson(response, 400, { error: 'valid seat, stateVersion, and actionId are required' });
+          }
+          if (opponent === 'south' && seat === 'south') return sendJson(response, 400, { error: 'south is controlled by the deterministic opponent' });
+          if (sessionStatus() !== 'ready') return sendJson(response, 400, { error: 'Further submissions are blocked', ...await snapshot(client, seat) });
+          let playerAction = body.actionId;
+          try {
+            const viewed = await observation(client, seat);
+            const action = asGameLegalActions(await client.legalActions(seat)).find(({ actionId }) => actionId === body.actionId);
+            if (action) playerAction = displayActionLabel(action, viewed, selectedPreset.cardNames ?? {}, manifest.cards);
+          } catch {
+            return sendJson(response, 503, { error: 'Action presentation unavailable', ...await snapshot(client, seat, { stage: 'player-presentation', message: 'Action presentation unavailable' }) });
+          }
+          const actionRequest = { actionId: body.actionId, seat, stateVersion: body.stateVersion as number };
+          let result;
+          let receipt;
+          try {
+            result = await client.step(actionRequest);
+            if (result.accepted) receipt = confirmReceipt(result.receipt, actionRequest);
+          } catch (error) {
+            const message = stepFailure(error);
+            return sendJson(response, sessionStatus() === 'unknown' ? 503 : 400, { error: message,
+              ...await snapshot(client, seat, { stage: 'opponent-step', message }) });
+          }
+          if (!result.accepted) return sendJson(response, 200, { ...await snapshot(client, seat), accepted: false,
+            reason: result.rejection, opponentActionCount: 0, opponentActions: [] });
+          const summaries: Array<{ events: readonly string[]; kind: GameLegalAction['descriptor']['kind'] }> = [];
+          let diagnostic: { stage: RecoveryStage; message: string } | undefined;
+          let presented: JsonRecord;
+          try {
+            if (opponent === 'south') {
+              while (true) {
+                let viewed;
+                try {
+                  viewed = await observation(client, 'north');
+                  if (viewed.terminal.status !== 'active' || viewed.decisionSeat !== 'south') break;
+                } catch { diagnostic = { stage: 'snapshot', message: 'Latest opponent state is unavailable' }; break; }
+                if (summaries.length >= MAX_OPPONENT_ACTIONS) {
+                  blocked = true;
+                  diagnostic = { stage: 'opponent-budget', message: 'Deterministic opponent exceeded the request action budget' }; break;
+                }
+                let action: GameLegalAction;
+                try { action = asGameLegalActions([await client.selectPolicyAction()])[0]!; }
+                catch { diagnostic = { stage: 'opponent-policy', message: 'Deterministic opponent policy is unavailable' }; break; }
+                try {
+                  const stepped = await client.step(action);
+                  if (!stepped.accepted) { diagnostic = { stage: 'opponent-step', message: 'Deterministic opponent action was rejected' }; break; }
+                  const confirmed = confirmReceipt(stepped.receipt, action);
+                  summaries.push({ events: confirmed.events.map(({ type }) => type), kind: action.descriptor.kind });
+                } catch (error) { diagnostic = { stage: 'opponent-step', message: stepFailure(error) }; break; }
+              }
+            }
+            presented = await snapshot(client, seat, diagnostic);
+          } catch {
+            presented = { recovery: recovery('snapshot', 'Latest opponent presentation is unavailable',
+              sessionStatus() === 'unknown' ? 'untrusted' : 'unavailable') };
+          }
+          return sendJson(response, 200, { ...presented, accepted: true,
+            playerAction, receipt, opponentActionCount: summaries.length, opponentActions: summaries });
         }
-        await ensureSession(client);
-        const { view: observationValue } = await client.publicView(seat);
-        const observation = observationValue as GameObservation;
-        const selectedAction = asGameLegalActions(await client.legalActions(seat))
-          .find(({ actionId }) => actionId === body.actionId);
-        const playerAction = selectedAction
-          ? displayActionLabel(
-            selectedAction,
-            observation,
-            selectedPreset.cardNames ?? {},
-            runtime.manifest.cards,
-          )
-          : undefined;
-        const result = await client.step({
-          actionId: body.actionId,
-          seat,
-          stateVersion: body.stateVersion as number,
-        });
-        if (result.accepted && playerAction === undefined) {
-          throw new Error('accepted action lacks a legal action summary');
+        if (sessionStatus() !== 'ready') return sendJson(response, 503, { error: 'Session continuation and certification are blocked',
+          recovery: recovery('snapshot', 'Session continuation and certification are blocked', 'unavailable') });
+        try {
+          if (request.method === 'POST' && url.pathname === '/api/checkpoint') {
+            const checkpointValue = await client.checkpoint();
+            if (!isRecord(checkpointValue) || !validHash(checkpointValue.checkpointId) || !validHash(checkpointValue.expectedSessionHash)) throw new Error('Invalid checkpoint');
+            const viewed = await observation(client, 'north');
+            return sendJson(response, 200, { checkpoint: canonicalJson(checkpointValue as JsonValue),
+              checkpointId: checkpointValue.checkpointId, opponent, stateHash: pair!.stateHash, turnNumber: viewed.turnNumber });
+          }
+          if (request.method === 'GET' && url.pathname === '/api/replay/steps') return sendJson(response, 200, await client.replaySteps());
+          if (request.method === 'POST' && url.pathname === '/api/replay') {
+            const session = parseExportedSession(await client.exportSession(), manifest);
+            await observation(client, 'north');
+            return sendJson(response, 200, { acceptedActionCount: session.transcript.length, finalStateHash: pair!.stateHash, verified: await client.verifyReplay() });
+          }
+        } catch {
+          return sendJson(response, 503, { error: 'Session evidence unavailable', recovery: recovery('snapshot',
+            'Session evidence unavailable', sessionStatus() === 'unknown' ? 'untrusted' : 'unavailable') });
         }
-        if (result.accepted) await refreshSession(client);
-        const advanced = result.accepted && opponent === 'south'
-          ? await advanceOpponent(client)
-          : { count: 0, summaries: [] as readonly Readonly<{
-            events: readonly string[];
-            kind: GameLegalAction['descriptor']['kind'];
-          }>[] };
-        return sendJson(response, 200, {
-          ...await view(client, seat),
-          accepted: result.accepted,
-          opponentActionCount: advanced.count,
-          opponentActions: advanced.summaries,
-          ...(result.accepted
-            ? { playerAction, receipt: result.receipt }
-            : { reason: result.rejection }),
-        });
-      }
-      if (request.method === 'POST' && url.pathname === '/api/checkpoint') {
-        await ensureSession(client);
-        const checkpointValue = await client.checkpoint();
-        if (!isRecord(checkpointValue)
-          || typeof checkpointValue.checkpointId !== 'string'
-          || typeof checkpointValue.expectedSessionHash !== 'string') {
-          throw new Error('Rust checkpoint result was malformed');
-        }
-        const session = await refreshSession(client);
-        return sendJson(response, 200, {
-          checkpoint: canonicalJson(checkpointValue as JsonValue),
-          checkpointId: checkpointValue.checkpointId,
-          opponent,
-          stateHash: runtime.stateHash,
-          turnNumber: session.state.turnNumber,
-        });
-      }
-      if (request.method === 'POST' && url.pathname === '/api/resume') {
-        const seat = url.searchParams.get('seat');
-        const requestedOpponent = url.searchParams.get('opponent');
-        if (!isSeat(seat)) {
-          return sendJson(response, 400, { error: 'seat must be north or south' });
-        }
-        if (requestedOpponent !== 'manual' && requestedOpponent !== 'south') {
-          return sendJson(response, 400, { error: 'opponent must be manual or south' });
-        }
-        if (requestedOpponent === 'south' && seat === 'south') {
-          return sendJson(response, 403, {
-            error: 'south is hidden while controlled by the deterministic opponent',
-          });
-        }
-        const checkpointText = await readText(request, GAME_CHECKPOINT_MAX_BYTES);
-        const checkpoint = parseGameCheckpoint(checkpointText);
-        const preset = presets.find(({ manifest }) =>
-          reseedManifest(manifest, checkpoint.manifest.seed).manifestId
-            === checkpoint.manifest.manifestId);
-        if (!preset) throw new Error('saved position preset is unavailable');
-        await client.resume(JSON.parse(checkpointText) as JsonValue);
-        selectedPreset = preset;
-        opponent = requestedOpponent;
-        runtime.manifest = checkpoint.manifest;
-        await refreshSession(client);
-        return sendJson(response, 200, await view(client, seat));
-      }
-      if (request.method === 'GET' && url.pathname === '/api/replay/steps') {
-        await ensureSession(client);
-        return sendJson(response, 200, await client.replaySteps());
-      }
-      if (request.method === 'POST' && url.pathname === '/api/replay') {
-        await ensureSession(client);
-        const session = await refreshSession(client);
-        return sendJson(response, 200, {
-          acceptedActionCount: session.transcript.length,
-          finalStateHash: runtime.stateHash,
-          verified: await client.verifyReplay(),
-        });
-      }
-      return sendJson(response, 404, { error: 'not found' });
-    } catch (error) {
-      return sendJson(response, 400, { error: error instanceof Error ? error.message : 'bad request' });
+        return sendJson(response, 404, { error: 'not found' });
+      });
+    } catch {
+      return sendJson(response, 400, { error: request.url?.startsWith('/api/resume')
+        ? 'Invalid checkpoint request' : 'Invalid request' });
     }
   });
-  server.on('close', () => {
-    void clientPromise.then((client) => client.close());
-  });
+  server.on('close', () => { void clientPromise.then((client) => client.close()); });
   return server;
 }
 

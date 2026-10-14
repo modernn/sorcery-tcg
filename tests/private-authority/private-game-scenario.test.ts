@@ -24,6 +24,7 @@ async function verifyPrivateStarterHttp(catalog: readonly PrivateStarterPreset[]
     const response = await fetch(`${origin}${path}`, init);
     const body = await response.json() as JsonObject;
     assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(body.recovery, undefined, "Recovery invalidates successful game evidence");
     return body;
   };
   const findAction = (response: JsonObject, predicate: (value: JsonObject) => boolean): JsonObject => {

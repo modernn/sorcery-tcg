@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 
 import { createSyntheticDemoManifest } from '../../src/commands/run-game-demo.ts';
 import { canonicalJson } from '../../src/authority/canonical-json.ts';
-import { RustSessionClient } from '../../src/engine/rust-engine.ts';
+import { RustSessionClient, RustSessionRpcError } from '../../src/engine/rust-engine.ts';
 import { withSetup } from './rust-setup-session.ts';
 
 test('Rust session-json client creates, views, steps, and verifies a synthetic match', async () => {
@@ -195,4 +195,57 @@ test('SetupCtx forwards explicit v3 movement-progress policy behavior', async ()
     const legalActions = await ctx.legalActions(selected.seat);
     assert.ok(legalActions.some(({ actionId }) => actionId === selected.actionId));
   });
+});
+
+test('RPC error effects retain matching method and Error compatibility; malformed and unrelated responses confer no effect', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sorcery-effect-client-'));
+  const executablePath = join(directory, 'session-json');
+  const source = `#!/usr/bin/env node
+import { createInterface } from 'node:readline';
+createInterface({input:process.stdin}).on('line',line=>{
+ const r=JSON.parse(line),mode=r.params.actionId||r.params.manifestJson||'unchanged';
+ let response={id:r.id,schemaVersion:1,error:{message:'synthetic RPC failure',sessionEffect:mode}};
+ if(mode==='missing')delete response.error.sessionEffect;
+ if(mode==='invalid-id')delete response.id;
+ if(mode==='wrong-id'){response.id=r.id+100;process.stdout.write(JSON.stringify(response)+'\\n');process.exit(0);return}
+ if(mode==='invalid-json'){process.stdout.write('{\\n');return}
+ if(mode==='invalid-schema')response.schemaVersion=2;
+ if(mode==='invalid-message')response.error.message=12;
+ if(mode==='invalid-effect-array')response.error.sessionEffect=['capacity'];
+ if(mode==='invalid-effect-object')response.error.sessionEffect={toString:'capacity'};
+ if(mode==='malformed-success'){delete response.error;response.result={accepted:true};}
+ process.stdout.write(JSON.stringify(response)+'\\n');
+});
+`;
+  await writeFile(executablePath, source); await chmod(executablePath, 0o755);
+  const expectedSha256 = createHash('sha256').update(await readFile(executablePath)).digest('hex');
+  try {
+    for (const effect of ['capacity', 'unsupported', 'unknown', 'unchanged', 'missing', 'unrecognized', 'invalid-id', 'wrong-id', 'invalid-json', 'invalid-schema', 'invalid-message', 'invalid-effect-array', 'invalid-effect-object']) {
+      const client = await RustSessionClient.start({ executablePath, expectedSha256 });
+      try {
+        await assert.rejects(client.step({ actionId: effect, seat: 'north', stateVersion: 0 }), (error: unknown) => {
+          assert.ok(error instanceof Error);
+          if (['capacity', 'unsupported', 'unknown', 'unchanged'].includes(effect)) {
+            assert.ok(error instanceof RustSessionRpcError, effect+': '+error.message);
+            assert.equal(error.method, 'step');
+            assert.equal(error.sessionEffect, effect);
+            assert.equal(error.message, 'synthetic RPC failure');
+          } else assert.equal(error instanceof RustSessionRpcError, false);
+          return true;
+        });
+      } finally { await client.close(); }
+    }
+    const client = await RustSessionClient.start({ executablePath, expectedSha256 });
+    try {
+      const results = await Promise.allSettled([client.newSession('unchanged'), client.legalActions('north')]);
+      assert.ok(results.every((result) => result.status === 'rejected'));
+      assert.equal((results[0] as PromiseRejectedResult).reason.method, 'new');
+      assert.equal((results[1] as PromiseRejectedResult).reason.method, 'legalActions');
+      await assert.rejects(client.newSession('malformed-success'), (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.equal(error instanceof RustSessionRpcError, false);
+        return true;
+      });
+    } finally { await client.close(); }
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
