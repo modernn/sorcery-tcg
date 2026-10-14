@@ -2293,7 +2293,7 @@ impl Game {
                         facts.connects_top_bottom,
                     );
                 let mut value = json!({
-                    "airborne": self.minion_is_airborne(unit, facts),
+                    "airborne": self.minion_has_airborne(unit, facts),
                     "attack": attack,
                     "cardId": self.rules.cards[usize::from(unit.card.card_id.0)].id,
                     "controller": unit.controller,
@@ -2759,7 +2759,7 @@ impl Game {
             region: Region::Surface,
         };
         let profile = MovementProfile {
-            airborne: self.minion_is_airborne(unit, facts),
+            airborne: self.minion_has_airborne(unit, facts),
             cause: MovementCause::BasicMovement,
             connects_top_bottom: facts.connects_top_bottom,
             maximum_cost: (!facts.immobile).then_some(1),
@@ -3021,6 +3021,11 @@ impl Game {
         )? {
             return Ok(Vec::new());
         }
+        let attacker_region = self.combatant_region(
+            pending.attacker_kind,
+            pending.attacking_seat,
+            &pending.attacker_instance_id,
+        )?;
         let attacker_airborne = self.combatant_airborne(
             pending.attacker_kind,
             pending.attacking_seat,
@@ -3033,7 +3038,8 @@ impl Game {
             .collect();
         let mut candidates = Vec::new();
         let player = &self.position.players[seat_index(seat)];
-        if player.avatar.location == pending.cell
+        if attacker_region == Region::Surface
+            && player.avatar.location == pending.cell
             && !player.avatar.tapped
             && !unavailable.contains(&player.avatar.card.instance_id)
             && !attacker_airborne
@@ -3045,7 +3051,7 @@ impl Game {
         }
         for unit in &self.position.units {
             if unit.controller != seat
-                || unit.region != Region::Surface
+                || unit.region != attacker_region
                 || !Self::unit_occupies_cell(unit, pending.cell)
                 || unit.tapped
                 || self.minion_is_disabled(unit)
@@ -3181,7 +3187,7 @@ impl Game {
                 unit.card.instance_id.clone(),
                 unit.location,
                 MovementProfile {
-                    airborne: self.minion_is_airborne(unit, facts),
+                    airborne: self.minion_has_airborne(unit, facts),
                     cause: MovementCause::BasicMovement,
                     connects_top_bottom: facts.connects_top_bottom,
                     maximum_cost: if facts.cannot_defend || facts.immobile {
@@ -4143,7 +4149,7 @@ impl Game {
                     region: unit.region,
                 },
                 MovementProfile {
-                    airborne: self.minion_is_airborne(unit, facts),
+                    airborne: self.minion_has_airborne(unit, facts),
                     cause: MovementCause::BasicMovement,
                     connects_top_bottom: facts.connects_top_bottom,
                     maximum_cost: if facts.immobile {
@@ -4453,7 +4459,8 @@ impl Game {
         else {
             return false;
         };
-        let attacker_airborne = self.minion_is_airborne(unit, facts);
+        let attacker_airborne =
+            destination.region == Region::Surface && self.minion_has_airborne(unit, facts);
         let attacker_cells = Self::translated_footprint(
             unit.occupied_cells,
             unit.location,
@@ -4496,7 +4503,8 @@ impl Game {
         else {
             return false;
         };
-        let attacker_airborne = self.minion_is_airborne(unit, facts);
+        let attacker_airborne =
+            destination.region == Region::Surface && self.minion_has_airborne(unit, facts);
         let attacker_cells = Self::translated_footprint(
             unit.occupied_cells,
             unit.location,
@@ -6001,11 +6009,13 @@ impl Game {
         counted
     }
 
-    /// Whether a minion is flying right now.
-    ///
-    /// Printed Airborne is lost while the minion is disabled or while a conjured area grounds any
-    /// cell of its footprint.
+    /// Whether a minion currently receives Airborne combat benefits.
     fn minion_is_airborne(&self, unit: &UnitPosition, facts: &MinionFacts) -> bool {
+        unit.region == Region::Surface && self.minion_has_airborne(unit, facts)
+    }
+
+    /// Airborne availability; movement qualifies the region at the start of each step.
+    fn minion_has_airborne(&self, unit: &UnitPosition, facts: &MinionFacts) -> bool {
         (facts.airborne
             || unit
                 .temporary_modifiers
@@ -8585,7 +8595,7 @@ impl Game {
                     disabled,
                     facts.immobile,
                     MovementProfile {
-                        airborne: self.minion_is_airborne(unit, facts),
+                        airborne: self.minion_has_airborne(unit, facts),
                         cause: MovementCause::CardEffect,
                         connects_top_bottom: facts.connects_top_bottom,
                         maximum_cost: Some(max_cost),
@@ -11693,7 +11703,7 @@ impl Game {
                     return Err(GameError::IllegalAction);
                 };
                 (
-                    self.minion_is_airborne(unit, facts),
+                    self.minion_has_airborne(unit, facts),
                     facts.connects_top_bottom,
                     true,
                     self.minion_entry_power(unit)?,
@@ -15222,7 +15232,7 @@ impl Game {
                     },
                     self.minion_can_move_and_attack(unit, seat),
                     MovementProfile {
-                        airborne: self.minion_is_airborne(unit, facts),
+                        airborne: self.minion_has_airborne(unit, facts),
                         cause: MovementCause::BasicMovement,
                         connects_top_bottom: facts.connects_top_bottom,
                         maximum_cost: if facts.immobile {
@@ -19610,7 +19620,7 @@ impl Game {
                 .zip(arrival.iter())
                 .all(|(left, right)| left == right);
         let profile = MovementProfile {
-            airborne: self.minion_is_airborne(unit, facts),
+            airborne: self.minion_has_airborne(unit, facts),
             cause: MovementCause::CardEffect,
             connects_top_bottom: facts.connects_top_bottom,
             maximum_cost: None,
@@ -39682,6 +39692,218 @@ mod tests {
         assert_eq!(game.position, parent_position);
         assert_eq!(game.state_hash().unwrap(), parent_hash);
         assert_eq!(game.legal_actions().unwrap(), parent_actions);
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the region and ability matrix shares one native combat fixture"
+    )]
+    fn airborne_combat_benefits_require_surface_in_both_seats() {
+        for seat in [Seat::North, Seat::South] {
+            for region in [
+                Region::Surface,
+                Region::Void,
+                Region::Underground,
+                Region::Underwater,
+            ] {
+                for (responder_airborne, granted) in [(false, false), (true, false), (true, true)] {
+                    for (attacker_airborne, attacker_ranged) in
+                        [(false, false), (false, true), (true, false)]
+                    {
+                        let manifest = crate::synthetic::synthetic_demo_manifest_json(905).unwrap();
+                        let mut game = Game::from_manifest_json(&manifest).unwrap();
+                        let enemy = other_seat(seat);
+                        let cell = Cell::parse("C3").unwrap();
+                        for player in &mut game.position.players {
+                            player.mulligan_complete = true;
+                        }
+                        if region != Region::Void {
+                            let card = game.position.players[seat_index(seat)].hand_atlas.remove(0);
+                            let CardFacts::Site(facts) = &mut Arc::get_mut(&mut game.rules)
+                                .unwrap()
+                                .cards[usize::from(card.card_id.0)]
+                            .facts
+                            else {
+                                panic!("fixture site")
+                            };
+                            facts.elements =
+                                ElementSet::empty().with(if region == Region::Underwater {
+                                    Element::Water
+                                } else {
+                                    Element::Earth
+                                });
+                            game.position.sites[cell.index()] = Some(SitePosition {
+                                card,
+                                controller: seat,
+                                last_flight_turn: None,
+                                warded: false,
+                            });
+                        }
+                        let mut ids = Vec::new();
+                        for (controller, airborne, ranged) in [
+                            (seat, attacker_airborne, attacker_ranged),
+                            (enemy, responder_airborne && !granted, false),
+                        ] {
+                            let mut card = game.position.players[seat_index(controller)]
+                                .hand_spellbook
+                                .remove(0);
+                            let rules = Arc::get_mut(&mut game.rules).unwrap();
+                            let CardFacts::Minion(facts) =
+                                &mut rules.cards[usize::from(card.card_id.0)].facts
+                            else {
+                                panic!("fixture minion")
+                            };
+                            facts.airborne = airborne;
+                            facts.ranged = ranged;
+                            facts.voidwalk = true;
+                            facts.burrowing = true;
+                            facts.submerge = true;
+                            ids.push(card.instance_id.clone());
+                            card.enter_realm().unwrap();
+                            let mut unit = SummonPlacement {
+                                card,
+                                controller,
+                                lance_count: 0,
+                                location: cell,
+                                occupied_cells: None,
+                                region,
+                                stealthed: false,
+                                warded: false,
+                            }
+                            .into_unit();
+                            unit.summoning_sickness = false;
+                            if controller == enemy && granted {
+                                unit.temporary_modifiers.grant(
+                                    TemporaryModifierKind::Airborne,
+                                    1,
+                                    ids[0].clone(),
+                                );
+                            }
+                            game.position.units.push(unit);
+                        }
+                        game.position.phase = Phase::Main;
+                        game.position.active_seat = seat;
+                        game.position.decision_seat = seat;
+                        game.position.turn_controller = Some(seat);
+                        game.position.turn_number = 1;
+                        game.position.players[seat_index(seat)].domain_established = true;
+                        let destination = Location { cell, region };
+                        assert_eq!(
+                            game.minion_would_have_unit_attack_target(
+                                &game.position.units[0],
+                                destination
+                            ),
+                            !responder_airborne || region != Region::Surface || attacker_airborne
+                        );
+                        let mut arriving = game.position.units[0].clone();
+                        arriving.region = if region == Region::Surface {
+                            Region::Void
+                        } else {
+                            Region::Surface
+                        };
+                        let expected_target =
+                            !responder_airborne || region != Region::Surface || attacker_airborne;
+                        assert_eq!(
+                            game.minion_would_have_unit_attack_target(&arriving, destination),
+                            expected_target
+                        );
+                        let responder_card = usize::from(game.position.units[1].card.card_id.0);
+                        let CardFacts::Minion(facts) =
+                            &mut Arc::get_mut(&mut game.rules).unwrap().cards[responder_card].facts
+                        else {
+                            unreachable!()
+                        };
+                        facts.enemies_must_attack_this_if_able = true;
+                        assert_eq!(
+                            game.minion_would_attack_forced_source(&arriving, destination),
+                            expected_target
+                        );
+                        let CardFacts::Minion(facts) =
+                            &mut Arc::get_mut(&mut game.rules).unwrap().cards[responder_card].facts
+                        else {
+                            unreachable!()
+                        };
+                        facts.enemies_must_attack_this_if_able = false;
+                        let action = game.legal_actions().unwrap().into_iter().find(|a| matches!(&a.descriptor,
+                            ActionDescriptor::MoveAndAttack { unit_instance_id, path, .. } if *unit_instance_id == ids[0] && path == &[destination]
+                        )).unwrap_or_else(|| panic!("issued stationary move and attack {seat:?} {region:?} {attacker_airborne} {attacker_ranged}"));
+                        game.apply_action(&action).unwrap();
+                        let actions = game.legal_actions().unwrap();
+                        let target = actions.iter().find(|a| matches!(&a.descriptor,
+                            ActionDescriptor::DeclareAttack { target: CombatTarget::Minion { instance_id, .. } } if *instance_id == ids[1]
+                        ));
+                        assert_eq!(
+                            target.is_some(),
+                            !responder_airborne || region != Region::Surface || attacker_airborne
+                        );
+                        if let Some(target) = target {
+                            let mut recorded = game.clone();
+                            recorded.apply_action_recorded(target).unwrap();
+                            let mut ignored = game.clone();
+                            ignored.apply_action(target).unwrap();
+                            let owned = game.clone().apply_action_owned(target).unwrap();
+                            assert_eq!(
+                                recorded.state_hash().unwrap(),
+                                ignored.state_hash().unwrap()
+                            );
+                            assert_eq!(recorded.state_hash().unwrap(), owned.state_hash().unwrap());
+                            assert_eq!(
+                                recorded.legal_actions().unwrap(),
+                                owned.legal_actions().unwrap()
+                            );
+                        }
+                        let mut declined = game.clone();
+                        let decline = declined
+                            .legal_actions()
+                            .unwrap()
+                            .into_iter()
+                            .find(|a| matches!(a.descriptor, ActionDescriptor::DeclineAttack))
+                            .unwrap();
+                        declined.apply_action(&decline).unwrap();
+                        assert_eq!(declined.legal_actions().unwrap().iter().any(|a| matches!(&a.descriptor, ActionDescriptor::Intercept { unit_instance_id } if *unit_instance_id == ids[1])), region != Region::Surface || !attacker_airborne || responder_airborne);
+                        let responder = &game.position.units[1];
+                        let CardFacts::Minion(facts) =
+                            &game.rules.cards[usize::from(responder.card.card_id.0)].facts
+                        else {
+                            unreachable!()
+                        };
+                        assert_eq!(
+                            facts.airborne
+                                || responder
+                                    .temporary_modifiers
+                                    .has(TemporaryModifierKind::Airborne),
+                            responder_airborne
+                        );
+                        let mut silenced = responder.clone();
+                        silenced.temporary_modifiers.grant(
+                            TemporaryModifierKind::Silence,
+                            1,
+                            ids[0].clone(),
+                        );
+                        assert!(!game.minion_is_airborne(&silenced, facts));
+                        let mut disabled = responder.clone();
+                        disabled.disabled_until_damaged = true;
+                        assert!(!game.minion_is_airborne(&disabled, facts));
+                        let responder = responder.clone();
+                        let facts = facts.clone();
+                        game.position.immobile_areas.push(ImmobileArea {
+                            cells: BTreeSet::from([cell]),
+                            expires_at_seat: None,
+                            minions_at_sites_only: true,
+                            source_instance_id: ids[0].clone(),
+                            suppresses_airborne: true,
+                        });
+                        assert!(!game.minion_is_airborne(&responder, &facts));
+                        game.position.immobile_areas.clear();
+                        assert_eq!(
+                            game.minion_is_airborne(&responder, &facts),
+                            responder_airborne && region == Region::Surface
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

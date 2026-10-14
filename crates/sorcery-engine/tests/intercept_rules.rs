@@ -1,6 +1,10 @@
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
-use sorcery_engine::contract::{ActionRequest, Receipt};
+use sorcery_engine::checkpoint::{
+    create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+    serialize_game_checkpoint,
+};
+use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::session::{Session, StepResult};
 
 fn minion() -> Value {
@@ -1044,4 +1048,216 @@ fn rule_catalog_1159_close_intercept_withheld_during_pending_deathrite_order() {
         descriptor == &json!({ "kind": "intercept", "unitInstanceId": interceptor_id })
     }));
     exact_replay(session);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one issued-action fixture compares both seats, layers and Avatar responses"
+)]
+fn interception_requires_the_same_final_region_in_both_seats() {
+    for seat in [Seat::North, Seat::South] {
+        for attacker_region in ["surface", "underground"] {
+            for responder_region in ["surface", "underground"] {
+                for airborne in [false, true] {
+                    let mut attacker = minion();
+                    attacker["manaCost"] = json!(0);
+                    attacker["thresholds"]["earth"] = json!(0);
+                    attacker["defense"] = json!(8);
+                    attacker["airborne"] = json!(airborne);
+                    attacker["burrowing"] = json!(true);
+                    let mut responder = attacker.clone();
+                    responder["airborne"] = json!(false);
+                    let site = json!({"cardType":"site", "elements":["earth"]});
+                    let mut manifest: Value = serde_json::from_str(&scenario_manifest(
+                        1204, &attacker, &responder, &site,
+                    ))
+                    .unwrap();
+                    manifest.as_object_mut().unwrap().remove("manifestId");
+                    if seat == Seat::South {
+                        let north = manifest["decks"]["north"].clone();
+                        manifest["decks"]["north"] = manifest["decks"]["south"].clone();
+                        manifest["decks"]["south"] = north;
+                        manifest["firstSeat"] = json!("south");
+                    }
+                    manifest["manifestId"] = json!(identity_hash(&manifest).unwrap());
+                    let mut session = Session::new(&canonical_json(&manifest).unwrap()).unwrap();
+                    let cell = |value: &str| {
+                        if seat == Seat::North {
+                            value.to_owned()
+                        } else {
+                            format!("{}{}", &value[..1], 5 - value[1..].parse::<u8>().unwrap())
+                        }
+                    };
+                    keep(&mut session);
+                    keep(&mut session);
+                    accept_where(&mut session, |d| {
+                        d["kind"] == "play-site" && d["cell"] == cell("C4")
+                    });
+                    let (summon, _) = accept_where(&mut session, |d| {
+                        d["kind"] == "summon-minion"
+                            && d["cardId"] == "north-attacker"
+                            && d["cell"] == cell("C4")
+                            && d["region"].is_null()
+                    });
+                    let attacker_id = summon["cardInstanceId"].as_str().unwrap().to_owned();
+                    accept_where(&mut session, |d| d["kind"] == "end-turn");
+                    accept_where(&mut session, |d| {
+                        d["kind"] == "draw" && d["zone"] == "spellbook"
+                    });
+                    accept_where(&mut session, |d| {
+                        d["kind"] == "play-site" && d["cell"] == cell("C1")
+                    });
+                    accept_where(&mut session, |d| d["kind"] == "end-turn");
+                    accept_where(&mut session, |d| {
+                        d["kind"] == "draw" && d["zone"] == "spellbook"
+                    });
+                    accept_where(&mut session, |d| {
+                        d["kind"] == "play-site" && d["cell"] == cell("C3")
+                    });
+                    accept_where(&mut session, |d| {
+                        d["kind"] == "move-and-attack"
+                            && d["unitInstanceId"] == attacker_id
+                            && d["to"]["cell"] == cell("C3")
+                            && d["to"]["region"] == "surface"
+                    });
+                    accept_where(&mut session, |d| d["kind"] == "decline-attack");
+                    if state(&session)["phase"] == "intercept" {
+                        accept_where(&mut session, |d| d["kind"] == "close-intercept");
+                    }
+                    accept_where(&mut session, |d| d["kind"] == "end-turn");
+                    accept_where(&mut session, |d| {
+                        d["kind"] == "draw" && d["zone"] == "spellbook"
+                    });
+                    accept_where(&mut session, |d| {
+                        d["kind"] == "play-site" && d["cell"] == cell("C2")
+                    });
+                    let (summon, _) = accept_where(&mut session, |d| {
+                        d["kind"] == "summon-minion"
+                            && d["cardId"] == "south-responder"
+                            && d["cell"] == cell("C2")
+                            && d["region"].is_null()
+                    });
+                    let responder_id = summon["cardInstanceId"].as_str().unwrap().to_owned();
+                    accept_where(&mut session, |d| d["kind"] == "end-turn");
+                    accept_where(&mut session, |d| {
+                        d["kind"] == "draw" && d["zone"] == "spellbook"
+                    });
+                    accept_where(&mut session, |d| {
+                        d["kind"] == "move-and-attack"
+                            && d["unitInstanceId"] == attacker_id
+                            && d["to"]["cell"] == cell("C2")
+                            && d["to"]["region"] == "surface"
+                    });
+                    accept_where(&mut session, |d| d["kind"] == "decline-attack");
+                    if state(&session)["phase"] == "intercept" {
+                        accept_where(&mut session, |d| d["kind"] == "close-intercept");
+                    }
+                    accept_where(&mut session, |d| d["kind"] == "end-turn");
+                    accept_where(&mut session, |d| {
+                        d["kind"] == "draw" && d["zone"] == "spellbook"
+                    });
+                    let (avatar_move, _) = accept_where(&mut session, |d| {
+                        d["kind"] == "move-and-attack"
+                            && d["from"]["cell"] == cell("C1")
+                            && d["to"]["cell"] == cell("C2")
+                            && d["to"]["region"] == "surface"
+                    });
+                    let avatar_id = avatar_move["unitInstanceId"].as_str().unwrap().to_owned();
+                    accept_where(&mut session, |d| d["kind"] == "decline-attack");
+                    if state(&session)["phase"] == "intercept" {
+                        accept_where(&mut session, |d| d["kind"] == "close-intercept");
+                    }
+                    if responder_region == "underground" {
+                        accept_where(&mut session, |d| {
+                            d["kind"] == "move-and-attack"
+                                && d["unitInstanceId"] == responder_id
+                                && d["to"] == json!({"cell":cell("C2"), "region":"underground"})
+                        });
+                        accept_where(&mut session, |d| d["kind"] == "decline-attack");
+                        if state(&session)["phase"] == "intercept" {
+                            accept_where(&mut session, |d| d["kind"] == "close-intercept");
+                        }
+                    }
+                    accept_where(&mut session, |d| d["kind"] == "end-turn");
+                    accept_where(&mut session, |d| {
+                        d["kind"] == "draw" && d["zone"] == "spellbook"
+                    });
+                    // Ready the responder after its optional burrow, without changing either location.
+                    accept_where(&mut session, |d| d["kind"] == "end-turn");
+                    accept_where(&mut session, |d| {
+                        d["kind"] == "draw" && d["zone"] == "spellbook"
+                    });
+                    accept_where(&mut session, |d| d["kind"] == "end-turn");
+                    accept_where(&mut session, |d| {
+                        d["kind"] == "draw" && d["zone"] == "spellbook"
+                    });
+                    accept_where(&mut session, |d| {
+                        d["kind"] == "move-and-attack"
+                            && d["unitInstanceId"] == attacker_id
+                            && d["to"] == json!({"cell":cell("C2"), "region":attacker_region})
+                            && d["path"].as_array().unwrap().len()
+                                == if attacker_region == "surface" { 1 } else { 2 }
+                    });
+                    let (_, decline) =
+                        accept_where(&mut session, |d| d["kind"] == "decline-attack");
+                    let minion_allowed = attacker_region == responder_region
+                        && (attacker_region != "surface" || !airborne);
+                    let avatar_allowed = attacker_region == "surface" && !airborne;
+                    let actions = session.legal_actions().unwrap();
+                    for (id, expected) in [
+                        (&responder_id, minion_allowed),
+                        (&avatar_id, avatar_allowed),
+                    ] {
+                        assert_eq!(
+                            actions.iter().any(|a| a.descriptor["kind"] == "intercept"
+                                && a.descriptor["unitInstanceId"] == *id),
+                            expected,
+                            "{seat:?}: {attacker_region}/{responder_region}, Airborne={airborne}"
+                        );
+                    }
+                    assert_eq!(
+                        decline.events[0].payload["interceptWindowOpened"],
+                        minion_allowed || avatar_allowed
+                    );
+                    let checkpoint =
+                        serialize_game_checkpoint(&create_game_checkpoint(&session).unwrap())
+                            .unwrap();
+                    let resumed =
+                        resume_game_checkpoint(&parse_game_checkpoint(&checkpoint).unwrap())
+                            .unwrap();
+                    assert_eq!(
+                        resumed.legal_actions().unwrap(),
+                        session.legal_actions().unwrap()
+                    );
+                    assert_eq!(
+                        resumed.replay_value().unwrap(),
+                        session.replay_value().unwrap()
+                    );
+                    assert_eq!(resumed.transcript(), session.transcript());
+                    for view_seat in [Seat::North, Seat::South] {
+                        assert_eq!(
+                            resumed.public_view(view_seat).unwrap(),
+                            session.public_view(view_seat).unwrap()
+                        );
+                    }
+                    if minion_allowed || avatar_allowed {
+                        for (id, allowed) in [
+                            (&responder_id, minion_allowed),
+                            (&avatar_id, avatar_allowed),
+                        ] {
+                            if allowed {
+                                let (_, receipt) = accept_where(&mut session, |d| {
+                                    d["kind"] == "intercept" && d["unitInstanceId"] == *id
+                                });
+                                assert_eq!(receipt.events[0].event_type, "interceptor-joined");
+                            }
+                        }
+                        accept_where(&mut session, |d| d["kind"] == "close-intercept");
+                    }
+                    exact_replay(&session);
+                }
+            }
+        }
+    }
 }
