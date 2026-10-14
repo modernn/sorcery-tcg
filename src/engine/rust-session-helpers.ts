@@ -130,7 +130,9 @@ export class RustGameSessionHandle {
     }>;
     result: JsonValue;
   }>> {
-    return this.client.runNoveltyFromForcedAction(input);
+    const result = await this.client.runNoveltyFromForcedAction(input);
+    await this.loadSnapshot();
+    return result;
   }
 
   /** Applies one bound action request. */
