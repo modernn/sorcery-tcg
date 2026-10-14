@@ -10,13 +10,10 @@ use crate::canonical::{
     CanonicalError, IdentityHash, canonical_json, identity_hash, parse_json_without_duplicate_keys,
 };
 use crate::contract::ActionRequest;
-use crate::session::{Session, SessionError};
+use crate::session::{SESSION_MAX_ATTEMPTS, Session, SessionError};
 
 /// Maximum accepted checkpoint byte length.
 pub const GAME_CHECKPOINT_MAX_BYTES: usize = 16 * 1024 * 1024;
-const MAX_CHECKPOINT_REQUESTS: usize = 1_000;
-const MAX_ACTION_ID_UTF16_UNITS: usize = 256;
-const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 /// A private checkpoint that reconstructs hidden state by replaying every request.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -105,17 +102,13 @@ fn validate(checkpoint: &GameCheckpoint) -> Result<(), CheckpointError> {
             "checkpoint kind or schema version is unsupported".to_owned(),
         ));
     }
-    if checkpoint.requests.len() > MAX_CHECKPOINT_REQUESTS {
+    if checkpoint.requests.len() > SESSION_MAX_ATTEMPTS {
         return Err(CheckpointError::Invalid(format!(
-            "checkpoint requests must contain at most {MAX_CHECKPOINT_REQUESTS} entries"
+            "checkpoint requests must contain at most {SESSION_MAX_ATTEMPTS} entries"
         )));
     }
     for (index, request) in checkpoint.requests.iter().enumerate() {
-        let action_length = request.action_id.encode_utf16().count();
-        if action_length == 0
-            || action_length > MAX_ACTION_ID_UTF16_UNITS
-            || request.state_version > MAX_SAFE_INTEGER
-        {
+        if request.validate().is_err() {
             return Err(CheckpointError::Invalid(format!(
                 "checkpoint request {index} is invalid"
             )));

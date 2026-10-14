@@ -17,7 +17,7 @@ pub enum Seat {
 
 /// A version-bound request referencing an engine-issued action.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ActionRequest {
     /// Opaque action identity as supplied by the caller. Unknown strings are
     /// preserved in rejected-attempt journals.
@@ -26,6 +26,23 @@ pub struct ActionRequest {
     pub seat: Seat,
     /// State version that issued the action.
     pub state_version: u64,
+}
+
+impl ActionRequest {
+    /// Checks the shape shared by live requests and V1 checkpoint journals.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable explanation when the ID or version is outside the contract.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.action_id.is_empty() || self.action_id.encode_utf16().count() > 256 {
+            return Err("actionId must contain 1 to 256 UTF-16 units");
+        }
+        if self.state_version > 9_007_199_254_740_991 {
+            return Err("stateVersion must be a nonnegative safe integer");
+        }
+        Ok(())
+    }
 }
 
 /// An engine-issued legal action.

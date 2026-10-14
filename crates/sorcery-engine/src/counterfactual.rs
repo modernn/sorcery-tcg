@@ -368,8 +368,7 @@ mod tests {
         run_counterfactual_with_workers,
     };
     use crate::contract::ActionRequest;
-    use crate::session::Session;
-    use crate::session::StepResult;
+    use crate::session::{SESSION_MAX_ATTEMPTS, Session, StepResult};
     use crate::synthetic::synthetic_demo_session;
 
     #[test]
@@ -423,11 +422,12 @@ mod tests {
     #[test]
     fn large_rejected_attempt_journal_falls_back_to_serial() {
         let mut session = synthetic_demo_session(31);
-        let oversized_action_id = "rejected-".to_owned() + &"x".repeat(8 * 1024);
-        for _ in 0..600 {
+        let valid_action_id = "rejected-".to_owned() + &"x".repeat(247);
+        let rejected_attempts = 600;
+        for _ in 0..rejected_attempts {
             let result = session
                 .step(ActionRequest {
-                    action_id: oversized_action_id.clone(),
+                    action_id: valid_action_id.clone(),
                     seat: session.acting_controller(),
                     state_version: session.state_version().saturating_add(1),
                 })
@@ -435,12 +435,20 @@ mod tests {
             assert!(matches!(result, StepResult::Rejected(_)));
         }
         let serialized_bytes = session.serialized_clone_size().expect("serialized size");
-        let minimum_rejection_size =
-            COUNTERFACTUAL_PARALLEL_BYTES_LIMIT / (COUNTERFACTUAL_CLONE_ALLOWANCE_FACTOR * 5 * 2);
+        let minimum_rejection_size = COUNTERFACTUAL_PARALLEL_BYTES_LIMIT
+            / (COUNTERFACTUAL_CLONE_ALLOWANCE_FACTOR
+                * (COUNTERFACTUAL_CONTINUATION_LIMIT + 1)
+                * COUNTERFACTUAL_WORKER_LIMIT);
         assert!(serialized_bytes > minimum_rejection_size);
-        let serial = run_counterfactual(&session, 4).expect("serial fallback baseline");
-        let fallback = run_counterfactual_with_workers(&session, 4, 2)
-            .expect("large rejected-attempt journal should fall back to serial");
+        assert!(rejected_attempts + COUNTERFACTUAL_CONTINUATION_LIMIT < SESSION_MAX_ATTEMPTS);
+        let serial = run_counterfactual(&session, COUNTERFACTUAL_CONTINUATION_LIMIT)
+            .expect("serial fallback baseline");
+        let fallback = run_counterfactual_with_workers(
+            &session,
+            COUNTERFACTUAL_CONTINUATION_LIMIT,
+            COUNTERFACTUAL_WORKER_LIMIT,
+        )
+        .expect("large rejected-attempt journal should fall back to serial");
         assert_eq!(serial.result(), fallback.result());
         assert_eq!(
             serial.result()["rootStateHash"],

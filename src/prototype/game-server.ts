@@ -525,7 +525,9 @@ export function createGamePrototypeServer(
           || !Number.isSafeInteger(body.stateVersion)
           || (body.stateVersion as number) < 0
           || typeof body.actionId !== 'string'
-          || body.actionId.length > 128) {
+          || body.actionId.length === 0
+          || body.actionId.length > 256
+          || Object.keys(body).sort().join(',') !== 'actionId,seat,stateVersion') {
           return sendJson(response, 400, { error: 'valid seat, stateVersion, and actionId are required' });
         }
         if (opponent === 'south' && seat === 'south') {

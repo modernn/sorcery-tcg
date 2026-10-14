@@ -631,7 +631,11 @@ export class RustSessionClient {
   }
 
   async step(request: RustActionRequest): Promise<RustStepResult> {
-    const result = await this.call('step', request as unknown as JsonValue);
+    const result = await this.call('step', {
+      actionId: request.actionId,
+      seat: request.seat,
+      stateVersion: request.stateVersion,
+    });
     if (!isRecord(result) || typeof result.accepted !== 'boolean') {
       throw new Error('Rust session step result was invalid');
     }

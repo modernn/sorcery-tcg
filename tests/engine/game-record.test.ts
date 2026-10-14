@@ -123,6 +123,39 @@ test('SIM-06 seed-31 artifacts replay and detect engine and hash mismatches', ()
     const state = replayGameArtifacts(dir);
     assert.equal(state.matched, false);
     assert.equal(state.mismatch, 'final-state-hash');
+
+    runGameDemo(31, dir);
+    const transcriptPath = join(dir, 'transcript.json');
+    const transcript = JSON.parse(readFileSync(transcriptPath, 'utf8')) as Record<string, unknown>[];
+    assert.ok(transcript[0]);
+    transcript[0].stateVersion = 999;
+    writeFileSync(transcriptPath, JSON.stringify(transcript));
+    const receipt = replayGameArtifacts(dir);
+    assert.equal(receipt.mismatch, 'transcript-contents');
+    assert.equal(receipt.matched, false);
+    assert.equal(receipt.replayVerified, false);
+    assert.equal(receipt.eligibility.ranked, false);
+
+    runGameDemo(31, dir);
+    const changedOutcome = JSON.parse(readFileSync(outcomePath, 'utf8')) as Record<string, unknown>;
+    changedOutcome.turnCount = 0;
+    writeFileSync(outcomePath, JSON.stringify(changedOutcome));
+    const outcomeContents = replayGameArtifacts(dir);
+    assert.equal(outcomeContents.mismatch, 'outcome-contents');
+    assert.equal(outcomeContents.matched, false);
+    assert.equal(outcomeContents.replayVerified, false);
+    assert.equal(outcomeContents.eligibility.ranked, false);
+
+    runGameDemo(31, dir);
+    const coveragePath = join(dir, 'coverage.json');
+    const coverage = JSON.parse(readFileSync(coveragePath, 'utf8')) as Record<string, unknown>;
+    coverage.offeredActionKinds = [];
+    writeFileSync(coveragePath, JSON.stringify(coverage));
+    const coverageContents = replayGameArtifacts(dir);
+    assert.equal(coverageContents.mismatch, 'coverage-contents');
+    assert.equal(coverageContents.matched, false);
+    assert.equal(coverageContents.replayVerified, false);
+    assert.equal(coverageContents.eligibility.ranked, false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

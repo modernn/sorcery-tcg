@@ -2,6 +2,7 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { closeSync, mkdtempSync, openSync, readSync, rmSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
 
 import { canonicalJson, parseJsonWithDuplicateKeyCheck, type JsonValue } from '../authority/canonical-json.ts';
@@ -36,7 +37,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Blocking FIFO pair. Node's spawned pipes are O_NONBLOCK, so readSync returns EAGAIN. */
-function openBlockingFifos(): Readonly<{ stdinFd: number; stdoutFd: number }> {
+function openBlockingFifos(): Readonly<{
+  stdinFd: number;
+  stdoutFd: number;
+  childStdinFd: number;
+  childStdoutFd: number;
+}> {
   const dir = mkdtempSync(join(tmpdir(), 'sorcery-session-json-'));
   const stdinPath = join(dir, 'in');
   const stdoutPath = join(dir, 'out');
@@ -45,14 +51,22 @@ function openBlockingFifos(): Readonly<{ stdinFd: number; stdoutFd: number }> {
     rmSync(dir, { force: true, recursive: true });
     throw new Error(`mkfifo failed: ${made.stderr || made.stdout || made.status}`);
   }
-  let stdinFd: number | undefined;
+  const opened: number[] = [];
+  function open(path: string, flags: string): number {
+    const fd = openSync(path, flags);
+    opened.push(fd);
+    return fd;
+  }
   try {
-    stdinFd = openSync(stdinPath, 'r+');
-    const stdoutFd = openSync(stdoutPath, 'r+');
+    // Keepers let directional parent descriptors open before the worker starts.
+    const childStdinFd = open(stdinPath, 'r+');
+    const childStdoutFd = open(stdoutPath, 'r+');
+    const stdinFd = open(stdinPath, 'w');
+    const stdoutFd = open(stdoutPath, 'r');
     rmSync(dir, { force: true, recursive: true });
-    return { stdinFd, stdoutFd };
+    return { stdinFd, stdoutFd, childStdinFd, childStdoutFd };
   } catch (error) {
-    if (stdinFd !== undefined) closeSync(stdinFd);
+    for (const fd of opened) closeSync(fd);
     rmSync(dir, { force: true, recursive: true });
     throw error;
   }
@@ -76,28 +90,37 @@ class SyncSessionJson {
   private closed = false;
   private nextId = 1;
   private remainder = '';
+  private readonly decoder = new StringDecoder('utf8');
+  private readonly onHostExit = () => this.close();
 
   constructor() {
     const fifos = openBlockingFifos();
     this.stdinFd = fifos.stdinFd;
     this.stdoutFd = fifos.stdoutFd;
-    const launch = sessionJsonLaunch();
-    this.child = spawn(launch.command, [...launch.args], {
-      cwd: REPOSITORY_ROOT,
-      stdio: [this.stdinFd, this.stdoutFd, 'ignore'],
-    });
+    try {
+      const launch = sessionJsonLaunch();
+      this.child = spawn(launch.command, [...launch.args], {
+        cwd: REPOSITORY_ROOT,
+        stdio: [fifos.childStdinFd, fifos.childStdoutFd, 'ignore'],
+      });
+    } catch (error) {
+      closeSync(this.stdinFd);
+      closeSync(this.stdoutFd);
+      throw error;
+    } finally {
+      closeSync(fifos.childStdinFd);
+      closeSync(fifos.childStdoutFd);
+    }
     this.child.unref();
-    this.child.once('exit', () => {
-      this.closed = true;
-      if (client === this) client = undefined;
-    });
-    process.once('exit', () => {
-      this.close();
-    });
+    this.child.once('exit', () => this.close());
+    this.child.on('error', () => this.close());
+    process.once('exit', this.onHostExit);
   }
 
   close(): void {
+    if (this.closed) return;
     this.closed = true;
+    process.removeListener('exit', this.onHostExit);
     try {
       this.child.kill();
     } catch {
@@ -113,55 +136,72 @@ class SyncSessionJson {
     } catch {
       // Already closed after a failed request or host shutdown.
     }
-    if (client === this) client = undefined;
+    if (client === this) {
+      client = undefined;
+      liveCheckpoint = undefined;
+    }
   }
 
   call(method: string, params: JsonValue): unknown {
     if (this.closed) throw new Error('Rust session-json process is closed');
-    const id = this.nextId;
-    this.nextId += 1;
-    writeAll(this.stdinFd, `${canonicalJson({
-      id,
-      method,
-      params,
-      schemaVersion: 1,
-    } as JsonValue)}\n`);
-    while (true) {
-      const newline = this.remainder.indexOf('\n');
-      if (newline >= 0) {
-        const line = this.remainder.slice(0, newline);
-        this.remainder = this.remainder.slice(newline + 1);
-        if (line.length === 0) continue;
-        if (line.length > MAX_LINE_BYTES) {
+    let rpcError: Error | undefined;
+    try {
+      const id = this.nextId;
+      this.nextId += 1;
+      writeAll(this.stdinFd, `${canonicalJson({
+        id,
+        method,
+        params,
+        schemaVersion: 1,
+      } as JsonValue)}\n`);
+      while (true) {
+        const newline = this.remainder.indexOf('\n');
+        if (newline >= 0) {
+          const line = this.remainder.slice(0, newline);
+          this.remainder = this.remainder.slice(newline + 1);
+          if (line.length === 0) continue;
+          if (line.length > MAX_LINE_BYTES) {
+            throw new Error('Rust session-json response exceeded 16 MiB');
+          }
+          const parsed = parseJsonWithDuplicateKeyCheck(line);
+          if (!isRecord(parsed) || parsed.id !== id || parsed.schemaVersion !== 1) {
+            throw new Error('Rust session-json response envelope was invalid');
+          }
+          if (parsed.error !== undefined) {
+            if (!isRecord(parsed.error) || typeof parsed.error.message !== 'string'
+              || Object.hasOwn(parsed, 'result')) {
+              throw new Error('Rust session-json error response was malformed');
+            }
+            rpcError = new Error(parsed.error.message);
+            throw rpcError;
+          }
+          if (!Object.hasOwn(parsed, 'result')) {
+            throw new Error('Rust session-json response lacked a result');
+          }
+          return parsed.result;
+        }
+        const chunk = Buffer.alloc(65_536);
+        const bytes = readSync(this.stdoutFd, chunk);
+        if (bytes === 0) {
+          throw new Error('Rust session-json process closed');
+        }
+        this.remainder += this.decoder.write(chunk.subarray(0, bytes));
+        if (this.remainder.length > MAX_LINE_BYTES) {
           throw new Error('Rust session-json response exceeded 16 MiB');
         }
-        const parsed = parseJsonWithDuplicateKeyCheck(line);
-        if (!isRecord(parsed) || parsed.id !== id) {
-          throw new Error('Rust session-json response id did not match the request');
-        }
-        if (parsed.error !== undefined) {
-          const message = isRecord(parsed.error) && typeof parsed.error.message === 'string'
-            ? parsed.error.message
-            : 'Rust session-json request failed';
-          throw new Error(message);
-        }
-        return parsed.result;
       }
-      const chunk = Buffer.alloc(65_536);
-      const bytes = readSync(this.stdoutFd, chunk);
-      if (bytes === 0) {
-        throw new Error('Rust session-json process closed');
-      }
-      this.remainder += chunk.toString('utf8', 0, bytes);
-      if (this.remainder.length > MAX_LINE_BYTES) {
-        throw new Error('Rust session-json response exceeded 16 MiB');
-      }
+    } catch (error) {
+      if (error !== rpcError) this.close();
+      throw error;
     }
   }
 }
 
 function processClient(): SyncSessionJson {
-  client ??= new SyncSessionJson();
+  if (!client) {
+    liveCheckpoint = undefined;
+    client = new SyncSessionJson();
+  }
   return client;
 }
 
@@ -193,7 +233,8 @@ function readCheckpoint(): JsonValue {
 }
 
 function resumeBinding(binding: SessionBinding): void {
-  if (liveCheckpoint === binding.checkpoint) return;
+  if (client && liveCheckpoint === binding.checkpoint) return;
+  liveCheckpoint = undefined;
   processClient().call('resume', { checkpoint: binding.checkpoint });
   liveCheckpoint = binding.checkpoint;
 }
@@ -208,8 +249,8 @@ function exportBoundSession(manifest: GameManifest): GameSession {
 
 /** Opens one authoritative session through the Rust legality engine. */
 export function createRustGameSession(manifest: GameManifest): GameSession {
-  processClient().call('new', { manifestJson: canonicalJson(manifest as unknown as JsonValue) });
   liveCheckpoint = undefined;
+  processClient().call('new', { manifestJson: canonicalJson(manifest as unknown as JsonValue) });
   return exportBoundSession(manifest);
 }
 
@@ -242,6 +283,7 @@ export function rustStepGame(session: GameSession, request: GameActionRequest): 
     throw new Error('stepGame requires a Rust-exported session');
   }
   resumeBinding(binding);
+  liveCheckpoint = undefined;
   const stepped = processClient().call('step', {
     actionId: request.actionId,
     seat: request.seat,

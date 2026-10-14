@@ -1,6 +1,6 @@
 //! Line-delimited JSON-RPC boundary for authoritative [`Session`] control.
 
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read, Write};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -98,19 +98,45 @@ impl SessionJsonService {
     /// Returns I/O or JSON errors. Operational failures are encoded as RPC errors.
     pub fn serve(
         &mut self,
-        input: impl BufRead,
+        mut input: impl BufRead,
         mut output: impl Write,
     ) -> Result<(), SessionJsonError> {
-        for line in input.lines() {
-            let line = line?;
+        let mut bytes = Vec::new();
+        loop {
+            bytes.clear();
+            // Include room for CRLF and one excess byte, without buffering an unbounded line.
+            if input
+                .by_ref()
+                .take((MAX_LINE_BYTES + 3) as u64)
+                .read_until(b'\n', &mut bytes)?
+                == 0
+            {
+                break;
+            }
+            if bytes.last() == Some(&b'\n') {
+                bytes.pop();
+                if bytes.last() == Some(&b'\r') {
+                    bytes.pop();
+                }
+            }
+            if bytes.len() > MAX_LINE_BYTES {
+                return Err(SessionJsonError::LineTooLarge);
+            }
+            let line = match std::str::from_utf8(&bytes) {
+                Ok(line) => line,
+                Err(error) => {
+                    write_response(
+                        &mut output,
+                        error_response(0, &format!("invalid session-json request: {error}")),
+                    )?;
+                    continue;
+                }
+            };
             if line.is_empty() {
                 continue;
             }
-            if line.len() > MAX_LINE_BYTES {
-                return Err(SessionJsonError::LineTooLarge);
-            }
             let request: RpcRequest =
-                match parse_json_without_duplicate_keys(&line).and_then(serde_json::from_value) {
+                match parse_json_without_duplicate_keys(line).and_then(serde_json::from_value) {
                     Ok(request) => request,
                     Err(error) => {
                         write_response(
@@ -162,6 +188,9 @@ impl SessionJsonService {
         let Ok(seat) = parse_seat_param(params, id) else {
             return error_response(id, "legalActions requires seat north or south");
         };
+        if let Err(error) = session.ensure_active() {
+            return error_response(id, &error.to_string());
+        }
         if seat != session.acting_controller() {
             return ok_response(id, json!({ "actions": [] }));
         }
@@ -1029,6 +1058,73 @@ mod tests {
         assert!(result["status"] == "complete" || result["status"] == "too-wide");
         assert_eq!(result["policyVersion"], "deterministic-demo-v1");
         assert_eq!(result["rootActionLimit"], 128);
+    }
+
+    #[test]
+    fn invalid_utf8_request_preserves_live_session_and_continues() {
+        let mut service = SessionJsonService::new();
+        let manifest = synthetic_demo_manifest_json(31).expect("manifest");
+        assert!(
+            service
+                .handle(&rpc(1, "new", json!({ "manifestJson": manifest })))
+                .error
+                .is_none()
+        );
+        let before = service.handle(&rpc(2, "checkpoint", json!({}))).result;
+        let mut input = b"\xff\n\xe2\x82\r\n".to_vec();
+        input.extend_from_slice(
+            b"{\"schemaVersion\":1,\"id\":3,\"method\":\"checkpoint\",\"params\":{}}\r\n",
+        );
+        let mut output = Vec::new();
+        service
+            .serve(BufReader::with_capacity(1, Cursor::new(input)), &mut output)
+            .expect("malformed lines do not terminate service");
+        let responses: Vec<RpcResponse> = std::str::from_utf8(&output)
+            .expect("output UTF-8")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("response"))
+            .collect();
+        assert_eq!(responses.len(), 3);
+        for response in &responses[..2] {
+            assert_eq!(response.id, 0);
+            assert!(
+                response
+                    .error
+                    .as_ref()
+                    .unwrap()
+                    .message
+                    .contains("invalid session-json")
+            );
+        }
+        assert_eq!(responses[2].id, 3);
+        assert_eq!(responses[2].result, before);
+        assert!(
+            service
+                .handle(&rpc(4, "verifyReplay", json!({})))
+                .error
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn oversized_line_stops_at_existing_byte_limit() {
+        let mut service = SessionJsonService::new();
+        let mut output = Vec::new();
+        let input = std::io::repeat(b' ');
+        assert!(matches!(
+            service.serve(BufReader::new(input), &mut output),
+            Err(SessionJsonError::LineTooLarge)
+        ));
+        assert!(output.is_empty());
+        for ending in [b"\n".as_slice(), b"\r\n".as_slice(), b"".as_slice()] {
+            let mut input = vec![b' '; MAX_LINE_BYTES];
+            input.extend_from_slice(ending);
+            output.clear();
+            service
+                .serve(Cursor::new(input), &mut output)
+                .expect("exactly 16 MiB reaches JSON parser");
+            assert!(!output.is_empty());
+        }
     }
 
     #[test]

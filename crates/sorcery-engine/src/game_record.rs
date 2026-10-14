@@ -100,6 +100,12 @@ pub enum ReplayMismatch {
     SchemaVersion,
     /// Replayed receipts did not reproduce the recorded transcript hash.
     TranscriptHash,
+    /// Saved receipt contents differ from the authoritative replay.
+    TranscriptContents,
+    /// Saved outcome fields differ from the authoritative replay.
+    OutcomeContents,
+    /// Saved coverage fields differ from the authoritative replay.
+    CoverageContents,
 }
 
 /// Integer-canonical result of replaying one SIM-03 artifact directory.
@@ -303,7 +309,7 @@ pub fn write_game_artifacts(dir: &Path, record: &GameRecord) -> Result<(), GameR
     Ok(())
 }
 
-/// Replays `manifest.json` + `transcript.json` and checks recorded hashes.
+/// Replays `manifest.json` + `transcript.json` and checks every recorded artifact.
 ///
 /// Classifies engine, schema, authority, identity, transcript, event, and
 /// state mismatches instead of treating them as a silent success.
@@ -315,8 +321,10 @@ pub fn write_game_artifacts(dir: &Path, record: &GameRecord) -> Result<(), GameR
 pub fn replay_game_artifacts(dir: &Path) -> Result<ArtifactReplayReport, GameRecordError> {
     validate_artifacts_dir(dir)?;
     let manifest = read_artifact_json(dir, "manifest.json")?;
-    let transcript = read_transcript(dir)?;
+    let transcript_value = read_artifact_json(dir, "transcript.json")?;
+    let transcript: Vec<Receipt> = serde_json::from_value(transcript_value.clone())?;
     let outcome = read_artifact_json(dir, "outcome.json")?;
+    let coverage = read_artifact_json(dir, "coverage.json")?;
     let events_hash = hash_events_file(dir)?;
     if let Some(mismatch) = manifest_version_mismatch(&manifest) {
         return Ok(mismatch_report(mismatch));
@@ -337,7 +345,14 @@ pub fn replay_game_artifacts(dir: &Path) -> Result<ArtifactReplayReport, GameRec
         Err(error) => return Err(error.into()),
     };
     let record = game_record_from_session(&replayed)?;
-    Ok(compare_replay(&record, &manifest, &outcome, &events_hash))
+    compare_replay(
+        &record,
+        &manifest,
+        &outcome,
+        &events_hash,
+        &transcript_value,
+        &coverage,
+    )
 }
 
 /// Builds an inspectable step list from one authoritative transcript.
@@ -450,7 +465,9 @@ fn compare_replay(
     manifest: &Value,
     outcome: &Value,
     events_file_hash: &IdentityHash,
-) -> ArtifactReplayReport {
+    transcript: &Value,
+    coverage: &Value,
+) -> Result<ArtifactReplayReport, GameRecordError> {
     let recorded_authority = manifest_authority_hash(manifest);
     let replayed_authority = manifest_authority_hash(&record.manifest);
     let mismatch = if recorded_authority != replayed_authority {
@@ -470,6 +487,12 @@ fn compare_replay(
         != Some(record.final_state_hash.as_str())
     {
         Some(ReplayMismatch::FinalStateHash)
+    } else if transcript != &serde_json::to_value(&record.transcript)? {
+        Some(ReplayMismatch::TranscriptContents)
+    } else if outcome != &serde_json::to_value(record.outcome_artifact())? {
+        Some(ReplayMismatch::OutcomeContents)
+    } else if coverage != &serde_json::to_value(&record.coverage)? {
+        Some(ReplayMismatch::CoverageContents)
     } else {
         None
     };
@@ -490,14 +513,14 @@ fn compare_replay(
             eligibility_policy_for_manifest(manifest),
         )
     };
-    ArtifactReplayReport {
+    Ok(ArtifactReplayReport {
         classification: eligibility.classification,
         eligibility,
         matched,
         mismatch,
         replay_verified: matched,
         schema_version: 1,
-    }
+    })
 }
 
 fn read_artifact_json(dir: &Path, name: &str) -> Result<Value, GameRecordError> {
@@ -978,6 +1001,146 @@ mod tests {
         assert!(!state.matched);
         assert_eq!(state.mismatch, Some(ReplayMismatch::FinalStateHash));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn artifact_replay_checks_full_receipts_outcome_and_coverage() {
+        let record = record_synthetic_demo(31).expect("record");
+        let dir =
+            std::env::temp_dir().join(format!("sorcery-artifact-contents-{}", std::process::id()));
+        let cases = [
+            (
+                "outcome.json",
+                "/terminal/winner",
+                serde_json::json!("forged"),
+                ReplayMismatch::OutcomeContents,
+            ),
+            (
+                "outcome.json",
+                "/eligibility/ranked",
+                serde_json::json!(true),
+                ReplayMismatch::OutcomeContents,
+            ),
+            (
+                "outcome.json",
+                "/classification",
+                serde_json::json!("ranked"),
+                ReplayMismatch::OutcomeContents,
+            ),
+            (
+                "outcome.json",
+                "/acceptedActionCount",
+                serde_json::json!(0),
+                ReplayMismatch::OutcomeContents,
+            ),
+            (
+                "outcome.json",
+                "/turnCount",
+                serde_json::json!(0),
+                ReplayMismatch::OutcomeContents,
+            ),
+            (
+                "outcome.json",
+                "/schemaVersion",
+                serde_json::json!(99),
+                ReplayMismatch::OutcomeContents,
+            ),
+            (
+                "outcome.json",
+                "/replayVerified",
+                serde_json::json!(false),
+                ReplayMismatch::OutcomeContents,
+            ),
+            (
+                "transcript.json",
+                "/0/stateVersion",
+                serde_json::json!(999),
+                ReplayMismatch::TranscriptContents,
+            ),
+            (
+                "transcript.json",
+                "/0/events",
+                serde_json::json!([]),
+                ReplayMismatch::TranscriptContents,
+            ),
+            (
+                "coverage.json",
+                "/offeredActionKinds",
+                serde_json::json!([]),
+                ReplayMismatch::CoverageContents,
+            ),
+        ];
+        for (file, pointer, value, expected) in cases {
+            write_game_artifacts(&dir, &record).expect("restore");
+            let path = dir.join(file);
+            let mut changed: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+            let field = changed.pointer_mut(pointer).expect("existing field");
+            assert_ne!(*field, value, "fixture actually changes {pointer}");
+            *field = value;
+            fs::write(path, serde_json::to_string(&changed).unwrap()).unwrap();
+            let report = replay_game_artifacts(&dir).expect("classified mismatch");
+            assert_eq!(report.mismatch, Some(expected), "{file} {pointer}");
+            assert!(!report.matched && !report.replay_verified && !report.eligibility.ranked);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn artifact_replay_preserves_unknown_fields_and_rejects_missing_or_malformed_files() {
+        let record = record_synthetic_demo(31).expect("record");
+        let dir =
+            std::env::temp_dir().join(format!("sorcery-artifact-extras-{}", std::process::id()));
+        write_game_artifacts(&dir, &record).expect("restore");
+        let mut transcript = serde_json::to_value(&record.transcript).unwrap();
+        transcript[0]["unverifiedMetadata"] = serde_json::json!("forged");
+        fs::write(
+            dir.join("transcript.json"),
+            serde_json::to_string(&transcript).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            replay_game_artifacts(&dir).unwrap().mismatch,
+            Some(ReplayMismatch::TranscriptContents)
+        );
+
+        write_game_artifacts(&dir, &record).expect("restore");
+        let mut transcript = serde_json::to_value(&record.transcript).unwrap();
+        transcript[0]["actionId"] = serde_json::json!(
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+        fs::write(
+            dir.join("transcript.json"),
+            serde_json::to_string(&transcript).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            replay_game_artifacts(&dir).unwrap().mismatch,
+            Some(ReplayMismatch::ReplayRejected)
+        );
+
+        write_game_artifacts(&dir, &record).expect("restore");
+        fs::remove_file(dir.join("coverage.json")).unwrap();
+        assert!(replay_game_artifacts(&dir).is_err());
+        write_game_artifacts(&dir, &record).expect("restore");
+        fs::write(dir.join("outcome.json"), "{invalid").unwrap();
+        assert!(replay_game_artifacts(&dir).is_err());
+
+        // Formatting differences carry no semantic changes.
+        write_game_artifacts(&dir, &record).expect("restore");
+        for file in [
+            "manifest.json",
+            "transcript.json",
+            "outcome.json",
+            "coverage.json",
+        ] {
+            let path = dir.join(file);
+            let value: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+            fs::write(path, serde_json::to_string_pretty(&value).unwrap()).unwrap();
+        }
+        assert!(replay_game_artifacts(&dir).unwrap().matched);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

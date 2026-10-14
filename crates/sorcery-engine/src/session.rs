@@ -29,6 +29,10 @@ use crate::policy::{
 };
 use crate::simulator::SimulatorError;
 
+/// Maximum total accepted and rejected requests in a V1 session journal.
+/// At capacity the session remains readable, checkpointable, and replayable.
+pub const SESSION_MAX_ATTEMPTS: usize = 1_000;
+
 /// An accepted receipt or stable rejection.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StepResult {
@@ -61,6 +65,10 @@ pub enum SessionError {
     Json(serde_json::Error),
     /// A replayed action was rejected.
     ReplayRejected(RejectionCode),
+    /// Request shape cannot be recorded in a V1 checkpoint.
+    InvalidRequest(&'static str),
+    /// The V1 request journal is full; no further steps can be recorded.
+    AttemptLimitReached,
     /// A journal sequence exhausted its supported range.
     SequenceExhausted,
     /// The deterministic policy could not select a legal action.
@@ -76,6 +84,11 @@ impl fmt::Display for SessionError {
             Self::Canonical(error) => error.fmt(formatter),
             Self::Json(error) => error.fmt(formatter),
             Self::ReplayRejected(code) => write!(formatter, "replay rejected action: {code:?}"),
+            Self::InvalidRequest(message) => write!(formatter, "invalid action request: {message}"),
+            Self::AttemptLimitReached => write!(
+                formatter,
+                "session request limit of {SESSION_MAX_ATTEMPTS} reached"
+            ),
             Self::SequenceExhausted => formatter.write_str("session journal sequence exhausted"),
             Self::Policy(error) => error.fmt(formatter),
             Self::Novelty { message } => formatter.write_str(message),
@@ -89,7 +102,11 @@ impl Error for SessionError {
             Self::Game(error) => Some(error),
             Self::Canonical(error) => Some(error),
             Self::Json(error) => Some(error),
-            Self::ReplayRejected(_) | Self::SequenceExhausted | Self::Novelty { .. } => None,
+            Self::ReplayRejected(_)
+            | Self::InvalidRequest(_)
+            | Self::AttemptLimitReached
+            | Self::SequenceExhausted
+            | Self::Novelty { .. } => None,
             Self::Policy(error) => Some(error),
         }
     }
@@ -323,11 +340,16 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// Returns [`SessionError`] when authoritative hashing or receipt creation fails.
+    /// Returns [`SessionError`] without mutation for malformed requests or a full V1
+    /// request journal, or when authoritative hashing or receipt creation fails.
     /// Receipt-construction errors after a successful engine transition retain their
     /// existing non-transactional behavior; only unsupported resolution aborts the session.
     pub fn step(&mut self, request: ActionRequest) -> Result<StepResult, SessionError> {
         self.ensure_active()?;
+        request.validate().map_err(SessionError::InvalidRequest)?;
+        if self.attempts.len() >= SESSION_MAX_ATTEMPTS {
+            return Err(SessionError::AttemptLimitReached);
+        }
         let state_version = self.game.position().state_version();
         let state_hash = self.state_hash.clone();
         if request.state_version != state_version {

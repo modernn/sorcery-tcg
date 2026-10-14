@@ -10472,6 +10472,7 @@ impl Game {
             Some(&mut random_draws),
             None,
         )?;
+        self.ensure_supported_decision()?;
         Ok(self)
     }
 
@@ -10504,12 +10505,32 @@ impl Game {
         // Borrowed callers retain a usable game on error. Owned rollouts and internal
         // continuations do not need this snapshot.
         let before = self.position.clone();
-        let result = self.apply_action_with_log(action, outcomes, Some(random_draws), None);
+        let result = self
+            .apply_action_with_log(action, outcomes, Some(random_draws), None)
+            .and_then(|()| self.ensure_supported_decision());
         if result.is_err() {
             self.position = before;
         }
         // Both public callers keep their logs local and return none of them on failure.
         result
+    }
+
+    /// Do not commit a settled decision whose required strike cannot be enumerated.
+    /// Check after settlement, inside borrowed rollback or before returning an owned game.
+    fn ensure_supported_decision(&self) -> Result<(), GameError> {
+        if self.position.phase == Phase::Allocate {
+            let pending = self
+                .position
+                .pending_combat
+                .as_ref()
+                .ok_or(GameError::IllegalAction)?;
+            self.combatant_strike_stats(
+                pending.attacker_kind,
+                pending.attacking_seat,
+                &pending.attacker_instance_id,
+            )?;
+        }
+        Ok(())
     }
 
     #[expect(
@@ -33160,6 +33181,154 @@ mod tests {
             game.legal_actions().expect("recorded restored actions"),
             actions
         );
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one synthetic combat setup compares all three public apply modes"
+    )]
+    fn close_intercept_allocate_preflight_matches_borrowed_recorded_and_owned() {
+        let manifest = crate::synthetic::selfplay_manifest_with(31, |manifest| {
+            for ordinal in 1..=50 {
+                manifest["cards"][format!("south-spell-{ordinal}")] = json!({
+                    "attack": 2,
+                    "cardType": "minion",
+                    "defense": 3,
+                    "manaCost": 0,
+                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                });
+            }
+        });
+        let mut supported = Game::from_manifest_json(&manifest).unwrap();
+        let attacker_card = supported.position.players[seat_index(Seat::South)]
+            .hand_spellbook
+            .remove(0);
+        let attacker_id = attacker_card.instance_id.clone();
+        supported.position.units.push(
+            SummonPlacement {
+                card: attacker_card,
+                controller: Seat::South,
+                lance_count: 0,
+                location: Cell::parse("C3").unwrap(),
+                occupied_cells: None,
+                region: Region::Surface,
+                stealthed: false,
+                warded: false,
+            }
+            .into_unit(),
+        );
+        let second_card = supported.position.players[seat_index(Seat::South)]
+            .hand_spellbook
+            .remove(0);
+        let defender_id = second_card.instance_id.clone();
+        supported.position.units.push(
+            SummonPlacement {
+                card: second_card,
+                controller: Seat::North,
+                lance_count: 0,
+                location: Cell::parse("C3").unwrap(),
+                occupied_cells: None,
+                region: Region::Surface,
+                stealthed: false,
+                warded: false,
+            }
+            .into_unit(),
+        );
+        let avatar_id = supported.position.players[seat_index(Seat::North)]
+            .avatar
+            .card
+            .instance_id
+            .clone();
+        let site = supported.position.players[seat_index(Seat::South)]
+            .hand_atlas
+            .remove(0);
+        supported.position.sites[Cell::parse("C3").unwrap().index()] = Some(SitePosition {
+            card: site,
+            controller: Seat::South,
+            last_flight_turn: None,
+            warded: false,
+        });
+        supported.position.players[seat_index(Seat::North)]
+            .avatar
+            .location = Cell::parse("C3").unwrap();
+        supported.position.phase = Phase::Intercept;
+        supported.position.decision_seat = Seat::North;
+        supported.position.pending_combat = Some(PendingCombat {
+            allocations: Vec::new(),
+            attacker_instance_id: attacker_id.clone(),
+            attacker_kind: UnitKind::Minion,
+            attacking_seat: Seat::South,
+            cell: Cell::parse("C3").unwrap(),
+            combatants: Vec::new(),
+            defenders: vec![
+                UnitTarget::Avatar {
+                    instance_id: avatar_id,
+                    seat: Seat::North,
+                },
+                UnitTarget::Minion {
+                    instance_id: defender_id,
+                    seat: Seat::North,
+                },
+            ],
+            original_target: None,
+            region: Region::Surface,
+            target_removed: false,
+        });
+        assert!(matches!(
+            supported.rules.cards[usize::from(supported.position.units[0].card.card_id.0)].facts,
+            CardFacts::Minion(_)
+        ));
+        supported
+            .combatant_strike_stats(UnitKind::Minion, Seat::South, &attacker_id)
+            .expect("attacker strike before close");
+        let mut unsupported = supported.clone();
+        let close = |game: &Game| {
+            game.legal_actions()
+                .unwrap()
+                .into_iter()
+                .find(|action| matches!(action.descriptor, ActionDescriptor::CloseIntercept {}))
+                .unwrap()
+        };
+        let supported_action = close(&supported);
+        let mut supported_recorded = supported.clone();
+        supported_recorded
+            .apply_action_recorded(&supported_action)
+            .unwrap();
+        let supported_owned = supported
+            .clone()
+            .apply_action_owned(&supported_action)
+            .unwrap();
+        supported.apply_action(&supported_action).unwrap();
+        assert_eq!(supported.position, supported_recorded.position);
+        assert_eq!(supported.position, supported_owned.position);
+        assert_eq!(supported.position.phase, Phase::Allocate);
+        assert!(supported.legal_actions().is_ok());
+
+        unsupported.position.units[0].carried_lance_count = 1;
+        unsupported.position.units[0].temporary_modifiers.grant(
+            TemporaryModifierKind::NextStrikeDouble,
+            1,
+            attacker_id,
+        );
+        let action = close(&unsupported);
+        let before = unsupported.position.clone();
+        let expected = "additive and doubling strike modifiers require a damage-order choice";
+        let mut unsupported_recorded = unsupported.clone();
+        assert!(matches!(
+            unsupported.clone().apply_action_owned(&action),
+            Err(GameError::UnsupportedMechanic(reason)) if reason == expected
+        ));
+        assert!(matches!(
+            unsupported_recorded.apply_action_recorded(&action),
+            Err(GameError::UnsupportedMechanic(reason)) if reason == expected
+        ));
+        assert_eq!(unsupported_recorded.position, before);
+        assert!(matches!(
+            unsupported.apply_action(&action),
+            Err(GameError::UnsupportedMechanic(reason)) if reason == expected
+        ));
+        assert_eq!(unsupported.position, before);
     }
 
     #[test]

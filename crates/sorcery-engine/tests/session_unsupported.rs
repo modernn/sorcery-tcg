@@ -162,6 +162,10 @@ fn session_json_cannot_continue_or_export_after_unsupported_transition() {
     let mut service = SessionJsonService::new();
     let resume = json!({ "checkpoint": checkpoint });
     assert!(rpc(&mut service, "resume", &resume)["error"].is_null());
+    assert_eq!(
+        rpc(&mut service, "legalActions", &json!({ "seat": "south" }))["result"],
+        json!({ "actions": [] })
+    );
     let view = rpc(&mut service, "publicView", &json!({ "seat": "north" }));
     let failed = rpc(&mut service, "step", &json!(rain));
     assert!(
@@ -172,6 +176,12 @@ fn session_json_cannot_continue_or_export_after_unsupported_transition() {
     );
     let continued = rpc(&mut service, "step", &json!(end_turn));
     assert_eq!(continued["error"], failed["error"]);
+    for seat in ["north", "south"] {
+        assert_eq!(
+            rpc(&mut service, "legalActions", &json!({ "seat": seat }))["error"],
+            failed["error"]
+        );
+    }
     for method in [
         "checkpoint",
         "exportSession",

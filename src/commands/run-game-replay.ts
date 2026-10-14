@@ -22,7 +22,10 @@ export type ReplayMismatch =
   | 'manifest-identity'
   | 'replay-rejected'
   | 'schema-version'
-  | 'transcript-hash';
+  | 'transcript-hash'
+  | 'transcript-contents'
+  | 'outcome-contents'
+  | 'coverage-contents';
 
 export type ArtifactReplayReport = Readonly<{
   classification: BatchClassification;
@@ -42,6 +45,9 @@ const MISMATCHES = new Set<ReplayMismatch>([
   'replay-rejected',
   'schema-version',
   'transcript-hash',
+  'transcript-contents',
+  'outcome-contents',
+  'coverage-contents',
 ]);
 
 function parseReplay(value: unknown): ArtifactReplayReport {
