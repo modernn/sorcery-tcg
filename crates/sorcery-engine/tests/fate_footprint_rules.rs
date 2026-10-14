@@ -1,12 +1,8 @@
 //! Direct proofs that Fate Genesis submerges 2×2 occupants of an affected site
 //! (RULE-CATALOG-0355–0356).
 //!
-//! Fate already collects surface occupants by occupancy. It then required the
-//! whole footprint to exist underwater before submerging. A B3-anchored square
-//! occupying C3 was skipped when the rest of the square was land, so Fate left
-//! it on the surface. Submerge every occupant of the affected site; occupancy
-//! then kills illegal underwater footprints. An all-Water square with Submerge
-//! still survives. Fate must not cover C4 while the Avatar stands there.
+//! Forced submerge requires underwater locations across the entire occupied footprint.
+//! Mixed Land/Water squares remain at the surface; all-Water squares submerge once.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -397,17 +393,20 @@ fn cast_fate_on_c3(session: &mut Session) -> Receipt {
 }
 
 #[test]
-fn rule_catalog_0355_fate_submerges_mixed_square_occupying_affected_site() {
+fn rule_catalog_0355_fate_cannot_submerge_mixed_square_occupying_affected_site() {
     let mut session = mixed_opening();
     establish_square(&mut session, "north-earth", "north-special");
     let giant_id = summon_b3_square(&mut session);
     let receipt = cast_fate_on_c3(&mut session);
     assert!(event_types(&receipt).contains(&"aura-conjured"));
-    assert!(event_types(&receipt).contains(&"minion-submerged"));
-    assert!(event_types(&receipt).contains(&"minion-died"));
+    assert!(!event_types(&receipt).contains(&"minion-submerged"));
+    assert!(!event_types(&receipt).contains(&"minion-died"));
+    assert!(!event_types(&receipt).contains(&"minion-banished"));
     let current = state(&session);
-    assert!(realm_unit(&current, &giant_id).is_none());
-    assert!(cemetery_has(&current, &giant_id));
+    let occupant = realm_unit(&current, &giant_id).expect("mixed footprint remains at Surface");
+    assert_eq!(occupant["region"], "surface");
+    assert_eq!(occupant["occupiedCells"], json!(["B3", "B4", "C3", "C4"]));
+    assert!(!cemetery_has(&current, &giant_id));
     assert_exact_replay(&session);
 }
 

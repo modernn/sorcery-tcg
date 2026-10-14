@@ -94,13 +94,13 @@ fn flooded_and_water_only_overlays_preserve_existing_water_multiplicity() {
 }
 
 #[test]
-fn drought_removes_only_water_and_later_overlays_restore_printed_counts() {
+fn drought_then_flood_uses_current_water_and_removal_restores_printed_counts() {
     let mut game = fixture(&["earth", "water"], Some(counts(2, 0, 2, 0)));
     overlay(&mut game, "drought");
     assert_eq!(game.elemental_affinities(Seat::North), [2, 0, 0, 0]);
     assert!(game.is_land_site(Cell::parse("C4").unwrap()));
     overlay(&mut game, "flood");
-    assert_eq!(game.elemental_affinities(Seat::North), [2, 0, 2, 0]);
+    assert_eq!(game.elemental_affinities(Seat::North), [2, 0, 1, 0]);
     game.position.auras.clear();
     assert_eq!(game.elemental_affinities(Seat::North), [2, 0, 2, 0]);
 }

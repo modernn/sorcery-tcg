@@ -9432,51 +9432,48 @@ impl Game {
         self.surface_location_exists(cell) && !self.is_water_site(cell)
     }
 
-    /// Later-timestamp terrain overlay on a Site or Rubble location, if any Aura covers it.
-    fn site_water_overlay(&self, cell: Cell) -> SiteWaterOverlay {
-        let (ordinary, protected) = match self.position.sites[cell.index()].as_ref() {
-            Some(site) => {
-                let CardFacts::Site(facts) =
-                    &self.rules.cards[usize::from(site.card.card_id.0)].facts
-                else {
-                    return SiteWaterOverlay::None;
-                };
-                (facts.ordinary, facts.cannot_be_moved_destroyed_or_modified)
+    /// Eligible terrain overlays in passive realm-entry order, starting at printed values.
+    fn site_water_overlays(&self, cell: Cell) -> impl Iterator<Item = SiteWaterOverlay> + '_ {
+        let (initial, ordinary, protected) = match self.position.sites[cell.index()].as_ref() {
+            Some(site) => match &self.rules.cards[usize::from(site.card.card_id.0)].facts {
+                CardFacts::Site(facts) => (
+                    SiteWaterOverlay::Printed,
+                    facts.ordinary,
+                    facts.cannot_be_moved_destroyed_or_modified,
+                ),
+                _ => (SiteWaterOverlay::None, false, true),
+            },
+            None if self.position.rubble[cell.index()].is_some() => {
+                (SiteWaterOverlay::Printed, true, false)
             }
-            None if self.position.rubble[cell.index()].is_some() => (true, false),
-            None => return SiteWaterOverlay::None,
+            None => (SiteWaterOverlay::None, false, true),
         };
-        if protected {
-            return SiteWaterOverlay::Printed;
-        }
-        let mut overlay = SiteWaterOverlay::Printed;
-        for aura in &self.position.auras {
-            if !aura.cells.contains(&cell) {
-                continue;
+        std::iter::once(initial).chain(self.position.auras.iter().filter_map(move |aura| {
+            if protected || !aura.cells.contains(&cell) {
+                return None;
             }
-            let CardFacts::Aura(aura_facts) =
-                &self.rules.cards[usize::from(aura.card.card_id.0)].facts
-            else {
-                continue;
+            let CardFacts::Aura(facts) = &self.rules.cards[usize::from(aura.card.card_id.0)].facts else {
+                return None;
             };
-            match aura_facts.effect {
-                AuraEffect::AffectedSitesAreFlooded => overlay = SiteWaterOverlay::Flooded,
-                AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold => {
-                    overlay = SiteWaterOverlay::Drought;
-                }
+            match facts.effect {
+                AuraEffect::AffectedSitesAreFlooded => Some(SiteWaterOverlay::Flooded),
+                AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold => Some(SiteWaterOverlay::Drought),
                 AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
-                    if !ordinary =>
-                {
-                    overlay = SiteWaterOverlay::Fate;
-                }
+                    if !ordinary => Some(SiteWaterOverlay::Fate),
                 AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
                 | AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
                 | AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
                 | AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
-                | AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns => {}
+                | AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns => None,
             }
-        }
-        overlay
+        }))
+    }
+
+    /// Later-timestamp terrain overlay on a Site or Rubble location, if any Aura covers it.
+    fn site_water_overlay(&self, cell: Cell) -> SiteWaterOverlay {
+        self.site_water_overlays(cell)
+            .last()
+            .unwrap_or(SiteWaterOverlay::None)
     }
 
     /// Official Fate is a Lose effect: a covered non-Ordinary site has no printed abilities.
@@ -9886,20 +9883,21 @@ impl Game {
         affinities
     }
 
-    fn effective_site_affinity(&self, cell: Cell, mut printed: [u8; 4]) -> [u8; 4] {
-        match self.site_water_overlay(cell) {
-            SiteWaterOverlay::Fate => [0, 0, printed[2].max(1), 0],
-            SiteWaterOverlay::Flooded => {
-                printed[2] = printed[2].max(1);
-                printed
-            }
-            SiteWaterOverlay::Drought => {
-                printed[2] = 0;
-                printed
-            }
-            SiteWaterOverlay::Printed => printed,
-            SiteWaterOverlay::None => [0; 4],
-        }
+    fn effective_site_affinity(&self, cell: Cell, printed: [u8; 4]) -> [u8; 4] {
+        self.site_water_overlays(cell)
+            .fold(printed, |mut current, overlay| match overlay {
+                SiteWaterOverlay::Fate => [0, 0, current[2].max(1), 0],
+                SiteWaterOverlay::Flooded => {
+                    current[2] = current[2].max(1);
+                    current
+                }
+                SiteWaterOverlay::Drought => {
+                    current[2] = 0;
+                    current
+                }
+                SiteWaterOverlay::Printed => current,
+                SiteWaterOverlay::None => [0; 4],
+            })
     }
 
     fn thresholds_met(&self, seat: Seat, thresholds: Thresholds) -> bool {
@@ -18505,8 +18503,8 @@ impl Game {
         Ok(())
     }
 
-    /// Official Fate Genesis submerges minions and loose Artifacts atop affected non-Ordinary sites.
-    /// Occupancy, not the anchor cell, decides who is atop a site. Mixed footprints die afterwards.
+    /// Fate Genesis includes Ordinary sites; each occupant must have an underwater destination.
+    /// Occupancy, not the anchor cell, decides who is atop an affected site.
     fn apply_atlantean_fate_genesis(
         &mut self,
         cells: &[Cell],
@@ -18525,11 +18523,7 @@ impl Game {
     ) -> (BTreeSet<IdentityHash>, BTreeSet<IdentityHash>) {
         let mut minion_ids = BTreeSet::new();
         let mut artifact_ids = BTreeSet::new();
-        for cell in cells
-            .iter()
-            .copied()
-            .filter(|cell| self.site_abilities_lost(*cell))
-        {
+        for cell in cells.iter().copied() {
             for unit in &self.position.units {
                 if unit.region == Region::Surface && Self::unit_occupies_cell(unit, cell) {
                     minion_ids.insert(unit.card.instance_id.clone());
@@ -18563,10 +18557,12 @@ impl Game {
             else {
                 continue;
             };
-            // Every surface occupant of an affected site is submerged. A 2x2 that
-            // also covers land is still at this site; occupancy then kills the
-            // illegal underwater footprint instead of leaving the minion unharmed.
-            if self.position.units[index].region != Region::Surface {
+            // Forced submerge fails if any occupied cell has no underwater location.
+            if self.position.units[index].region != Region::Surface
+                || !Self::unit_occupied_cells(&self.position.units[index])
+                    .iter()
+                    .all(|cell| self.location_exists_in_region(*cell, Region::Underwater))
+            {
                 continue;
             }
             self.position.units[index].region = Region::Underwater;

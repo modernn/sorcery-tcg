@@ -7810,7 +7810,7 @@
         "RULE-02",
         "RULE-05"
       ],
-      "plainLanguage": "Fate Genesis submerges every surface minion that occupies an affected non-Ordinary site. A 2×2 square that occupies that cell and also covers land is still hit. Occupancy then kills the illegal underwater footprint. The minion does not stay on the surface unharmed.",
+      "plainLanguage": "Fate Genesis selects Surface minions occupying affected cells, including Ordinary sites. Forced submerge requires an Underwater location throughout the occupied footprint. A mixed Land/Water square remains at Surface without a submerge or death event.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
@@ -7821,13 +7821,11 @@
         "summon"
       ],
       "eventHints": [
-        "aura-conjured",
-        "minion-submerged",
-        "minion-died"
+        "aura-conjured"
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/fate_footprint_rules.rs",
-        "testName": "rule_catalog_0355_fate_submerges_mixed_square_occupying_affected_site"
+        "testName": "rule_catalog_0355_fate_cannot_submerge_mixed_square_occupying_affected_site"
       }
     },
     {
