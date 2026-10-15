@@ -237,6 +237,7 @@ impl Game {
         }
         for artifact in &self.position.artifacts {
             if artifact.carried_by(kind, striker.seat(), striker.instance_id())
+                && self.artifact_source_active(artifact)
                 && let Some(modifier) = self.artifact_facts(artifact)?.bearer_unit_strike
                 && modifier.damage_bonus > 0
             {

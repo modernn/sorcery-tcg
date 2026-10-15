@@ -143,3 +143,34 @@ test('artifact characteristics reject noncanonical arrays and unsupported rarity
   assert.throws(() => createGameManifest(input({ ...base, subtypes: null } as never)), /subtypes/);
   assert.throws(() => createGameManifest(input({ ...base, rarity: null } as never)), /rarity/);
 });
+
+test('restricted bearer grants compose, clone and reject malformed fields at the boundary', () => {
+  const grant = ['water'] as const;
+  const base = { cardType: 'artifact' as const, bearerSpellcasterElements: grant, manaCost: null,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 }, token: true as const };
+  for (const source of [base, { ...base, bearerPowerBonus: 1 }]) {
+    const card = createGameManifest(input(source)).cards.token as Extract<GameCardDefinition, { cardType: 'artifact' }>;
+    assert.deepEqual(card.bearerSpellcasterElements, grant);
+    assert.notEqual(card.bearerSpellcasterElements, grant);
+  }
+  for (const invalid of [[], null, true, 1, ['water', 'water'], ['unknown']]) {
+    assert.throws(() => createGameManifest(input({ ...base, bearerSpellcasterElements: invalid } as never)), /bearerSpellcasterElements/);
+  }
+});
+
+test('positional suppression and conditional disability roundtrip as facts only', () => {
+  const base = input({ bearerPowerBonus: 1, cardType: 'artifact', manaCost: null, token: true,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 } });
+  const definitions: GameCardDefinition[] = [
+    { cardType: 'aura', manaCost: 1, silenceMinionsAtAffectedSites: true,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 1 } },
+    { cardType: 'aura', manaCost: 1, silenceAffectedSitesAndArtifactsThere: true,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 1 } },
+    { cardType: 'minion', attack: 4, defense: 4, manaCost: 4, disabledUnlessAdjacentAlliedSpellcaster: true,
+      thresholds: { air: 1, earth: 0, fire: 0, water: 0 } },
+  ];
+  for (const spell of definitions) {
+    const manifest = createGameManifest({ ...base, cards: { avatar: base.cards.avatar!, site: base.cards.site!, spell } });
+    assert.deepEqual(manifest.cards.spell, spell);
+  }
+});

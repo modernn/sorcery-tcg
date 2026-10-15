@@ -130,6 +130,7 @@ type BearerUnitStrike = Readonly<{
   firstStrike?: true;
 }>;
 type ArtifactCharacteristics = Readonly<{
+  bearerSpellcasterElements?: readonly GameElement[];
   bearerPowerBonus?: number;
   elements?: readonly GameElement[];
   rarity?: 'ordinary' | 'exceptional' | 'elite' | 'unique';
@@ -198,6 +199,27 @@ export type SiteCountQuery = Readonly<{
 }>;
 
 export type GameCardDefinition =
+  | Readonly<{
+    atEndOfControllerTurnUntapNearbyAllies?: never;
+    atEndOfEachTurnSiteControllerLosesLife?: never;
+    atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
+    bearerControllerChoosesExtraRandomOutcome?: never;
+    bearerUnitStrike?: BearerUnitStrike;
+    bearerSpellcasterElements: readonly GameElement[];
+    cardType: 'artifact';
+    cannotBeCarried?: true;
+    grantsBearerLethal?: never;
+    grantsBearerPower?: never;
+    manaCost: number | null;
+    nearbyMinionsMustAttackIfAble?: never;
+    nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
+    sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves?: never;
+    tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps?: never;
+    tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
+    tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
+    thresholds: GameThresholds;
+    token?: true;
+  }> & ArtifactCharacteristics
   | Readonly<{
     atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife?: never;
@@ -553,6 +575,22 @@ export type GameCardDefinition =
     atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent?: never;
     atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf?: never;
     cardType: 'aura';
+    silenceMinionsAtAffectedSites?: true;
+    silenceAffectedSitesAndArtifactsThere?: true;
+    immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns?: never;
+    manaCost: number;
+    thresholds: GameThresholds;
+  }>
+  | Readonly<{
+    affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities?: never;
+    affectedSitesAreFlooded?: never;
+    affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold?: never;
+    atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep?: never;
+    atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent?: never;
+    atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf?: never;
+    cardType: 'aura';
+    silenceMinionsAtAffectedSites?: true;
+    silenceAffectedSitesAndArtifactsThere?: true;
     immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns: true;
     manaCost: number;
     thresholds: GameThresholds;
@@ -565,6 +603,8 @@ export type GameCardDefinition =
     atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent?: never;
     atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf?: never;
     cardType: 'aura';
+    silenceMinionsAtAffectedSites?: true;
+    silenceAffectedSitesAndArtifactsThere?: true;
     immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns?: never;
     manaCost: number;
     thresholds: GameThresholds;
@@ -577,6 +617,8 @@ export type GameCardDefinition =
     atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent?: never;
     atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf: true;
     cardType: 'aura';
+    silenceMinionsAtAffectedSites?: true;
+    silenceAffectedSitesAndArtifactsThere?: true;
     immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns?: never;
     manaCost: number;
     thresholds: GameThresholds;
@@ -589,6 +631,8 @@ export type GameCardDefinition =
     atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent: 3;
     atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf?: never;
     cardType: 'aura';
+    silenceMinionsAtAffectedSites?: true;
+    silenceAffectedSitesAndArtifactsThere?: true;
     immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns?: never;
     manaCost: number;
     thresholds: GameThresholds;
@@ -601,6 +645,8 @@ export type GameCardDefinition =
     atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent?: never;
     atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf?: never;
     cardType: 'aura';
+    silenceMinionsAtAffectedSites?: true;
+    silenceAffectedSitesAndArtifactsThere?: true;
     immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns?: never;
     manaCost: number;
     thresholds: GameThresholds;
@@ -613,6 +659,8 @@ export type GameCardDefinition =
     atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent?: never;
     atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf?: never;
     cardType: 'aura';
+    silenceMinionsAtAffectedSites?: true;
+    silenceAffectedSitesAndArtifactsThere?: true;
     immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns?: never;
     manaCost: number;
     thresholds: GameThresholds;
@@ -625,6 +673,8 @@ export type GameCardDefinition =
     atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent?: never;
     atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf?: never;
     cardType: 'aura';
+    silenceMinionsAtAffectedSites?: true;
+    silenceAffectedSitesAndArtifactsThere?: true;
     immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns?: never;
     manaCost: number;
     thresholds: GameThresholds;
@@ -727,6 +777,7 @@ export type GameCardDefinition =
     attack: number;
     burrowing?: boolean;
     cardType: 'minion';
+    disabledUnlessAdjacentAlliedSpellcaster?: true;
     cannotAttackSites?: boolean;
     charge?: boolean;
     cannotDefend?: boolean;
@@ -1678,7 +1729,7 @@ function requireCardId(value: string, path: string): void {
 const SUPPORTED_CARD_FIELDS = {
   artifact: new Set(`
     bearerUnitStrike
-    bearerPowerBonus
+    bearerPowerBonus bearerSpellcasterElements
     atEndOfControllerTurnUntapNearbyAllies
     atEndOfEachTurnSiteControllerLosesLife
     cannotBeCarried
@@ -1700,7 +1751,7 @@ const SUPPORTED_CARD_FIELDS = {
     atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep
     atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent
     atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf cardType
-    immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns manaCost thresholds
+    immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns silenceMinionsAtAffectedSites silenceAffectedSitesAndArtifactsThere manaCost thresholds
   `.trim().split(/\s+/)),
   avatar: new Set(`
     attack cardType defense drawSpell earthSitePlayCreatesAdjacentRubble life
@@ -1734,7 +1785,7 @@ const SUPPORTED_CARD_FIELDS = {
     teleportNearbyAllyThenDrawCard teleportTargetMinionArtifactOrAuraOneDiagonal thresholds untapTargetMinion untapTargetMinionAfterDamage
   `.trim().split(/\s+/)),
   minion: new Set(`
-    airborne atEndOfControllerTurnControllerGainsLife atEndOfControllerTurnControllerLosesLife atEndOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnControllerGainsLife atStartOfControllerTurnControllerGainsMana atStartOfControllerTurnControllerLosesLife atStartOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnDrawSites atStartOfControllerTurnDrawSpells atStartOfControllerTurnLureNearbyEnemyMinion atStartOfControllerTurnMillSites atStartOfControllerTurnMillSpells atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
+    disabledUnlessAdjacentAlliedSpellcaster airborne atEndOfControllerTurnControllerGainsLife atEndOfControllerTurnControllerLosesLife atEndOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnControllerGainsLife atStartOfControllerTurnControllerGainsMana atStartOfControllerTurnControllerLosesLife atStartOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnDrawSites atStartOfControllerTurnDrawSpells atStartOfControllerTurnLureNearbyEnemyMinion atStartOfControllerTurnMillSites atStartOfControllerTurnMillSpells atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
     cannotAttackSites cannotDefend cannotDefendOrIntercept
     charge connectsTopBottom deathriteDamageEachUnitHere deathriteDrawSite deathriteDrawSpells deathriteHeal deathriteMillSites deathriteMillSpells
     deathriteLoseLifePerNearbySiteControlled defense discardRandomCardInsteadOfMana
@@ -2270,6 +2321,14 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
         throw new RangeError(`${path}.bearerUnitStrike.destroyAfterStrike must be true`);
       }
     }
+    if (card.bearerSpellcasterElements !== undefined) {
+      const grant = card.bearerSpellcasterElements;
+      if (!Array.isArray(grant) || grant.length === 0
+        || grant.some((element) => !elements.includes(element))
+        || grant.some((element, index) => index > 0 && elements.indexOf(element) <= elements.indexOf(grant[index - 1]!))) {
+        throw new RangeError(`${path}.bearerSpellcasterElements must contain unique elements in canonical order`);
+      }
+    }
     if (card.bearerPowerBonus !== undefined
       && (!Number.isSafeInteger(card.bearerPowerBonus)
         || card.bearerPowerBonus < 1 || card.bearerPowerBonus > MAX_COMBAT_STAT)) {
@@ -2377,6 +2436,7 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
       || (exclusiveArtifactEffects === 0 && maskArtifactEffects === 0
         && card.bearerUnitStrike === undefined
         && card.bearerPowerBonus === undefined
+        && card.bearerSpellcasterElements === undefined
         && card.grantsBearerPower === undefined)) {
       throw new RangeError(`${path} must define exactly one supported Artifact effect`);
     }
@@ -2394,6 +2454,9 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
     return;
   }
   if (card.cardType === 'aura') {
+    for (const field of ['silenceMinionsAtAffectedSites', 'silenceAffectedSitesAndArtifactsThere'] as const) {
+      if (card[field] !== undefined && card[field] !== true) throw new RangeError(`${path}.${field} must be true`);
+    }
     if (card.immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns !== undefined
       && card.immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns !== true) {
       throw new RangeError(
@@ -2434,7 +2497,9 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
         `${path}.affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities must be true`,
       );
     }
-    if (Number(card.immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns === true)
+    if (Number(card.silenceMinionsAtAffectedSites === true)
+      + Number(card.silenceAffectedSitesAndArtifactsThere === true)
+      + Number(card.immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns === true)
       + Number(card.atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3)
       + Number(card.atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf === true)
       + Number(card.atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent === 3)
@@ -2976,6 +3041,9 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
   if (card.cardType !== 'minion') throw new RangeError(`${path}.cardType is unsupported`);
   if (card.airborne !== undefined && typeof card.airborne !== 'boolean') {
     throw new RangeError(`${path}.airborne must be boolean`);
+  }
+  if (card.disabledUnlessAdjacentAlliedSpellcaster !== undefined && card.disabledUnlessAdjacentAlliedSpellcaster !== true) {
+    throw new RangeError(`${path}.disabledUnlessAdjacentAlliedSpellcaster must be true`);
   }
   if (card.charge !== undefined && typeof card.charge !== 'boolean') {
     throw new RangeError(`${path}.charge must be boolean`);
@@ -3633,6 +3701,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                                   : card.bearerUnitStrike !== undefined
                                     ? { bearerUnitStrike: { ...card.bearerUnitStrike } }
                                     : {}),
+            ...(card.bearerSpellcasterElements !== undefined
+              ? { bearerSpellcasterElements: [...card.bearerSpellcasterElements] } : {}),
             manaCost: card.manaCost,
             ...(card.rarity !== undefined ? { rarity: card.rarity } : {}),
             ...(card.subtypes !== undefined ? { subtypes: [...card.subtypes] } : {}),
@@ -3747,6 +3817,10 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                         affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities:
                           true as const,
                       }
+                    : card.silenceMinionsAtAffectedSites === true
+                      ? { silenceMinionsAtAffectedSites: true as const }
+                    : card.silenceAffectedSitesAndArtifactsThere === true
+                      ? { silenceAffectedSitesAndArtifactsThere: true as const }
                     : {
                       immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns:
                         true as const,
@@ -4012,6 +4086,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             attack: card.attack,
             ...(card.burrowing === true ? { burrowing: true } : {}),
             cardType: 'minion' as const,
+            ...(card.disabledUnlessAdjacentAlliedSpellcaster === true ? { disabledUnlessAdjacentAlliedSpellcaster: true as const } : {}),
             ...(card.genesisProgram !== undefined
               ? { genesisProgram: cloneEffectProgram(card.genesisProgram) }
               : {}),

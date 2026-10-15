@@ -32,6 +32,7 @@ mod ability;
 #[cfg(test)]
 mod bearer_strike_tests;
 mod choices;
+mod continuous;
 mod damage_order;
 #[cfg(test)]
 mod damage_order_tests;
@@ -1557,7 +1558,9 @@ fn unsupported_selfplay_fact(facts: &CardFacts) -> Option<&'static str> {
 
 const fn unsupported_selfplay_aura(facts: &AuraFacts) -> Option<&'static str> {
     match facts.effect {
-        AuraEffect::AffectedSitesAreFlooded
+        AuraEffect::SilenceMinionsAtAffectedSites
+        | AuraEffect::SilenceAffectedSitesAndArtifactsThere
+        | AuraEffect::AffectedSitesAreFlooded
         | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
         | AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
         | AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns
@@ -1765,6 +1768,7 @@ fn account_for_selfplay_site_fields(facts: &SiteFacts) {
 
 fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
     let MinionFacts {
+        disabled_unless_adjacent_allied_spellcaster: _,
         airborne: _,
         alternative_summon_payment: _,
         at_end_of_controller_turn_controller_gains_life: _,
@@ -1945,6 +1949,7 @@ impl Game {
             });
             card_ids.insert(id.clone(), CardId(id_number));
         }
+        continuous::ensure_suppression_context_supported(&cards)?;
         let canonical_cards_json = canonical_json(&Value::Object(
             cards
                 .iter()
@@ -2099,6 +2104,7 @@ impl Game {
     }
 
     pub(crate) fn ensure_selfplay_supported(&self) -> Result<(), GameError> {
+        continuous::ensure_suppression_context_supported(&self.rules.cards)?;
         for card in &self.rules.cards {
             if let Some(field) = unsupported_selfplay_fact(&card.facts) {
                 return Err(GameError::UnsupportedManifestFact(field.to_owned()));
@@ -2317,7 +2323,7 @@ impl Game {
                 if unit.death_marked {
                     value["deathMarked"] = json!(true);
                 }
-                if Self::minion_is_silenced(unit) {
+                if self.minion_is_silenced(unit) {
                     value["silenced"] = json!(true);
                 }
                 if unit.carried_lance_count > 0 {
@@ -3600,7 +3606,7 @@ impl Game {
                     site_facts.genesis_pay_one_mana_to_summon_token.as_deref()
                 {
                     let mut choices = vec![Some(GenesisTokenChoice::Decline)];
-                    if (site_facts.ordinary || !self.fate_covers_cell(*cell))
+                    if !self.site_facts_abilities_lost(*cell, site_facts)
                         && self.token_may_enter_played_site(
                             seat,
                             token_card_id,
@@ -4349,7 +4355,9 @@ impl Game {
             let Ok(facts) = self.artifact_facts(artifact) else {
                 return false;
             };
-            if facts.effect != ArtifactEffect::NearbyMinionsMustAttackIfAble {
+            if !self.artifact_source_active(artifact)
+                || facts.effect != ArtifactEffect::NearbyMinionsMustAttackIfAble
+            {
                 return false;
             }
             let Ok(location) = self.artifact_location(artifact) else {
@@ -4364,8 +4372,9 @@ impl Game {
         let Ok(facts) = self.artifact_facts(artifact) else {
             return false;
         };
-        facts.nearby_strikes_against_units_deal_double_damage
-            || facts.effect == ArtifactEffect::NearbyStrikesAgainstUnitsDealDoubleDamage
+        self.artifact_source_active(artifact)
+            && (facts.nearby_strikes_against_units_deal_double_damage
+                || facts.effect == ArtifactEffect::NearbyStrikesAgainstUnitsDealDoubleDamage)
     }
 
     fn nearby_unit_strike_multiplier(
@@ -5031,33 +5040,22 @@ impl Game {
     }
 
     fn spellcasters(&self, seat: Seat) -> Vec<(UnitKind, IdentityHash, Option<ElementSet>)> {
-        let player = &self.position.players[seat_index(seat)];
+        let view = continuous::EffectiveView::new(self);
         std::iter::once((
             UnitKind::Avatar,
-            player.avatar.card.instance_id.clone(),
+            self.position.players[seat_index(seat)]
+                .avatar
+                .card
+                .instance_id
+                .clone(),
             None,
         ))
         .chain(self.position.units.iter().filter_map(|unit| {
-            if unit.controller != seat || self.minion_abilities_lost(unit) {
+            if unit.controller != seat {
                 return None;
             }
-            let CardFacts::Minion(facts) =
-                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
-            else {
-                return None;
-            };
-            let atop_tower = self.minion_atop_tower(unit);
-            (facts.spellcaster || atop_tower).then(|| {
-                (
-                    UnitKind::Minion,
-                    unit.card.instance_id.clone(),
-                    if atop_tower {
-                        None
-                    } else {
-                        facts.spellcaster_elements
-                    },
-                )
-            })
+            view.caster(unit)
+                .map(|elements| (UnitKind::Minion, unit.card.instance_id.clone(), elements))
         }))
         .collect()
     }
@@ -5081,39 +5079,35 @@ impl Game {
         {
             return true;
         }
+        let view = continuous::EffectiveView::new(self);
         self.position.units.iter().any(|unit| {
-            if unit.controller != seat
-                || unit.card.instance_id != *instance_id
-                || self.minion_abilities_lost(unit)
-            {
-                return false;
-            }
-            let CardFacts::Minion(facts) =
-                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
-            else {
-                return false;
-            };
-            self.minion_atop_tower(unit)
-                || (facts.spellcaster
-                    && Self::caster_element_accepts(facts.spellcaster_elements, thresholds))
+            unit.controller == seat
+                && unit.card.instance_id == *instance_id
+                && view
+                    .caster(unit)
+                    .is_some_and(|elements| Self::caster_element_accepts(elements, thresholds))
         })
     }
 
     fn spellcaster_kind(&self, seat: Seat, instance_id: &IdentityHash) -> Option<UnitKind> {
-        let player = &self.position.players[seat_index(seat)];
-        if player.avatar.card.instance_id == *instance_id {
+        if self.position.players[seat_index(seat)]
+            .avatar
+            .card
+            .instance_id
+            == *instance_id
+        {
             return Some(UnitKind::Avatar);
         }
-        let unit = self.position.units.iter().find(|unit| {
-            unit.controller == seat
-                && unit.card.instance_id == *instance_id
-                && !self.minion_abilities_lost(unit)
-        })?;
-        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
-        else {
-            return None;
-        };
-        (facts.spellcaster || self.minion_atop_tower(unit)).then_some(UnitKind::Minion)
+        let view = continuous::EffectiveView::new(self);
+        self.position
+            .units
+            .iter()
+            .find(|unit| {
+                unit.controller == seat
+                    && unit.card.instance_id == *instance_id
+                    && view.caster(unit).is_some()
+            })
+            .map(|_| UnitKind::Minion)
     }
 
     fn append_artifact_actions(
@@ -5285,7 +5279,8 @@ impl Game {
         let Some(bearer) = artifact.bearer() else {
             return Ok(None);
         };
-        if bearer.seat() != seat
+        if !self.artifact_source_active(artifact)
+            || bearer.seat() != seat
             || self.artifact_facts(artifact)?.effect != effect
             || !self.unit_target_is_ready(bearer)?
         {
@@ -5437,7 +5432,7 @@ impl Game {
         ];
         let mut descriptors = Vec::new();
         for artifact in &self.position.artifacts {
-            if self.artifact_facts(artifact)?.effect
+            if !self.artifact_source_active(artifact) || self.artifact_facts(artifact)?.effect
                 != ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour
             {
                 continue;
@@ -5477,7 +5472,7 @@ impl Game {
         }
         let mut descriptors = Vec::new();
         for artifact in &self.position.artifacts {
-            if self.artifact_facts(artifact)?.effect
+            if !self.artifact_source_active(artifact) || self.artifact_facts(artifact)?.effect
                 != ArtifactEffect::SacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves
             {
                 continue;
@@ -5901,7 +5896,9 @@ impl Game {
     ) -> Result<u16, GameError> {
         let mut bonus = 0_u16;
         for artifact in &self.position.artifacts {
-            if !artifact.carried_by(kind, seat, instance_id) {
+            if !artifact.carried_by(kind, seat, instance_id)
+                || !self.artifact_source_active(artifact)
+            {
                 continue;
             }
             let facts = self.artifact_facts(artifact)?;
@@ -5926,6 +5923,7 @@ impl Game {
     ) -> Result<bool, GameError> {
         for artifact in &self.position.artifacts {
             if artifact.carried_by(kind, seat, instance_id)
+                && self.artifact_source_active(artifact)
                 && self.artifact_facts(artifact)?.effect == ArtifactEffect::GrantsBearerLethal
             {
                 return Ok(true);
@@ -5994,7 +5992,9 @@ impl Game {
             };
             if matches!(
                 facts.effect,
-                AuraEffect::AffectedSitesAreFlooded
+                AuraEffect::SilenceMinionsAtAffectedSites
+        | AuraEffect::SilenceAffectedSitesAndArtifactsThere
+        | AuraEffect::AffectedSitesAreFlooded
                     | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
                     | AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
                     | AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
@@ -6034,24 +6034,16 @@ impl Game {
     }
 
     fn minion_is_disabled(&self, unit: &UnitPosition) -> bool {
-        if unit.disabled_until_damaged || !unit.disable_effects.is_empty() {
-            return true;
-        }
-        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
-        else {
-            return true;
-        };
-        let occupied = Self::unit_occupied_cells(unit);
-        (facts.waterbound && !occupied.iter().any(|cell| self.is_water_site(*cell)))
-            || (facts.landbound && !occupied.iter().any(|cell| self.is_land_site(*cell)))
+        continuous::EffectiveView::new(self).disabled(unit)
     }
 
-    fn minion_is_silenced(unit: &UnitPosition) -> bool {
-        unit.temporary_modifiers.has(TemporaryModifierKind::Silence)
+    fn minion_is_silenced(&self, unit: &UnitPosition) -> bool {
+        continuous::EffectiveView::new(self).silenced(unit)
     }
 
     fn minion_abilities_lost(&self, unit: &UnitPosition) -> bool {
-        self.minion_is_disabled(unit) || Self::minion_is_silenced(unit)
+        let view = continuous::EffectiveView::new(self);
+        view.disabled(unit) || view.silenced(unit)
     }
 
     fn minion_has_active_stealth(&self, unit: &UnitPosition) -> bool {
@@ -6068,13 +6060,17 @@ impl Game {
 
     /// Reports whether an active surface minion stands on a Tower it can draw from.
     fn minion_atop_tower(&self, unit: &UnitPosition) -> bool {
+        !self.minion_abilities_lost(unit) && self.minion_atop_tower_geometry(unit)
+    }
+
+    /// Stage-three Tower condition, without recursively asking for conditional disability.
+    fn minion_atop_tower_geometry(&self, unit: &UnitPosition) -> bool {
         let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
         else {
             return false;
         };
         facts.gains_power_ranged_and_spellcaster_atop_tower
             && unit.region == Region::Surface
-            && !self.minion_abilities_lost(unit)
             && Self::unit_occupied_cells(unit).iter().any(|cell| {
                 self.position.sites[cell.index()]
                     .as_ref()
@@ -9084,14 +9080,17 @@ impl Game {
                 bonus = bonus.saturating_add(1);
             }
         }
-        if facts.gains_power_ranged_and_spellcaster_atop_tower
+        if region == Region::Surface
+            && facts.gains_power_ranged_and_spellcaster_atop_tower
+            && !continuous::EffectiveView::new(self).silenced_cells(
+                cells, incoming_site.map(|(cell, _)| cell))
             && cells.iter().any(|cell| {
                 if let Some((incoming_cell, site)) = incoming_site
                     && *cell == incoming_cell
                 {
                     return Self::site_qualifies_as_tower(
                         site,
-                        self.fate_covers_cell(*cell) && !site.ordinary,
+                        self.site_facts_abilities_lost(*cell, site),
                     );
                 }
                 self.position.sites[cell.index()]
@@ -9122,7 +9121,7 @@ impl Game {
             if let Some((incoming_cell, site)) = incoming_site
                 && *cell == incoming_cell
             {
-                return (site.ordinary || !self.fate_covers_cell(*cell))
+                return !self.site_facts_abilities_lost(*cell, site)
                     && site
                         .prevents_units_with_power_at_least_from_entering
                         .is_some();
@@ -9258,7 +9257,7 @@ impl Game {
             Region::Surface,
             Some((cell, site)),
         )?;
-        let abilities_lost = self.fate_covers_cell(cell) && !site.ordinary;
+        let abilities_lost = self.site_facts_abilities_lost(cell, site);
         Ok(cells.iter().all(|candidate| {
             if *candidate == cell {
                 abilities_lost
@@ -9546,7 +9545,9 @@ impl Game {
                 | AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
                 | AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
                 | AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
-                | AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns => None,
+                | AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns
+                | AuraEffect::SilenceMinionsAtAffectedSites
+                | AuraEffect::SilenceAffectedSitesAndArtifactsThere => None,
             }
         }))
     }
@@ -9560,7 +9561,20 @@ impl Game {
 
     /// Official Fate is a Lose effect: a covered non-Ordinary site has no printed abilities.
     fn site_abilities_lost(&self, cell: Cell) -> bool {
-        self.fate_covers_non_ordinary_site(cell)
+        self.position.sites[cell.index()]
+            .as_ref()
+            .is_some_and(|site| {
+                matches!(&self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                CardFacts::Site(facts) if self.site_facts_abilities_lost(cell, facts))
+            })
+    }
+
+    // Prospective site entry uses the incoming definition, before its placement exists.
+    fn site_facts_abilities_lost(&self, cell: Cell, facts: &SiteFacts) -> bool {
+        !facts.cannot_be_moved_destroyed_or_modified
+            && ((!facts.ordinary && self.fate_covers_cell(cell))
+                || continuous::EffectiveView::new(self)
+                    .aura_covers_cell(cell, AuraEffect::SilenceAffectedSitesAndArtifactsThere))
     }
 
     fn fate_covers_cell(&self, cell: Cell) -> bool {
@@ -9573,19 +9587,6 @@ impl Game {
                             == AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
                 )
         })
-    }
-
-    fn fate_covers_non_ordinary_site(&self, cell: Cell) -> bool {
-        let Some(site) = self.position.sites[cell.index()].as_ref() else {
-            return false;
-        };
-        let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
-        else {
-            return false;
-        };
-        !facts.cannot_be_moved_destroyed_or_modified
-            && !facts.ordinary
-            && self.fate_covers_cell(cell)
     }
 
     fn underground_location_exists(&self, cell: Cell) -> bool {
@@ -10009,7 +10010,9 @@ impl Game {
                     continue;
                 }
                 match facts.effect {
-                    AuraEffect::AffectedSitesAreFlooded
+                    AuraEffect::SilenceMinionsAtAffectedSites
+        | AuraEffect::SilenceAffectedSitesAndArtifactsThere
+        | AuraEffect::AffectedSitesAreFlooded
                     | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
                     | AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
                     | AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns
@@ -12838,6 +12841,7 @@ impl Game {
         let mut consumed_artifacts = Vec::new();
         for artifact in &self.position.artifacts {
             if artifact.carried_by(kind, seat, instance_id)
+                && self.artifact_source_active(artifact)
                 && let Some(modifier) = self.artifact_facts(artifact)?.bearer_unit_strike
             {
                 additive_bonus = additive_bonus
@@ -12920,6 +12924,7 @@ impl Game {
         // This ability belongs to the artifact; bearer silence does not silence its source.
         let carried_first = self.position.artifacts.iter().any(|artifact| {
             artifact.carried_by(kind, seat, instance_id)
+                && self.artifact_source_active(artifact)
                 && self.artifact_facts(artifact).is_ok_and(|facts| {
                     facts
                         .bearer_unit_strike
@@ -15447,7 +15452,7 @@ impl Game {
         card_id: CardId,
         facts: &SiteFacts,
     ) -> (Option<u8>, usize) {
-        if self.fate_covers_cell(cell) && !facts.ordinary {
+        if self.site_facts_abilities_lost(cell, facts) {
             return (None, 0);
         }
         let only_controlled_copy = facts.genesis_gain_mana_if_only_controlled_copy
@@ -15589,7 +15594,7 @@ impl Game {
             let token_card_id = genesis_token_card_id
                 .as_deref()
                 .ok_or(GameError::IllegalAction)?;
-            if (self.fate_covers_cell(cell) && !facts.ordinary)
+            if self.site_facts_abilities_lost(cell, &facts)
                 || !self.token_may_enter_played_site(seat, token_card_id, cell, &facts)?
             {
                 return Err(GameError::IllegalAction);
@@ -15742,7 +15747,7 @@ impl Game {
         let CardFacts::Site(facts) = self.rules.cards[usize::from(card_id.0)].facts.clone() else {
             return Err(GameError::IllegalAction);
         };
-        let abilities_lost = self.fate_covers_cell(cell) && !facts.ordinary;
+        let abilities_lost = self.site_facts_abilities_lost(cell, &facts);
         if !abilities_lost && facts.genesis_cast_minions_up_to_power_two_to_any_site_this_turn {
             let turn_number = self.position.turn_number;
             self.position.players[seat_index(seat)].cast_minions_up_to_power_two_to_any_site_turn =
@@ -18755,9 +18760,10 @@ impl Game {
             .artifacts
             .iter()
             .filter(|artifact| {
-                artifact
-                    .bearer()
-                    .is_some_and(|bearer| bearer.seat() == seat)
+                self.artifact_source_active(artifact)
+                    && artifact
+                        .bearer()
+                        .is_some_and(|bearer| bearer.seat() == seat)
                     && matches!(
                         &self.rules.cards[usize::from(artifact.card.card_id.0)].facts,
                         CardFacts::Artifact(facts)
@@ -20209,7 +20215,9 @@ impl Game {
                 aura.controller == ending_seat
             }
             AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree => true,
-            AuraEffect::AffectedSitesAreFlooded
+            AuraEffect::SilenceMinionsAtAffectedSites
+        | AuraEffect::SilenceAffectedSitesAndArtifactsThere
+        | AuraEffect::AffectedSitesAreFlooded
             | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
             | AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
             | AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
@@ -25521,7 +25529,10 @@ impl Game {
             .artifacts
             .iter()
             .filter_map(|artifact| match self.artifact_facts(artifact) {
-                Ok(facts) if facts.effect == ArtifactEffect::ReturnToOwnerHandAfterEachTurn => {
+                Ok(facts)
+                    if self.artifact_source_active(artifact)
+                        && facts.effect == ArtifactEffect::ReturnToOwnerHandAfterEachTurn =>
+                {
                     Some(self.artifact_return_trigger(artifact))
                 }
                 Ok(_) => None,
@@ -26272,7 +26283,7 @@ impl Game {
             ("tapped".to_owned(), json!(unit.tapped)),
             ("warded".to_owned(), json!(unit.warded)),
         ]);
-        if Self::minion_is_silenced(unit) {
+        if unit.temporary_modifiers.has(TemporaryModifierKind::Silence) {
             object.insert("silenced".to_owned(), json!(true));
         }
         if let Some(turn) = unit.last_dropped_artifacts_turn {
@@ -32295,6 +32306,7 @@ mod tests {
             .expect("unique fixture rules")
             .cards[usize::from(artifact_card.card_id.0)]
         .facts = CardFacts::Artifact(ArtifactFacts {
+            bearer_spellcaster_elements: None,
             bearer_power_bonus: None,
             bearer_unit_strike: None,
             cannot_be_carried: false,
@@ -32325,6 +32337,7 @@ mod tests {
             .expect("unique fixture rules")
             .cards[token_definition_index]
             .facts = CardFacts::Artifact(ArtifactFacts {
+            bearer_spellcaster_elements: None,
             bearer_power_bonus: None,
             bearer_unit_strike: None,
             cannot_be_carried: false,

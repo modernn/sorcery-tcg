@@ -268,6 +268,8 @@ pub struct BearerUnitStrike {
 pub struct ArtifactFacts {
     /// Total power this Artifact adds to each unit that carries it.
     pub bearer_power_bonus: Option<u8>,
+    /// Restricted casting permission supplied to the current bearer.
+    pub bearer_spellcaster_elements: Option<ElementSet>,
     pub bearer_unit_strike: Option<BearerUnitStrike>,
     pub cannot_be_carried: bool,
     pub elements: Option<ElementSet>,
@@ -284,6 +286,8 @@ pub struct ArtifactFacts {
 /// The single supported effect carried by an Aura.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AuraEffect {
+    SilenceMinionsAtAffectedSites,
+    SilenceAffectedSitesAndArtifactsThere,
     AffectedSitesAreFlooded,
     AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold,
     AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities,
@@ -463,6 +467,7 @@ pub struct NearbyDamagePrevention {
     reason = "named normalized rule facts avoid invalid Option<bool> states"
 )]
 pub struct MinionFacts {
+    pub disabled_unless_adjacent_allied_spellcaster: bool,
     pub airborne: bool,
     pub alternative_summon_payment: Option<AlternativeSummonPayment>,
     pub at_end_of_controller_turn_controller_gains_life: Option<u8>,
@@ -1028,6 +1033,7 @@ const ARTIFACT_FIELDS: &[&str] = &[
     "atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn",
     "bearerControllerChoosesExtraRandomOutcome",
     "bearerPowerBonus",
+    "bearerSpellcasterElements",
     "bearerUnitStrike",
     "cannotBeCarried",
     "cardType",
@@ -1049,6 +1055,8 @@ const ARTIFACT_FIELDS: &[&str] = &[
 ];
 
 const AURA_FIELDS: &[&str] = &[
+    "silenceMinionsAtAffectedSites",
+    "silenceAffectedSitesAndArtifactsThere",
     "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
     "affectedSitesAreFlooded",
     "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
@@ -1157,6 +1165,7 @@ const MAGIC_FIELDS: &[&str] = &[
 ];
 
 const MINION_FIELDS: &[&str] = &[
+    "disabledUnlessAdjacentAlliedSpellcaster",
     "airborne",
     "atEndOfControllerTurnControllerGainsLife",
     "atEndOfControllerTurnControllerLosesLife",
@@ -1575,6 +1584,16 @@ fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFac
             "grantsBearerPower and bearerPowerBonus cannot both be defined",
         ));
     }
+    let bearer_spellcaster_elements = object
+        .contains_key("bearerSpellcasterElements")
+        .then(|| parse_element_set(object, "bearerSpellcasterElements", path))
+        .transpose()?;
+    if bearer_spellcaster_elements == Some(ElementSet::empty()) {
+        return Err(FactError::new(
+            format!("{path}.bearerSpellcasterElements"),
+            "must contain at least one element",
+        ));
+    }
     let bearer_unit_strike = object
         .get("bearerUnitStrike")
         .map(|value| parse_bearer_unit_strike(value, path))
@@ -1670,6 +1689,7 @@ fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFac
         && !nearby_double
         && bearer_unit_strike.is_none()
         && bearer_power_bonus.is_none()
+        && bearer_spellcaster_elements.is_none()
     {
         return Err(FactError::new(
             path,
@@ -1687,6 +1707,7 @@ fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFac
     };
     Ok(ArtifactFacts {
         bearer_power_bonus: bearer_power_bonus.or(legacy_bearer_power.then_some(2)),
+        bearer_spellcaster_elements,
         bearer_unit_strike,
         cannot_be_carried: true_only(object, "cannotBeCarried", path)?,
         elements,
@@ -1738,6 +1759,8 @@ fn parse_aura(object: &Map<String, Value>, path: &str) -> Result<AuraFacts, Fact
     reject_unknown(object, AURA_FIELDS, path)?;
     let effect = one_effect(
         [
+            true_only(object, "silenceMinionsAtAffectedSites", path)?.then_some(AuraEffect::SilenceMinionsAtAffectedSites),
+            true_only(object, "silenceAffectedSitesAndArtifactsThere", path)?.then_some(AuraEffect::SilenceAffectedSitesAndArtifactsThere),
             true_only(object, "affectedSitesAreFlooded", path)?
                 .then_some(AuraEffect::AffectedSitesAreFlooded),
             true_only(
@@ -2618,6 +2641,11 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     )?
     .map(compact_u8);
     Ok(MinionFacts {
+        disabled_unless_adjacent_allied_spellcaster: true_only(
+            object,
+            "disabledUnlessAdjacentAlliedSpellcaster",
+            path,
+        )?,
         airborne,
         alternative_summon_payment,
         at_end_of_controller_turn_controller_gains_life,
