@@ -128,7 +128,7 @@ impl Game {
                     ))
                     .ok_or(GameError::IllegalAction)?;
             }
-            if result.minion_died {
+            if result.lethal_damage_dealt {
                 dead_minions.push(target.instance_id().clone());
             }
             if result.avatar_defeated && !defeated_avatars.contains(&target.seat()) {
@@ -148,21 +148,33 @@ impl Game {
                 "stealth-lost",
                 || json!({"instanceId": group.source.instance_id(), "seat": group.source.seat()}),
             );
-            self.revert_stealth_bound_controls(outcomes)?;
+            self.revert_matching_temporary_controls_without_settlement(
+                outcomes,
+                |effect, stealthed| {
+                    effect.expiry == super::TemporaryControlExpiry::UntilStealthLost && !stealthed
+                },
+            )?;
         }
         self.consume_strike_artifacts(&group.strike, group.source.instance_id(), outcomes)?;
+        let current_seat = match kind {
+            UnitKind::Avatar => group.source.seat(),
+            UnitKind::Minion => {
+                self.position
+                    .units
+                    .iter()
+                    .find(|unit| unit.card.instance_id == *group.source.instance_id())
+                    .ok_or(GameError::IllegalAction)?
+                    .controller
+            }
+        };
         if group.strike.lance_count > 0 {
-            self.break_lance(group.source.seat(), group.source.instance_id(), outcomes)?;
+            self.break_lance(current_seat, group.source.instance_id(), outcomes)?;
         }
-        self.consume_next_strike_double(
-            kind,
-            group.source.seat(),
-            group.source.instance_id(),
-            outcomes,
-        )?;
-        if !group.strike.consumed_artifacts.is_empty() {
-            dead_minions.extend(self.static_power_death_ids()?);
-        }
+        self.consume_next_strike_double(kind, current_seat, group.source.instance_id(), outcomes)?;
+        let super::DamageCasualties {
+            minions: dead_minions,
+            avatars: defeated_avatars,
+        } = self.finish_damage_group(dead_minions, defeated_avatars)?;
         if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
             self.begin_minion_deaths(
                 &dead_minions,

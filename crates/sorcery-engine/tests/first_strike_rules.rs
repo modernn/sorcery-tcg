@@ -1381,6 +1381,15 @@ fn rule_catalog_0744_first_strike_snapshots_targets_before_awakening_nearby_aura
         unit(&position, &setup.target_id).expect("awakened aura")["damage"],
         1
     );
-    assert!(in_cemetery(&position, "south", ally_id));
+    assert!(!in_cemetery(&position, "south", ally_id));
+    assert_eq!(
+        unit(&position, ally_id).expect("restored-power ally")["damage"],
+        2
+    );
+    assert_eq!(
+        unit(&position, &setup.attacker_id).expect("attacker")["damage"],
+        3,
+        "the awakened source and surviving ally strike in the later normal window"
+    );
     assert_exact_replay(&setup.session);
 }

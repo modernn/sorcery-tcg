@@ -4142,3 +4142,132 @@ mod site_token_proofs {
         }
     }
 }
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the approved proof matrix keeps each simultaneous owner and its continuation assertions together"
+)]
+fn compiled_damage_wakes_a_power_provider_before_deaths_and_resumes_its_frame_once() {
+    for survives in [false, true] {
+        let mut game = fixture_game();
+        let provider_card = card_id(&game, "north-spell-48");
+        let rules = Arc::get_mut(&mut game.rules).unwrap();
+        let crate::facts::CardFacts::Minion(facts) =
+            &mut rules.cards[usize::from(provider_card.0)].facts
+        else {
+            panic!("provider")
+        };
+        facts.defense = if survives { 8 } else { 2 };
+        facts.other_nearby_allies_power_bonus = true;
+        for id in ["south-spell-1", "south-spell-2"] {
+            let card = rules.cards.iter_mut().find(|c| c.id == id).unwrap();
+            let crate::facts::CardFacts::Minion(facts) = &mut card.facts else {
+                panic!("recipient")
+            };
+            facts.defense = 3;
+            facts.damage_prevention = None;
+        }
+        let mut provider = minion(
+            &game,
+            "north-spell-48",
+            Seat::North,
+            "sleeping-provider",
+            false,
+        );
+        provider.disabled_until_damaged = true;
+        game.position.units = vec![
+            minion(
+                &game,
+                "south-spell-1",
+                Seat::North,
+                "first-recipient",
+                false,
+            ),
+            minion(
+                &game,
+                "south-spell-2",
+                Seat::North,
+                "second-recipient",
+                false,
+            ),
+            provider,
+        ];
+        let recipients = UnitSet::Query(UnitCohort {
+            area: UnitArea::Source,
+            kind: Some(super::super::UnitKind::Minion),
+            controller: ControllerRelation::Any,
+            relation: None,
+            exclude_source: false,
+        });
+        let magic = install(
+            &mut game,
+            vec![
+                Effect::Damage {
+                    recipients,
+                    amount: 3,
+                },
+                Effect::Draw {
+                    zone: DeckZone::Spellbook,
+                    count: 1,
+                },
+            ],
+        );
+        let frame = game
+            .effect_frame(
+                magic,
+                AbilityEntry::Magic,
+                source("wake-group", Seat::North, 0, None),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let before = game.position.players[0].hand_spellbook.len();
+        let mut silent = game.clone();
+        let mut events = Vec::new();
+        game.run_effect_frame(frame.clone(), &mut OutcomeLog::Record(&mut events))
+            .unwrap();
+        silent
+            .run_effect_frame(frame, &mut OutcomeLog::Ignore)
+            .unwrap();
+        assert_eq!(game.position, silent.position);
+        if survives {
+            assert!(game.position.pending_deathrites.is_none());
+            assert_eq!(game.position.units.len(), 3);
+            assert_eq!(game.position.players[0].hand_spellbook.len(), before + 1);
+        } else {
+            assert!(game.position.pending_deathrites.is_some());
+            assert_eq!(
+                game.position.players[0].hand_spellbook.len(),
+                before,
+                "program tail must wait for Deathrites"
+            );
+            let action = game
+                .legal_actions()
+                .unwrap()
+                .into_iter()
+                .find(|a| matches!(a.descriptor, ActionDescriptor::OrderTriggers { .. }))
+                .unwrap();
+            let owned = game.clone().apply_action_owned(&action).unwrap();
+            let (resolved, _) = game.apply_action_recorded(&action).unwrap();
+            silent.apply_action(&action).unwrap();
+            assert_eq!(game.position, silent.position);
+            assert_eq!(game.position, owned.position);
+            assert_eq!(
+                game.legal_actions().unwrap(),
+                owned.legal_actions().unwrap()
+            );
+            assert_eq!(
+                resolved
+                    .iter()
+                    .filter(|(kind, _)| kind == "spell-drawn")
+                    .count(),
+                3
+            );
+            assert!(game.position.pending_deathrites.is_none());
+            assert!(game.position.units.is_empty());
+            assert_eq!(game.position.players[0].hand_spellbook.len(), before + 3);
+        }
+    }
+}

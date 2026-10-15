@@ -840,7 +840,7 @@ fn rule_catalog_0794_deathrite_damage_preserves_source_power_until_resolution() 
 #[test]
 #[expect(
     clippy::too_many_lines,
-    reason = "one direct scenario proves stable target snapshots across an awakening AOE"
+    reason = "one direct scenario separates incoming snapshots from post-group ongoing power"
 )]
 fn rule_catalog_0745_simultaneous_area_damage_snapshots_status_before_awakening_aura() {
     let seed = 289;
@@ -942,9 +942,21 @@ fn rule_catalog_0745_simultaneous_area_damage_snapshots_status_before_awakening_
         })
         .expect("later target takes damage");
     assert!(awakened < target_damage);
-    assert!(receipt.events.iter().any(|event| {
+    // Incoming damage is snapshotted; power is evaluated after the whole group wakes.
+    assert!(!receipt.events.iter().any(|event| {
         event.event_type == "minion-died" && event.payload["instanceId"] == target_id
     }));
+    let view = session
+        .public_view(Seat::South)
+        .expect("current power view");
+    let survivor = view["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["instanceId"] == target_id)
+        .expect("ally survives restored power");
+    assert_eq!(survivor["damage"], 1);
+    assert_eq!(survivor["defense"], 2);
     assert_exact_replay(&session);
 }
 

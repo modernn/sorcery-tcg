@@ -743,3 +743,153 @@ fn effect_magic_completes_once_after_ordered_damage_and_ordered_deathrites() {
     assert_eq!(game.position.units.len(), 1);
     assert_eq!(game.position.units[0].damage, 0);
 }
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the approved proof matrix keeps each simultaneous owner and its continuation assertions together"
+)]
+fn effect_damage_order_wakes_all_recipients_before_one_power_check() {
+    for source_seat in [Seat::North, Seat::South] {
+        for reverse in [false, true] {
+            for ordered in [false, true] {
+                let (mut game, striker, _) = setup();
+                let target_seat = super::other_seat(source_seat);
+                let target_card = game.position.units[1].card.card_id;
+                let super::CardFacts::Minion(facts) = &mut std::sync::Arc::get_mut(&mut game.rules)
+                    .unwrap()
+                    .cards[usize::from(target_card.0)]
+                .facts
+                else {
+                    panic!("recipient")
+                };
+                facts.defense = if ordered { 5 } else { 3 };
+                facts.other_nearby_allies_power_bonus = true;
+                game.position.active_seat = source_seat;
+                game.position.decision_seat = source_seat;
+                game.position.units[0].controller = source_seat;
+                game.position.units[0].card.owner = source_seat;
+                game.position.units[1].controller = target_seat;
+                game.position.units[1].card.owner = target_seat;
+                for artifact in &mut game.position.artifacts {
+                    artifact.card.owner = source_seat;
+                    if let ArtifactPlacement::Carried { bearer, .. } = &mut artifact.placement {
+                        *bearer = UnitTarget::Minion {
+                            instance_id: striker.clone(),
+                            seat: source_seat,
+                        };
+                    }
+                }
+                if !ordered {
+                    game.position.artifacts.pop();
+                }
+                let mut provider = game.position.units[1].clone();
+                provider.card.instance_id = id("sleeping-ordered-provider");
+                provider.disabled_until_damaged = true;
+                game.position.units.push(provider);
+                let mut targets: Vec<_> = game.position.units[1..]
+                    .iter()
+                    .map(|u| UnitTarget::Minion {
+                        instance_id: u.card.instance_id.clone(),
+                        seat: target_seat,
+                    })
+                    .collect();
+                if reverse {
+                    targets.reverse();
+                }
+                let group = super::EffectStrikes {
+                    source: UnitTarget::Minion {
+                        instance_id: striker.clone(),
+                        seat: source_seat,
+                    },
+                    targets,
+                    strike: game
+                        .combatant_strike_stats(super::UnitKind::Minion, source_seat, &striker)
+                        .unwrap(),
+                    reveal_source: true,
+                    return_phase: Phase::Main,
+                    return_seat: source_seat,
+                };
+                let mut repeated = game.clone();
+                let mut silent = game.clone();
+                let mut owned = game.clone();
+                let mut events = Vec::new();
+                let mut repeated_events = Vec::new();
+                game.resolve_effect_strikes(&group, &mut super::OutcomeLog::Record(&mut events))
+                    .unwrap();
+                repeated
+                    .resolve_effect_strikes(
+                        &group,
+                        &mut super::OutcomeLog::Record(&mut repeated_events),
+                    )
+                    .unwrap();
+                silent
+                    .resolve_effect_strikes(&group, &mut super::OutcomeLog::Ignore)
+                    .unwrap();
+                owned
+                    .resolve_effect_strikes(&group, &mut super::OutcomeLog::Ignore)
+                    .unwrap();
+                assert_eq!(events, repeated_events);
+                if ordered {
+                    assert_eq!(game.position.phase, Phase::DamageOrder);
+                    assert!(game.position.units.iter().all(|u| u.damage == 0));
+                    for g in [&mut game, &mut repeated, &mut silent, &mut owned] {
+                        g.position.pending_damage_order.as_mut().unwrap().after =
+                            Some(super::ResolutionContinuation::MagicResolved {
+                                resolution: super::DeferredMagicResolved {
+                                    card_id: card_id(g, "north-spell-48"),
+                                    instance_id: id("ordered-after-magic"),
+                                    owner: source_seat,
+                                },
+                                held_card: None,
+                            });
+                    }
+                    while game.position.pending_damage_order.is_some() {
+                        let pending = game
+                            .position
+                            .pending_damage_order
+                            .as_ref()
+                            .unwrap()
+                            .value(&game);
+                        let action = game.legal_actions().unwrap().into_iter().find(|a| {
+                            let super::ActionDescriptor::ChooseDamageModifier { modifier_index } = a.descriptor else { return false };
+                            pending["remaining"][usize::try_from(modifier_index).unwrap()]["operation"] == "double"
+                        }).unwrap();
+                        let (next, _) = game.apply_action_recorded(&action).unwrap();
+                        let (again, _) = repeated.apply_action_recorded(&action).unwrap();
+                        assert_eq!(next, again);
+                        events.extend(next);
+                        silent.apply_action(&action).unwrap();
+                        owned = owned.apply_action_owned(&action).unwrap();
+                        assert_eq!(game.position, silent.position);
+                        assert_eq!(game.position, owned.position);
+                    }
+                    assert_eq!(
+                        events.iter().filter(|(k, _)| k == "magic-resolved").count(),
+                        1
+                    );
+                }
+                assert_eq!(game.position, repeated.position);
+                assert_eq!(game.position, silent.position);
+                assert_eq!(game.position, owned.position);
+                assert_eq!(game.position.units.len(), 3);
+                assert_eq!(game.position.phase, Phase::Main);
+                assert_eq!(game.position.decision_seat, source_seat);
+                assert!(
+                    game.position.units[1..]
+                        .iter()
+                        .all(|u| !u.disabled_until_damaged
+                            && u.damage == if ordered { 5 } else { 3 })
+                );
+                assert!(!events.iter().any(|(kind, _)| kind == "minion-died"));
+                assert_eq!(
+                    events
+                        .iter()
+                        .filter(|(kind, _)| kind == "artifact-consumed-after-strike")
+                        .count(),
+                    1
+                );
+            }
+        }
+    }
+}

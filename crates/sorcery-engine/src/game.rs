@@ -1178,7 +1178,7 @@ enum WinReason {
 }
 
 struct DamageResult {
-    minion_died: bool,
+    lethal_damage_dealt: bool,
     avatar_defeated: bool,
     dealt_by_source: Vec<u16>,
 }
@@ -1243,7 +1243,7 @@ impl DamagePreventionSnapshot {
 #[derive(Clone, Copy)]
 struct UnitDamageStatus {
     prevention: DamagePreventionSnapshot,
-    minion: Option<(usize, u16)>,
+    minion: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -11181,29 +11181,23 @@ impl Game {
         self.consume_next_strike_double(UnitKind::Minion, seat, shooter_instance_id, outcomes)?;
         // A hit breaks Stealth after concurrent strike effects, before Deathrites.
         // Reversion and damage must feed the same death cohort.
-        let controls_changed =
-            if self.mark_unit_interaction(UnitKind::Minion, seat, shooter_instance_id)? {
-                outcomes.push(
-                    "stealth-lost",
-                    || json!({ "instanceId": shooter_instance_id, "seat": seat }),
-                );
-                self.revert_matching_temporary_controls_without_settlement(
-                    outcomes,
-                    |effect, stealthed| {
-                        effect.expiry == TemporaryControlExpiry::UntilStealthLost && !stealthed
-                    },
-                )?
-            } else {
-                false
-            };
-        let mut dead_minions = if controls_changed || !strike.consumed_artifacts.is_empty() {
-            self.static_power_death_ids()?
-        } else {
-            Vec::new()
-        };
-        if damage.minion_died {
+        if self.mark_unit_interaction(UnitKind::Minion, seat, shooter_instance_id)? {
+            outcomes.push(
+                "stealth-lost",
+                || json!({ "instanceId": shooter_instance_id, "seat": seat }),
+            );
+            self.revert_matching_temporary_controls_without_settlement(
+                outcomes,
+                |effect, stealthed| {
+                    effect.expiry == TemporaryControlExpiry::UntilStealthLost && !stealthed
+                },
+            )?;
+        }
+        let mut dead_minions = Vec::new();
+        if damage.lethal_damage_dealt {
             dead_minions.push(target.instance_id().clone());
         }
+        let dead_minions = self.finish_damage_group(dead_minions, Vec::new())?.minions;
         if !dead_minions.is_empty() || damage.avatar_defeated {
             let target_seat = target.seat();
             self.begin_minion_deaths(
@@ -11480,20 +11474,22 @@ impl Game {
             damage_source,
             outcomes,
         )?;
-        if damage.minion_died || damage.avatar_defeated {
-            let target_instance_id = target.instance_id().clone();
-            let target_seat = target.seat();
+        let casualties = self.finish_damage_group(
+            damage
+                .lethal_damage_dealt
+                .then(|| target.instance_id().clone())
+                .into_iter()
+                .collect(),
+            damage
+                .avatar_defeated
+                .then_some(target.seat())
+                .into_iter()
+                .collect(),
+        )?;
+        if !casualties.minions.is_empty() || !casualties.avatars.is_empty() {
             self.begin_minion_deaths(
-                if damage.minion_died {
-                    std::slice::from_ref(&target_instance_id)
-                } else {
-                    &[]
-                },
-                if damage.avatar_defeated {
-                    std::slice::from_ref(&target_seat)
-                } else {
-                    &[]
-                },
+                &casualties.minions,
+                &casualties.avatars,
                 Phase::Main,
                 self.position.active_seat,
                 outcomes,
@@ -13256,19 +13252,30 @@ impl Game {
         mut continuation: FirstStrikeContinuation,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        // Each window captures its own operands. A surviving participant can have
+        // changed controller during first strikes or their intervening Deathrites.
         let attacker_survived = continuation.pending.attacker_kind == UnitKind::Avatar
             || self
                 .position
                 .units
                 .iter()
-                .any(|unit| unit.card.instance_id == continuation.pending.attacker_instance_id);
-        continuation.pending.combatants.retain(|target| {
-            matches!(target, UnitTarget::Avatar { .. })
-                || self
-                    .position
-                    .units
-                    .iter()
-                    .any(|unit| unit.card.instance_id == *target.instance_id())
+                .find(|unit| unit.card.instance_id == continuation.pending.attacker_instance_id)
+                .is_some_and(|unit| {
+                    continuation.pending.attacking_seat = unit.controller;
+                    true
+                });
+        continuation.pending.combatants.retain_mut(|target| {
+            let UnitTarget::Minion { instance_id, seat } = target else {
+                return true;
+            };
+            self.position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == *instance_id)
+                .is_some_and(|unit| {
+                    *seat = unit.controller;
+                    true
+                })
         });
         if self.position.terminal.is_some()
             || !attacker_survived
@@ -13431,15 +13438,35 @@ impl Game {
                 return Ok(true);
             }
         }
+        // Capture every recipient's prevention and incoming amount before any wake.
         let combatant_statuses = pending
             .combatants
             .iter()
-            .map(|target| {
-                self.unit_damage_status(
-                    unit_target_kind(target),
-                    target.seat(),
-                    target.instance_id(),
-                )
+            .enumerate()
+            .map(|(index, target)| {
+                let kind = unit_target_kind(target);
+                let status = self.unit_damage_status(kind, target.seat(), target.instance_id())?;
+                let amount = if !attacker_owes_allocation {
+                    0
+                } else if let Some(amounts) = ordered_damage {
+                    *amounts
+                        .get(return_sources.len() + index)
+                        .ok_or(GameError::IllegalAction)?
+                } else {
+                    let allocation = pending
+                        .allocations
+                        .iter()
+                        .find(|allocation| allocation.target_instance_id == *target.instance_id())
+                        .ok_or(GameError::IllegalAction)?;
+                    self.nearby_unit_strike_amount(
+                        allocation.amount,
+                        attacker.additive_bonus,
+                        kind,
+                        target.seat(),
+                        target.instance_id(),
+                    )?
+                };
+                Ok((status, amount))
             })
             .collect::<Result<Vec<_>, GameError>>()?;
 
@@ -13481,7 +13508,7 @@ impl Game {
             .collect::<Result<Vec<_>, GameError>>()?;
         let attacker_damage = if return_damage_sources.is_empty() {
             DamageResult {
-                minion_died: false,
+                lethal_damage_dealt: false,
                 avatar_defeated: false,
                 dealt_by_source: Vec::new(),
             }
@@ -13496,38 +13523,13 @@ impl Game {
         };
         let mut combatant_results = Vec::with_capacity(pending.combatants.len());
         if attacker_owes_allocation {
-            for (index, (target, status)) in pending
-                .combatants
-                .iter()
-                .zip(combatant_statuses)
-                .enumerate()
-            {
-                let allocation = pending
-                    .allocations
-                    .iter()
-                    .find(|allocation| allocation.target_instance_id == *target.instance_id())
-                    .ok_or(GameError::IllegalAction)?;
-                let kind = match target {
-                    UnitTarget::Avatar { .. } => UnitKind::Avatar,
-                    UnitTarget::Minion { .. } => UnitKind::Minion,
-                };
+            for (target, (status, amount)) in pending.combatants.iter().zip(combatant_statuses) {
+                let kind = unit_target_kind(target);
                 let result = self.apply_simple_damage_with_status(
                     kind,
                     target.seat(),
                     target.instance_id(),
-                    if let Some(amounts) = ordered_damage {
-                        *amounts
-                            .get(return_sources.len() + index)
-                            .ok_or(GameError::IllegalAction)?
-                    } else {
-                        self.nearby_unit_strike_amount(
-                            allocation.amount,
-                            attacker.additive_bonus,
-                            kind,
-                            target.seat(),
-                            target.instance_id(),
-                        )?
-                    },
+                    amount,
                     UnitDamageSource {
                         origin: DamageOrigin::Other,
                         current_power: attacker.current_power,
@@ -13571,40 +13573,59 @@ impl Game {
             );
         }
         if lost_stealth {
-            self.revert_stealth_bound_controls(outcomes)?;
+            self.revert_matching_temporary_controls_without_settlement(
+                outcomes,
+                |effect, stealthed| {
+                    effect.expiry == TemporaryControlExpiry::UntilStealthLost && !stealthed
+                },
+            )?;
         }
         if attacker_can_strike {
             self.consume_strike_artifacts(&attacker, &attacker_id, outcomes)?;
         }
-        if attacker_can_strike && attacker.lance_count > 0 {
-            self.break_lance(attacking_seat, &attacker_id, outcomes)?;
-        }
         if attacker_can_strike {
-            self.consume_next_strike_double(attacker_kind, attacking_seat, &attacker_id, outcomes)?;
+            let current_seat = match attacker_kind {
+                UnitKind::Avatar => attacking_seat,
+                UnitKind::Minion => {
+                    self.position
+                        .units
+                        .iter()
+                        .find(|unit| unit.card.instance_id == attacker_id)
+                        .ok_or(GameError::IllegalAction)?
+                        .controller
+                }
+            };
+            if attacker.lance_count > 0 {
+                self.break_lance(current_seat, &attacker_id, outcomes)?;
+            }
+            self.consume_next_strike_double(attacker_kind, current_seat, &attacker_id, outcomes)?;
         }
         for (kind, target, strike) in &return_sources {
             self.consume_strike_artifacts(strike, target.instance_id(), outcomes)?;
+            let current_seat = match kind {
+                UnitKind::Avatar => target.seat(),
+                UnitKind::Minion => {
+                    self.position
+                        .units
+                        .iter()
+                        .find(|unit| unit.card.instance_id == *target.instance_id())
+                        .ok_or(GameError::IllegalAction)?
+                        .controller
+                }
+            };
             if strike.lance_count > 0 {
-                self.break_lance(target.seat(), target.instance_id(), outcomes)?;
+                self.break_lance(current_seat, target.instance_id(), outcomes)?;
             }
-            self.consume_next_strike_double(*kind, target.seat(), target.instance_id(), outcomes)?;
+            self.consume_next_strike_double(*kind, current_seat, target.instance_id(), outcomes)?;
         }
-        let consumed_equipment = attacker_can_strike && !attacker.consumed_artifacts.is_empty()
-            || return_sources
-                .iter()
-                .any(|(_, _, strike)| !strike.consumed_artifacts.is_empty());
-        let mut dead_minions = if consumed_equipment {
-            self.static_power_death_ids()?
-        } else {
-            Vec::new()
-        };
-        if attacker_damage.minion_died {
+        let mut dead_minions = Vec::new();
+        if attacker_damage.lethal_damage_dealt {
             dead_minions.push(attacker_id);
         }
         dead_minions.extend(
             combatant_results
                 .iter()
-                .filter(|(_, result)| result.minion_died)
+                .filter(|(_, result)| result.lethal_damage_dealt)
                 .map(|(target, _)| target.instance_id().clone()),
         );
         let mut defeated_avatars = Vec::new();
@@ -13616,6 +13637,23 @@ impl Game {
                 .iter()
                 .filter_map(|(target, result)| result.avatar_defeated.then_some(target.seat())),
         );
+        let DamageCasualties {
+            minions: mut dead_minions,
+            avatars: defeated_avatars,
+        } = self.finish_damage_group(dead_minions, defeated_avatars)?;
+        // Preserve the fight's recipient order for simultaneous departures. This orders
+        // the completed cohort; it does not check or mark any recipient early.
+        dead_minions.sort_by_key(|instance_id| {
+            if *instance_id == pending.attacker_instance_id {
+                0
+            } else {
+                pending
+                    .combatants
+                    .iter()
+                    .position(|target| target.instance_id() == instance_id)
+                    .map_or(usize::MAX, |index| index + 1)
+            }
+        });
         self.position.pending_combat = None;
         self.position.decision_seat = self.position.active_seat;
         self.position.phase = Phase::Main;
@@ -13710,8 +13748,9 @@ impl Game {
         Ok((total, lethal_dealt, dealt_by_source))
     }
 
-    /// Resolves one recipient's simultaneous damage group. Prevention applies to each source;
-    /// one Ward protects against the entire group, and only damage actually dealt can be Lethal.
+    /// Applies one recipient's snapshotted incoming damage. Prevention applies to each source;
+    /// one Ward protects against all simultaneous sources, and only dealt damage can be Lethal.
+    /// The caller finalizes power casualties after every recipient and concurrent mutation.
     #[expect(
         clippy::too_many_lines,
         reason = "one damage transaction keeps prevention, mutation, and ordered events together"
@@ -13731,7 +13770,7 @@ impl Game {
             .ok_or(GameError::IllegalAction)?;
         match kind {
             UnitKind::Minion => {
-                let (index, defense) = status.minion.ok_or(GameError::IllegalAction)?;
+                let index = status.minion.ok_or(GameError::IllegalAction)?;
                 if self
                     .position
                     .units
@@ -13795,8 +13834,7 @@ impl Game {
                     );
                 }
                 Ok(DamageResult {
-                    minion_died: accumulated > 0
-                        && (accumulated >= defense || lethal_dealt && dealt > 0),
+                    lethal_damage_dealt: lethal_dealt && dealt > 0,
                     avatar_defeated: false,
                     dealt_by_source,
                 })
@@ -13817,7 +13855,7 @@ impl Game {
                         })
                     });
                     return Ok(DamageResult {
-                        minion_died: false,
+                        lethal_damage_dealt: false,
                         avatar_defeated: false,
                         dealt_by_source,
                     });
@@ -13834,7 +13872,7 @@ impl Game {
                 if avatar.life == 0 {
                     if amount == 0 {
                         return Ok(DamageResult {
-                            minion_died: false,
+                            lethal_damage_dealt: false,
                             avatar_defeated: false,
                             dealt_by_source,
                         });
@@ -13846,7 +13884,7 @@ impl Game {
                             || json!({ "instanceId": instance_id, "seat": seat }),
                         );
                         return Ok(DamageResult {
-                            minion_died: false,
+                            lethal_damage_dealt: false,
                             avatar_defeated: true,
                             dealt_by_source,
                         });
@@ -13862,14 +13900,14 @@ impl Game {
                         })
                     });
                     return Ok(DamageResult {
-                        minion_died: false,
+                        lethal_damage_dealt: false,
                         avatar_defeated: false,
                         dealt_by_source: vec![0; dealt_by_source.len()],
                     });
                 }
                 if amount == 0 {
                     return Ok(DamageResult {
-                        minion_died: false,
+                        lethal_damage_dealt: false,
                         avatar_defeated: false,
                         dealt_by_source,
                     });
@@ -13895,31 +13933,12 @@ impl Game {
                     );
                 }
                 Ok(DamageResult {
-                    minion_died: false,
+                    lethal_damage_dealt: false,
                     avatar_defeated: false,
                     dealt_by_source,
                 })
             }
         }
-    }
-
-    fn simple_minion_combatant(
-        &self,
-        instance_id: &IdentityHash,
-    ) -> Result<(usize, u16, u16, Option<DamagePrevention>), GameError> {
-        let (index, unit) = self
-            .position
-            .units
-            .iter()
-            .enumerate()
-            .find(|(_, unit)| unit.card.instance_id == *instance_id)
-            .ok_or(GameError::IllegalAction)?;
-        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
-        else {
-            return Err(GameError::IllegalAction);
-        };
-        let (attack, defense, _) = self.minion_current_stats(unit)?;
-        Ok((index, attack, defense, facts.damage_prevention))
     }
 
     /// Current admitted minion subtype membership. Subtype-changing effects must extend
@@ -13948,17 +13967,27 @@ impl Game {
         let avatar_cell;
         let (minion, printed, region, cells) = match kind {
             UnitKind::Minion => {
-                let (index, _, defense, printed) = self.simple_minion_combatant(instance_id)?;
-                let unit = &self.position.units[index];
+                let (index, unit) = self
+                    .position
+                    .units
+                    .iter()
+                    .enumerate()
+                    .find(|(_, unit)| unit.card.instance_id == *instance_id)
+                    .ok_or(GameError::IllegalAction)?;
+                let CardFacts::Minion(facts) =
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                else {
+                    return Err(GameError::IllegalAction);
+                };
                 if unit.controller != seat {
                     return Err(GameError::IllegalAction);
                 }
                 (
-                    Some((index, defense)),
+                    Some(index),
                     if self.minion_abilities_lost(unit) {
                         None
                     } else {
-                        printed
+                        facts.damage_prevention
                     },
                     unit.region,
                     Self::unit_occupied_cells(unit),
@@ -14003,7 +14032,7 @@ impl Game {
                     && !self.minion_abilities_lost(source)
                 {
                     if let Some(required) = &grant.recipient_subtype {
-                        let Some((index, _)) = minion else {
+                        let Some(index) = minion else {
                             continue;
                         };
                         if !self.minion_has_subtype(&self.position.units[index], required)? {
@@ -14078,6 +14107,22 @@ impl Game {
             unit.death_marked = true;
         }
         Ok((sources, marked))
+    }
+
+    /// Finish the entire simultaneous event before testing current defense. Recipient
+    /// transactions retain only positive Lethal evidence, never a frozen power verdict.
+    fn finish_damage_group(
+        &self,
+        lethal_recipients: Vec<IdentityHash>,
+        avatars: Vec<Seat>,
+    ) -> Result<DamageCasualties, GameError> {
+        let mut minions = self.static_power_death_ids()?;
+        for instance_id in lethal_recipients {
+            if !minions.contains(&instance_id) {
+                minions.push(instance_id);
+            }
+        }
+        Ok(DamageCasualties { minions, avatars })
     }
 
     fn static_power_death_ids(&self) -> Result<Vec<IdentityHash>, GameError> {
@@ -14566,13 +14611,16 @@ impl Game {
                     status,
                     outcomes,
                 )?;
-                if result.minion_died {
+                if result.lethal_damage_dealt {
                     triggered_deaths.push(target_instance_id);
                 }
                 if result.avatar_defeated && !pending.defeated_avatars.contains(&seat) {
                     pending.defeated_avatars.push(seat);
                 }
             }
+            triggered_deaths = self
+                .finish_damage_group(triggered_deaths, Vec::new())?
+                .minions;
         }
         if !pending.defeated_avatars.is_empty() {
             if !Self::deathrite_has_only_terminal_safe_clause(&facts) {
@@ -16767,13 +16815,17 @@ impl Game {
                 status,
                 outcomes,
             )?;
-            if damage.minion_died {
+            if damage.lethal_damage_dealt {
                 dead_minions.push(instance_id);
             }
             if damage.avatar_defeated && !defeated_avatars.contains(&target_seat) {
                 defeated_avatars.push(target_seat);
             }
         }
+        let DamageCasualties {
+            minions: dead_minions,
+            avatars: defeated_avatars,
+        } = self.finish_damage_group(dead_minions, defeated_avatars)?;
         if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
             self.begin_minion_deaths(
                 &dead_minions,
@@ -17306,14 +17358,14 @@ impl Game {
                 status,
                 outcomes,
             )?;
-            if result.minion_died {
+            if result.lethal_damage_dealt {
                 casualties.minions.push(target_instance_id);
             }
             if result.avatar_defeated && !casualties.avatars.contains(&target_seat) {
                 casualties.avatars.push(target_seat);
             }
         }
-        Ok(casualties)
+        self.finish_damage_group(casualties.minions, casualties.avatars)
     }
 
     /// Damages every unit standing at one location and settles the deaths it caused.
@@ -17671,7 +17723,7 @@ impl Game {
                 status,
                 outcomes,
             )?;
-            if result.minion_died {
+            if result.lethal_damage_dealt {
                 dead_minions.push(target.instance_id().clone());
             }
             if result.avatar_defeated && !defeated_avatars.contains(&target.seat()) {
@@ -17679,6 +17731,10 @@ impl Game {
             }
         }
         self.position.state_version += 1;
+        let DamageCasualties {
+            minions: dead_minions,
+            avatars: defeated_avatars,
+        } = self.finish_damage_group(dead_minions, defeated_avatars)?;
         if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
             self.begin_minion_deaths(
                 &dead_minions,
@@ -17987,18 +18043,22 @@ impl Game {
             source,
             outcomes,
         )?;
-        if result.minion_died || result.avatar_defeated {
+        let casualties = self.finish_damage_group(
+            result
+                .lethal_damage_dealt
+                .then(|| target_instance_id.clone())
+                .into_iter()
+                .collect(),
+            result
+                .avatar_defeated
+                .then_some(*target_seat)
+                .into_iter()
+                .collect(),
+        )?;
+        if !casualties.minions.is_empty() || !casualties.avatars.is_empty() {
             self.begin_minion_deaths(
-                if result.minion_died {
-                    std::slice::from_ref(target_instance_id)
-                } else {
-                    &[]
-                },
-                if result.avatar_defeated {
-                    std::slice::from_ref(target_seat)
-                } else {
-                    &[]
-                },
+                &casualties.minions,
+                &casualties.avatars,
                 Phase::Main,
                 self.position.active_seat,
                 outcomes,
@@ -18319,13 +18379,17 @@ impl Game {
                 status,
                 outcomes,
             )?;
-            if result.minion_died {
+            if result.lethal_damage_dealt {
                 dead_minions.push(target.instance_id().clone());
             }
             if result.avatar_defeated && !defeated_avatars.contains(&target.seat()) {
                 defeated_avatars.push(target.seat());
             }
         }
+        let DamageCasualties {
+            minions: dead_minions,
+            avatars: defeated_avatars,
+        } = self.finish_damage_group(dead_minions, defeated_avatars)?;
         if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
             self.begin_minion_deaths(
                 &dead_minions,
@@ -22925,7 +22989,7 @@ impl Game {
                             status,
                             outcomes,
                         )?;
-                        if damage.minion_died {
+                        if damage.lethal_damage_dealt {
                             dead_minions.push(instance_id);
                         }
                         if damage.avatar_defeated && !defeated_avatars.contains(&target_seat) {
@@ -22952,6 +23016,10 @@ impl Game {
                     }
                     self.settle_lost_ability_marks_without_settlement(outcomes)?;
                     self.settle_nearby_enemy_stealth_without_settlement(outcomes)?;
+                    let DamageCasualties {
+                        minions: dead_minions,
+                        avatars: defeated_avatars,
+                    } = self.finish_damage_group(dead_minions, defeated_avatars)?;
                     let raw = self.region_settlement_removals();
                     let (raw_deaths, raw_banishments) = &raw;
                     if !raw_deaths.is_empty()
@@ -22971,11 +23039,6 @@ impl Game {
                     }
                     let (mut region_deaths, banishments) =
                         self.collect_region_settlement_removals(outcomes, raw);
-                    for instance_id in self.static_power_death_ids()? {
-                        if !region_deaths.contains(&instance_id) {
-                            region_deaths.push(instance_id);
-                        }
-                    }
                     for instance_id in dead_minions {
                         if !region_deaths.contains(&instance_id) {
                             region_deaths.push(instance_id);
@@ -33086,7 +33149,7 @@ mod tests {
                 }
             );
             assert!(
-                !result.minion_died,
+                !result.lethal_damage_dealt,
                 "the only Lethal source dealt no damage"
             );
             assert_eq!(events[0].1["amount"], expected);
@@ -33126,7 +33189,7 @@ mod tests {
                 &mut OutcomeLog::Record(&mut events),
             )
             .expect("Ward protects entire group");
-        assert!(!result.minion_died);
+        assert!(!result.lethal_damage_dealt);
         assert_eq!(game.position.units[0].damage, 1);
         assert!(!game.position.units[0].warded);
         assert_eq!(
@@ -33153,7 +33216,7 @@ mod tests {
                 &mut OutcomeLog::Ignore,
             )
             .expect("next Lethal hit is unprotected");
-        assert!(result.minion_died);
+        assert!(result.lethal_damage_dealt);
     }
 
     #[test]
@@ -33221,7 +33284,7 @@ mod tests {
                     &mut OutcomeLog::Record(&mut events),
                 )
                 .expect("equivalent prevention orders remain supported");
-            assert!(!result.minion_died);
+            assert!(!result.lethal_damage_dealt);
             assert!(!game.position.units[0].warded);
             assert_eq!(game.position.units[0].damage, 0);
         }
