@@ -6,7 +6,10 @@ use super::{
     Location, OutcomeLog, Region, ResolutionContinuation, Seat, UnitDamageSource, UnitKind,
     UnitQuery, UnitTarget, Value, json, seat_index,
 };
-use crate::ability::{ArtifactTokenPlacement, EffectDuration, TokenDestination};
+use crate::ability::{
+    ArtifactTokenPlacement, ControllerRelation, EffectDuration, SiteDestinationArea,
+    SiteDestinationQuery, TokenDestination,
+};
 
 #[cfg(test)]
 mod tests;
@@ -123,6 +126,34 @@ pub(super) struct ResolvedTokenLocation {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+enum SiteDestinationReference {
+    Card(RealmReference),
+    Rubble {
+        cell: Cell,
+        instance_id: IdentityHash,
+    },
+}
+
+impl SiteDestinationReference {
+    fn value(&self) -> Value {
+        match self {
+            Self::Card(reference) => json!({"kind": "card", "reference": reference.value()}),
+            Self::Rubble { cell, instance_id } => {
+                json!({"kind": "rubble", "cell": cell, "instanceId": instance_id})
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SiteTokenPlacement {
+    sites: Vec<SiteDestinationReference>,
+    locations: Vec<Option<Location>>,
+    next: usize,
+    origin_state_version: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct EffectFrame {
     pub(super) card_id: CardId,
     entry: AbilityEntry,
@@ -135,6 +166,7 @@ pub(super) struct EffectFrame {
     bound_sets: Vec<(u8, Vec<RealmReference>)>,
     pub(super) chosen_location: Option<Location>,
     pub(super) token_location: Option<ResolvedTokenLocation>,
+    site_tokens: Option<SiteTokenPlacement>,
     location: Option<LocationBinding>,
     pub(super) magic: Option<CardInstance>,
     pending_settlement: Option<EffectSettlement>,
@@ -344,6 +376,7 @@ impl Game {
             chosen: None,
             chosen_location: None,
             token_location: None,
+            site_tokens: None,
             target: target
                 .map(|target| {
                     self.unit_reference(target).map(|reference| UnitBinding {
@@ -551,6 +584,25 @@ impl Game {
                     .as_ref()
                     .is_some_and(|reference| self.referenced_unit(reference).is_none()))
         {
+            if self
+                .compiled_ability(frame.card_id, frame.entry)
+                .is_some_and(|program| {
+                    program.effects.iter().any(|effect| {
+                        matches!(
+                            effect,
+                            Effect::SummonToken {
+                                destination: TokenDestination::ChooseSite(_)
+                                    | TokenDestination::EachSite(_),
+                                ..
+                            }
+                        )
+                    })
+                })
+            {
+                return Err(GameError::UnsupportedMechanic(
+                    "site token summon after source departure is unresolved".to_owned(),
+                ));
+            }
             return Ok(false);
         }
         if frame.entry == AbilityEntry::Magic {
@@ -654,6 +706,109 @@ impl Game {
                     destination,
                     ..
                 } => {
+                    if let TokenDestination::ChooseSite(query) | TokenDestination::EachSite(query) =
+                        destination
+                    {
+                        if count > 1 {
+                            return Err(GameError::UnsupportedMechanic(
+                                "multi-token site layer assignment is unresolved".to_owned(),
+                            ));
+                        }
+                        if frame.site_tokens.is_none() {
+                            let sites = if matches!(destination, TokenDestination::EachSite(_)) {
+                                self.site_destination_cells(query, frame.source.controller)
+                                    .into_iter()
+                                    .map(|cell| self.capture_site_destination(cell))
+                                    .collect::<Result<Vec<_>, _>>()?
+                                    .into_iter()
+                                    .flatten()
+                                    .collect()
+                            } else {
+                                Vec::new()
+                            };
+                            let locations = vec![None; sites.len()];
+                            frame.site_tokens = Some(SiteTokenPlacement {
+                                sites,
+                                locations,
+                                next: 0,
+                                origin_state_version: self.position.state_version,
+                            });
+                        }
+                        let plan = frame.site_tokens.as_ref().expect("site placement");
+                        if plan.next < plan.sites.len()
+                            || (matches!(destination, TokenDestination::ChooseSite(_))
+                                && plan.next == 0)
+                        {
+                            frame.cursor -= 1;
+                            return self.begin_ability_location_choice(
+                                frame,
+                                super::choices::AbilityChoiceSpec::SiteTokenLocation,
+                                outcomes,
+                            );
+                        }
+                        let plan = frame.site_tokens.take().expect("completed site placement");
+                        // Preflight the complete live plan before constructing or entering any member.
+                        let locations = plan
+                            .sites
+                            .iter()
+                            .zip(&plan.locations)
+                            .map(|(site, location)| {
+                                let location = location.filter(|location| {
+                                    self.site_destination_cell(site) == Some(location.cell)
+                                        && self.location_exists_in_region(
+                                            location.cell,
+                                            location.region,
+                                        )
+                                });
+                                location
+                                    .map(|location| {
+                                        self.token_may_enter_location(
+                                            frame.source.controller,
+                                            token,
+                                            location,
+                                        )
+                                        .map(|allowed| allowed.then_some(location))
+                                    })
+                                    .transpose()
+                                    .map(Option::flatten)
+                            })
+                            .collect::<Result<Vec<_>, GameError>>()?;
+                        let entries = locations
+                            .into_iter()
+                            .enumerate()
+                            .filter_map(|(index, location)| {
+                                location.map(|location| (index, location))
+                            })
+                            .map(|(index, location)| {
+                                Ok(super::TokenEntryContinuation {
+                                    seat: frame.source.controller,
+                                    token: self.create_token_unit(
+                                        frame.source.controller,
+                                        token,
+                                        &frame.source.instance_id,
+                                        location,
+                                        2048 + (frame.cursor - 1) * 640 + index * 32,
+                                        plan.origin_state_version,
+                                    )?,
+                                    source_instance_id: frame.source.instance_id.clone(),
+                                    mana_paid: 0,
+                                })
+                            })
+                            .collect::<Result<Vec<_>, GameError>>()?;
+                        self.finish_token_entries(entries, outcomes)?;
+                        if self.position.terminal.is_some()
+                            || self.position.pending_deathrites.is_some()
+                            || self.position.pending_damage_order.is_some()
+                            || self.position.pending_trigger_order.is_some()
+                            || self.position.pending_ability_choice.is_some()
+                        {
+                            return self.continue_resolution(
+                                ResolutionContinuation::Effect(Box::new(frame)),
+                                outcomes,
+                            );
+                        }
+                        continue;
+                    }
                     // Carried entry requires the same live bearer incarnation, even when
                     // a departed source retains last-known multi-cell geometry.
                     if matches!(
@@ -1012,7 +1167,10 @@ impl Game {
                 .as_ref()
                 .filter(|binding| binding.state == BindingState::Active)
                 .map(|binding| &binding.reference),
-            TokenDestination::Location | TokenDestination::ChosenLocation => None,
+            TokenDestination::Location
+            | TokenDestination::ChosenLocation
+            | TokenDestination::ChooseSite(_)
+            | TokenDestination::EachSite(_) => None,
         }
     }
 
@@ -1022,6 +1180,9 @@ impl Game {
         destination: TokenDestination,
     ) -> Result<Option<Location>, GameError> {
         let (region, cells) = match destination {
+            TokenDestination::ChooseSite(_) | TokenDestination::EachSite(_) => {
+                return Err(GameError::IllegalAction);
+            }
             TokenDestination::Source => self.effect_anchor(&frame.source)?,
             TokenDestination::Chosen | TokenDestination::Target => {
                 let reference = if destination == TokenDestination::Chosen {
@@ -1116,6 +1277,127 @@ impl Game {
         Ok(())
     }
 
+    fn site_destination_cells(&self, query: SiteDestinationQuery, controller: Seat) -> Vec<Cell> {
+        let anchor = self.position.players[seat_index(controller)]
+            .avatar
+            .location;
+        let scope = match query.area {
+            SiteDestinationArea::Realm => super::SiteCountScope::Realm,
+            SiteDestinationArea::NearControllerAvatar => super::SiteCountScope::Nearby,
+        };
+        Cell::ALL
+            .into_iter()
+            .filter(|cell| {
+                self.surface_location_exists(*cell)
+                    && Self::site_scope_contains(scope, anchor, *cell)
+                    && match query.controller {
+                        ControllerRelation::Any => true,
+                        ControllerRelation::Allied => self.position.sites[cell.index()]
+                            .as_ref()
+                            .is_some_and(|site| site.controller == controller),
+                        ControllerRelation::Enemy => self.position.sites[cell.index()]
+                            .as_ref()
+                            .is_some_and(|site| site.controller != controller),
+                    }
+            })
+            .collect()
+    }
+
+    fn capture_site_destination(
+        &self,
+        cell: Cell,
+    ) -> Result<Option<SiteDestinationReference>, GameError> {
+        match (
+            &self.position.sites[cell.index()],
+            &self.position.rubble[cell.index()],
+        ) {
+            (Some(_), Some(_)) => Err(GameError::IllegalAction),
+            (Some(site), None) => Ok(Some(SiteDestinationReference::Card(
+                RealmReference::from_card(&site.card),
+            ))),
+            (None, Some(instance_id)) => Ok(Some(SiteDestinationReference::Rubble {
+                cell,
+                instance_id: instance_id.clone(),
+            })),
+            (None, None) => Ok(None),
+        }
+    }
+
+    fn site_destination_cell(&self, reference: &SiteDestinationReference) -> Option<Cell> {
+        match reference {
+            SiteDestinationReference::Card(reference) => Cell::ALL.into_iter().find(|cell| {
+                self.position.rubble[cell.index()].is_none()
+                    && self.position.sites[cell.index()]
+                        .as_ref()
+                        .is_some_and(|site| reference.matches(&site.card))
+            }),
+            SiteDestinationReference::Rubble { cell, instance_id } => {
+                (self.position.sites[cell.index()].is_none()
+                    && self.position.rubble[cell.index()].as_ref() == Some(instance_id))
+                .then_some(*cell)
+            }
+        }
+    }
+
+    pub(super) fn site_token_location_choices(
+        &self,
+        frame: &EffectFrame,
+    ) -> Result<Vec<Location>, GameError> {
+        let plan = frame.site_tokens.as_ref().ok_or(GameError::IllegalAction)?;
+        let program = self
+            .compiled_ability(frame.card_id, frame.entry)
+            .ok_or(GameError::IllegalAction)?;
+        let Some(Effect::SummonToken { destination, .. }) = program.effects.get(frame.cursor)
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let cells = if let TokenDestination::ChooseSite(query) = destination {
+            if plan.next != 0 {
+                return Ok(Vec::new());
+            }
+            self.site_destination_cells(*query, frame.source.controller)
+        } else {
+            plan.sites
+                .get(plan.next)
+                .and_then(|site| self.site_destination_cell(site))
+                .into_iter()
+                .collect()
+        };
+        Ok(cells
+            .into_iter()
+            .flat_map(|cell| {
+                [Region::Surface, Region::Underground, Region::Underwater]
+                    .into_iter()
+                    .filter(move |region| self.location_exists_in_region(cell, *region))
+                    .map(move |region| Location { cell, region })
+            })
+            .collect())
+    }
+
+    pub(super) fn resume_site_token_placement(
+        &self,
+        frame: &mut EffectFrame,
+        location: Option<Location>,
+    ) -> Result<(), GameError> {
+        let plan = frame.site_tokens.as_mut().ok_or(GameError::IllegalAction)?;
+        if plan.sites.is_empty() {
+            if let Some(location) = location {
+                let site = self
+                    .capture_site_destination(location.cell)?
+                    .ok_or(GameError::IllegalAction)?;
+                plan.sites.push(site);
+                plan.locations.push(Some(location));
+            }
+        } else {
+            *plan
+                .locations
+                .get_mut(plan.next)
+                .ok_or(GameError::IllegalAction)? = location;
+        }
+        plan.next += 1;
+        Ok(())
+    }
+
     pub(super) fn effect_frame_value(&self, frame: &EffectFrame) -> Value {
         let mut value = json!({
             "kind": "effect", "cardId": self.rules.cards[usize::from(frame.card_id.0)].id,
@@ -1131,6 +1413,10 @@ impl Game {
             "location": frame.location.as_ref().map(|binding| json!({ "location": binding.location, "site": binding.site.as_ref().map(RealmReference::value), "state": binding.state.as_str() })),
             "magic": frame.magic.as_ref().map(|card| self.card_value(card)),
         });
+        if let Some(plan) = &frame.site_tokens {
+            value["siteTokens"] = json!({"sites": plan.sites.iter().map(SiteDestinationReference::value).collect::<Vec<_>>(),
+                "locations": plan.locations, "next": plan.next, "originStateVersion": plan.origin_state_version});
+        }
         if !frame.bound_sets.is_empty() {
             value["boundUnitSets"] = json!(frame.bound_sets.iter().map(|(id, references)| json!({
                 "id": id, "objects": references.iter().map(RealmReference::value).collect::<Vec<_>>()

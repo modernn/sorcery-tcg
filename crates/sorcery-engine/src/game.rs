@@ -56,6 +56,10 @@ mod site_transition;
 mod trigger_order;
 #[cfg(test)]
 mod trigger_tests;
+#[expect(
+    clippy::large_enum_variant,
+    reason = "bounded in-flight site placements stay in the approved effect frame; trigger ownership is unchanged"
+)]
 mod triggers;
 use ability::{CompiledAbilities, SelectionSpec, SpatialRelation};
 use choices::PendingAbilityChoice;
@@ -6108,6 +6112,18 @@ impl Game {
             })
     }
 
+    fn site_scope_contains(scope: SiteCountScope, anchor: Cell, candidate: Cell) -> bool {
+        match scope {
+            SiteCountScope::Adjacent => anchor.bordering(false).any(|cell| cell == candidate),
+            SiteCountScope::Nearby => {
+                anchor == candidate
+                    || anchor.bordering(false).any(|cell| cell == candidate)
+                    || anchor.diagonals(false).any(|cell| cell == candidate)
+            }
+            SiteCountScope::Realm => true,
+        }
+    }
+
     fn count_sites(
         &self,
         query: SiteCountQuery,
@@ -6117,17 +6133,7 @@ impl Game {
     ) -> usize {
         Cell::ALL
             .into_iter()
-            .filter(|candidate| match query.scope {
-                SiteCountScope::Adjacent => {
-                    source_cell.bordering(false).any(|cell| cell == *candidate)
-                }
-                SiteCountScope::Nearby => {
-                    *candidate == source_cell
-                        || source_cell.bordering(false).any(|cell| cell == *candidate)
-                        || source_cell.diagonals(false).any(|cell| cell == *candidate)
-                }
-                SiteCountScope::Realm => true,
-            })
+            .filter(|candidate| Self::site_scope_contains(query.scope, source_cell, *candidate))
             .filter(|cell| {
                 let Some(site) = self.position.sites[cell.index()].as_ref() else {
                     return false;
@@ -9038,6 +9044,26 @@ impl Game {
         cells: &[Cell],
         incoming_site: Option<(Cell, &SiteFacts)>,
     ) -> u8 {
+        u8::try_from(
+            u16::from(facts.attack).saturating_add(self.prospective_minion_entry_bonus(
+                seat,
+                facts,
+                cells,
+                Region::Surface,
+                incoming_site,
+            )),
+        )
+        .unwrap_or(u8::MAX)
+    }
+
+    fn prospective_minion_entry_bonus(
+        &self,
+        seat: Seat,
+        facts: &MinionFacts,
+        cells: &[Cell],
+        region: Region,
+        incoming_site: Option<(Cell, &SiteFacts)>,
+    ) -> u16 {
         let mut bonus = 0_u16;
         for source in &self.position.units {
             if source.controller != seat || self.minion_abilities_lost(source) {
@@ -9046,10 +9072,10 @@ impl Game {
             let CardFacts::Minion(source_facts) =
                 &self.rules.cards[usize::from(source.card.card_id.0)].facts
             else {
-                return u8::MAX;
+                return u16::MAX;
             };
             if source_facts.other_nearby_allies_power_bonus
-                && source.region == Region::Surface
+                && source.region == region
                 && Self::footprints_nearby(Self::unit_occupied_cells(source), cells)
             {
                 bonus = bonus.saturating_add(1);
@@ -9081,7 +9107,36 @@ impl Game {
         {
             bonus = bonus.saturating_add(2);
         }
-        u8::try_from(u16::from(facts.attack).saturating_add(bonus)).unwrap_or(u8::MAX)
+        bonus
+    }
+
+    fn token_entry_power_for_location(
+        &self,
+        seat: Seat,
+        facts: &MinionFacts,
+        cells: &[Cell],
+        region: Region,
+        incoming_site: Option<(Cell, &SiteFacts)>,
+    ) -> Result<u8, GameError> {
+        let has_bar = cells.iter().any(|cell| {
+            if let Some((incoming_cell, site)) = incoming_site
+                && *cell == incoming_cell
+            {
+                return (site.ordinary || !self.fate_covers_cell(*cell))
+                    && site
+                        .prevents_units_with_power_at_least_from_entering
+                        .is_some();
+            }
+            self.site_prevents_power_entry(*cell, u8::MAX)
+        });
+        if has_bar
+            && self.prospective_minion_entry_bonus(seat, facts, cells, region, incoming_site) != 0
+        {
+            return Err(GameError::UnsupportedMechanic(
+                "token entry power timing with ongoing bonuses is unresolved".to_owned(),
+            ));
+        }
+        Ok(facts.attack)
     }
 
     fn token_minion_facts(&self, token_card_id: &str) -> Result<&MinionFacts, GameError> {
@@ -9124,7 +9179,8 @@ impl Game {
             {
                 return Ok(false);
             }
-            let power = self.prospective_minion_entry_power(seat, facts, &area, None);
+            let power =
+                self.token_entry_power_for_location(seat, facts, &area, Region::Surface, None)?;
             return Ok(self.square_allows_power_entry(area, power));
         }
         if facts.occupies_square_area_two {
@@ -9132,7 +9188,13 @@ impl Game {
         }
         Ok(!self.site_prevents_power_entry(
             cell,
-            self.prospective_minion_entry_power(seat, facts, std::slice::from_ref(&cell), None),
+            self.token_entry_power_for_location(
+                seat,
+                facts,
+                std::slice::from_ref(&cell),
+                Region::Surface,
+                None,
+            )?,
         ))
     }
 
@@ -9160,8 +9222,12 @@ impl Game {
         }
         // A direct summon is not casting. Survival in the destination region is
         // settled after entry, rather than filtering out tokens without the keyword.
-        Ok(location.region != Region::Surface
-            || self.token_may_enter_cell(seat, token_card_id, location.cell)?)
+        let power =
+            self.token_entry_power_for_location(seat, facts, cells, location.region, None)?;
+        Ok(location.region == Region::Void
+            || cells
+                .iter()
+                .all(|cell| !self.site_prevents_power_entry(*cell, power)))
     }
 
     fn token_may_enter_played_site(
@@ -9185,7 +9251,13 @@ impl Game {
         {
             return Ok(false);
         }
-        let power = self.prospective_minion_entry_power(seat, facts, cells, Some((cell, site)));
+        let power = self.token_entry_power_for_location(
+            seat,
+            facts,
+            cells,
+            Region::Surface,
+            Some((cell, site)),
+        )?;
         let abilities_lost = self.fate_covers_cell(cell) && !site.ordinary;
         Ok(cells.iter().all(|candidate| {
             if *candidate == cell {
@@ -15934,6 +16006,9 @@ impl Game {
         ordinal: usize,
         origin_state_version: u64,
     ) -> Result<UnitPosition, GameError> {
+        if !self.token_may_enter_location(owner, token_card_id, location)? {
+            return Err(GameError::IllegalAction);
+        }
         let cell = location.cell;
         let card = self.create_token_card(
             owner,
@@ -15956,19 +16031,6 @@ impl Game {
         }
         let occupied_cells = Self::token_anchor_footprint(facts, cell);
         if facts.occupies_square_area_two && occupied_cells.is_none() {
-            return Err(GameError::IllegalAction);
-        }
-        let entry_power = match occupied_cells {
-            Some(area) => self.prospective_minion_entry_power(owner, facts, area.as_slice(), None),
-            None => {
-                self.prospective_minion_entry_power(owner, facts, std::slice::from_ref(&cell), None)
-            }
-        };
-        if location.region == Region::Surface
-            && (occupied_cells
-                .is_some_and(|area| !self.square_allows_power_entry(area, entry_power))
-                || occupied_cells.is_none() && self.site_prevents_power_entry(cell, entry_power))
-        {
             return Err(GameError::IllegalAction);
         }
         Ok(UnitPosition {
@@ -34480,6 +34542,20 @@ mod tests {
             &mut OutcomeLog::Ignore,
         )
         .expect("North takes control of South-owned source");
+        let survivor_cell = Cell::parse("A1").unwrap();
+        let mut survivor_site = game.position.players[seat_index(Seat::North)]
+            .atlas
+            .pop()
+            .expect("North survivor Site");
+        survivor_site
+            .enter_realm()
+            .expect("survivor Site enters realm");
+        game.position.sites[survivor_cell.index()] = Some(SitePosition {
+            card: survivor_site,
+            controller: Seat::North,
+            last_flight_turn: None,
+            warded: false,
+        });
         let mut survivor = game
             .create_token_unit(
                 Seat::South,
@@ -34496,20 +34572,6 @@ mod tests {
         survivor.card.enter_realm().expect("survivor enters realm");
         let survivor_id = survivor.card.instance_id.clone();
         game.position.units.push(survivor);
-        let survivor_cell = Cell::parse("A1").unwrap();
-        let mut survivor_site = game.position.players[seat_index(Seat::North)]
-            .atlas
-            .pop()
-            .expect("North survivor Site");
-        survivor_site
-            .enter_realm()
-            .expect("survivor Site enters realm");
-        game.position.sites[survivor_cell.index()] = Some(SitePosition {
-            card: survivor_site,
-            controller: Seat::North,
-            last_flight_turn: None,
-            warded: false,
-        });
         let survivor_definition = game
             .position
             .units

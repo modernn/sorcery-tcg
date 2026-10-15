@@ -2769,3 +2769,1376 @@ fn source_anchor_tracks_the_live_unit_and_rejects_unresolved_departure_geometry(
         Err(GameError::UnsupportedMechanic(_))
     ));
 }
+
+// These complete synthetic fixtures prove shared rules, not actual card admission.
+mod site_token_proofs {
+    use super::super::super::{CardFacts, PendingField, PendingGenesisToken, SitePosition};
+    use super::*;
+    use crate::ability::{SiteDestinationArea, SiteDestinationQuery};
+
+    fn fixture(seat: Seat) -> Game {
+        fixture_with_facts(seat, None)
+    }
+
+    fn fixture_with_facts(seat: Seat, extra: Option<&serde_json::Value>) -> Game {
+        let manifest = selfplay_manifest_with(141_001, |manifest| {
+            let mut facts: serde_json::Value = serde_json::from_str(r#"{"syn:land":{"cardType":"site","elements":["earth"]},"syn:water":{"cardType":"site","elements":["water"]},"syn:bar-land":{"cardType":"site","elements":["earth"],"preventsUnitsWithPowerAtLeastFromEntering":3},"syn:bar-water":{"cardType":"site","elements":["water"],"preventsUnitsWithPowerAtLeastFromEntering":3},"syn:bonus":{"cardType":"minion","attack":1,"defense":1,"manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0},"otherNearbyAlliesPowerBonus":1},"syn:power2":{"cardType":"minion","attack":2,"defense":2,"manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0},"token":true,"burrowing":true,"submerge":true},"syn:power3":{"cardType":"minion","attack":3,"defense":3,"manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0},"token":true,"burrowing":true,"submerge":true},"syn:plain-token":{"cardType":"minion","attack":1,"defense":1,"manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0},"token":true},"syn:single-site":{"cardType":"magic","manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0},"effectProgram":{"selection":null,"effects":[{"op":"summon-token","token":"syn:plain-token","count":1,"destination":{"choose-site":{"area":"realm","controller":"allied"}}}]}},"syn:parent":{"cardType":"magic","manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0},"effectProgram":{"selection":null,"effects":[{"op":"summon-token","token":"syn:entry-token","count":1,"destination":{"each-site":{"area":"near-controller-avatar","controller":"any"}}},{"op":"draw","zone":"spellbook","count":1}]}},"syn:entry-token":{"cardType":"minion","attack":1,"defense":1,"manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0},"token":true,"entersCarrying":["syn:gear"],"genesisProgram":{"effects":[{"op":"choose-unit","relation":"anywhere","alliedOnly":true,"optional":true},{"op":"draw","zone":"spellbook","count":1}]}},"syn:gear":{"cardType":"artifact","manaCost":null,"thresholds":{"air":0,"earth":0,"fire":0,"water":0},"token":true,"bearerUnitStrike":{"damageBonus":1}},"syn:death-parent":{"cardType":"magic","manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0},"effectProgram":{"selection":null,"effects":[{"op":"summon-token","token":"syn:death-token","count":1,"destination":{"each-site":{"area":"near-controller-avatar","controller":"any"}}},{"op":"draw","zone":"spellbook","count":1}]}},"syn:death-token":{"cardType":"minion","attack":1,"defense":1,"manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0},"token":true,"deathriteDrawSite":true},"syn:entry-stealth":{"cardType":"site","elements":["earth"],"siteEntryEffect":"grantStealthToEnteringMinion"},"syn:mixed-identity":{"cardType":"magic","manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0},"effectProgram":{"selection":null,"effects":[{"op":"summon-token","token":"syn:plain-token","count":1,"destination":{"each-site":{"area":"near-controller-avatar","controller":"any"}}},{"op":"summon-token","token":"syn:plain-token","count":1,"destination":"source"}]}},"syn:genesis-site-summoner":{"cardType":"minion","attack":1,"defense":1,"manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0},"genesisProgram":{"effects":[{"op":"summon-token","token":"syn:plain-token","count":1,"destination":{"each-site":{"area":"near-controller-avatar","controller":"any"}}}]}},"syn:paid-bar":{"cardType":"site","elements":["earth"],"preventsUnitsWithPowerAtLeastFromEntering":3,"genesisPayOneManaToSummonToken":"syn:power2"},"syn:paid-bar-ordinary":{"cardType":"site","elements":["earth"],"ordinary":true,"preventsUnitsWithPowerAtLeastFromEntering":3,"genesisPayOneManaToSummonToken":"syn:power2"},"syn:paid-clear":{"cardType":"site","elements":["earth"],"genesisPayOneManaToSummonToken":"syn:power2"},"syn:fate-contrast":{"cardType":"aura","manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0},"affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities":true},"syn:legacy-bar-magic":{"cardType":"magic","manaCost":2,"thresholds":{"air":0,"earth":0,"fire":0,"water":0},"summonTokenToEachControlledSiteBorderingEnemySite":"syn:power2"},"syn:power3-spell":{"cardType":"magic","manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0},"effectProgram":{"selection":null,"effects":[{"op":"summon-token","token":"syn:power3","count":1,"destination":{"each-site":{"area":"near-controller-avatar","controller":"any"}}}]}},"syn:square-power2":{"cardType":"minion","attack":2,"defense":2,"manaCost":0,"thresholds":{"air":0,"earth":0,"fire":0,"water":0},"token":true,"occupiesSquareArea":2}}"#).unwrap();
+            if let Some(extra) = extra {
+                facts
+                    .as_object_mut()
+                    .unwrap()
+                    .extend(extra.as_object().unwrap().clone());
+            }
+            manifest["cards"]["north-spell-49"] = json!({"cardType":"magic","manaCost":0,
+                "thresholds":{"air":0,"earth":0,"fire":0,"water":0},
+                "effectProgram":{"effects":[{"op":"summon-token","token":"syn:square-power2","count":1,"destination":"source"}]}});
+            for (id, facts) in facts.as_object().unwrap() {
+                manifest["cards"][id] = facts.clone();
+                if facts["token"] != true {
+                    let zone = if facts["cardType"] == "site" {
+                        "atlas"
+                    } else {
+                        "spellbook"
+                    };
+                    manifest["decks"]["north"][zone]
+                        .as_array_mut()
+                        .unwrap()
+                        .push(json!(id));
+                }
+            }
+        });
+        let mut game = Game::from_manifest_json(&manifest).unwrap();
+        game.position.sites.fill(None);
+        game.position.rubble.fill(None);
+        game.position.units.clear();
+        game.position.phase = Phase::Main;
+        game.position.active_seat = seat;
+        game.position.decision_seat = seat;
+        game.position.turn_number = 10;
+        game.position.state_version = 100;
+        for player in &mut game.position.players {
+            player.mana = 12;
+            player.domain_established = true;
+        }
+        game.position.players[seat_index(seat)].avatar.location = cell(seat, "C2");
+        game.position.players[seat_index(super::super::super::other_seat(seat))]
+            .avatar
+            .location = cell(seat, "E1");
+        for (at, id, allied, warded) in [
+            ("C2", "land", true, false),
+            ("B2", "land", true, false),
+            ("B1", "water", true, false),
+            ("D2", "water", true, false),
+            ("D3", "land", false, false),
+            ("B3", "land", false, true),
+            ("E4", "land", true, false),
+            ("A4", "water", true, false),
+            ("E1", "land", false, false),
+        ] {
+            put_site(&mut game, seat, at, id, allied, warded);
+        }
+        game.position.rubble[cell(seat, "C1").index()] =
+            Some(identity_hash(&json!({"rubble":"C1","seat":seat})).unwrap());
+        game
+    }
+
+    fn cell(seat: Seat, at: &str) -> Cell {
+        let bytes = at.as_bytes();
+        let at = if seat == Seat::South {
+            format!(
+                "{}{}",
+                char::from(b'E' - (bytes[0] - b'A')),
+                char::from(b'5' - (bytes[1] - b'0'))
+            )
+        } else {
+            at.to_owned()
+        };
+        Cell::parse(&at).unwrap()
+    }
+
+    fn put_site(game: &mut Game, seat: Seat, at: &str, id: &str, allied: bool, warded: bool) {
+        let at = cell(seat, at);
+        let owner = if allied {
+            seat
+        } else {
+            super::super::super::other_seat(seat)
+        };
+        let mut card = card(game, &format!("syn:{id}"), owner, &format!("site-{at:?}"));
+        card.enter_realm().unwrap();
+        game.position.rubble[at.index()] = None;
+        game.position.sites[at.index()] = Some(SitePosition {
+            card,
+            controller: owner,
+            warded,
+            last_flight_turn: None,
+        });
+    }
+
+    fn query(each: bool) -> TokenDestination {
+        let q = SiteDestinationQuery {
+            area: if each {
+                SiteDestinationArea::NearControllerAvatar
+            } else {
+                SiteDestinationArea::Realm
+            },
+            controller: if each {
+                ControllerRelation::Any
+            } else {
+                ControllerRelation::Allied
+            },
+        };
+        if each {
+            TokenDestination::EachSite(q)
+        } else {
+            TokenDestination::ChooseSite(q)
+        }
+    }
+
+    fn frame(game: &Game, seat: Seat, id: &str) -> super::super::EffectFrame {
+        game.effect_frame(
+            card_id(game, id),
+            AbilityEntry::Magic,
+            source("site-token", seat, 0, None),
+            None,
+            None,
+            Some(card(game, id, seat, "held-magic")),
+        )
+        .unwrap()
+    }
+
+    fn choose_all(game: &mut Game, outcomes: &mut OutcomeLog<'_>) {
+        while let Some(pending) = &game.position.pending_ability_choice {
+            let source = pending.frame.source.instance_id.clone();
+            let seat = pending.frame.source.controller;
+            let location = game
+                .site_token_location_choices(&pending.frame)
+                .unwrap()
+                .into_iter()
+                .find(|location| location.region == Region::Surface)
+                .unwrap();
+            game.apply_ability_location_choice_action(seat, &source, location, outcomes)
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn non_target_geometry_layers_ward_cohort_identity_and_both_seats() {
+        for seat in [Seat::North, Seat::South] {
+            let mut game = fixture(seat);
+            let destinations = game.site_destination_cells(
+                match query(true) {
+                    TokenDestination::EachSite(q) => q,
+                    _ => unreachable!(),
+                },
+                seat,
+            );
+            let expected: Vec<_> = ["C2", "B2", "B1", "D2", "D3", "B3", "C1"]
+                .map(|at| cell(seat, at))
+                .into();
+            assert_eq!(destinations.len(), expected.len());
+            assert!(expected.iter().all(|cell| destinations.contains(cell)));
+            let id = install(
+                &mut game,
+                vec![Effect::SummonToken {
+                    token: "syn:plain-token".into(),
+                    count: 1,
+                    destination: query(true),
+                }],
+            );
+            let mut f = frame(&game, seat, "north-spell-49");
+            f.card_id = id;
+            // Caster geometry does not restrict this controller-Avatar site query.
+            f.source.region = Region::Void;
+            f.source.cells = vec![cell(seat, "A4")];
+            let mut events = Vec::new();
+            let mut outcomes = OutcomeLog::Record(&mut events);
+            game.run_effect_frame(f, &mut outcomes).unwrap();
+            assert!(game.position.units.is_empty());
+            let pending = &game.position.pending_ability_choice.as_ref().unwrap().frame;
+            assert_eq!(
+                game.effect_frame_value(pending)["siteTokens"]["sites"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                7
+            );
+            let cloned = game.clone();
+            assert_eq!(cloned.state_hash().unwrap(), game.state_hash().unwrap());
+            choose_all(&mut game, &mut outcomes);
+            assert_eq!(game.position.units.len(), 7);
+            let ids: std::collections::BTreeSet<_> = game
+                .position
+                .units
+                .iter()
+                .map(|u| &u.card.instance_id)
+                .collect();
+            assert_eq!(ids.len(), 7);
+            assert!(game.position.units.iter().all(|u| u.controller == seat
+                && u.card.owner == seat
+                && u.summoning_sickness
+                && !u.tapped));
+            assert!(
+                game.position.sites[cell(seat, "B3").index()]
+                    .as_ref()
+                    .unwrap()
+                    .warded
+            );
+        }
+    }
+
+    #[test]
+    fn chosen_site_count_hold_empty_completion_and_stale_incarnations() {
+        for seat in [Seat::North, Seat::South] {
+            let mut game = fixture(seat);
+            let id = install(
+                &mut game,
+                vec![Effect::SummonToken {
+                    token: "syn:plain-token".into(),
+                    count: 4,
+                    destination: query(false),
+                }],
+            );
+            let mut f = frame(&game, seat, "north-spell-49");
+            f.card_id = id;
+            let before = game.authoritative_state();
+            let mut events = Vec::new();
+            assert!(matches!(
+                game.run_effect_frame(f, &mut OutcomeLog::Record(&mut events)),
+                Err(GameError::UnsupportedMechanic(_))
+            ));
+            assert!(game.position.units.is_empty());
+            assert!(game.position.pending_ability_choice.is_none());
+            assert_eq!(before, game.authoritative_state());
+            install(
+                &mut game,
+                vec![Effect::SummonToken {
+                    token: "syn:plain-token".into(),
+                    count: 1,
+                    destination: query(false),
+                }],
+            );
+            let f = frame(&game, seat, "north-spell-49");
+            game.run_effect_frame(f, &mut OutcomeLog::Ignore).unwrap();
+            let pending = game.position.pending_ability_choice.as_ref().unwrap();
+            let choices = game.site_token_location_choices(&pending.frame).unwrap();
+            assert!(choices.contains(&Location {
+                cell: cell(seat, "E4"),
+                region: Region::Underground
+            }));
+            assert!(
+                !choices
+                    .iter()
+                    .any(|l| l.cell == cell(seat, "C1") || l.cell == cell(seat, "B3"))
+            );
+            let c = cell(seat, "B2");
+            let captured = game.capture_site_destination(c).unwrap().unwrap();
+            game.position.sites[c.index()]
+                .as_mut()
+                .unwrap()
+                .card
+                .enter_realm()
+                .unwrap();
+            assert!(game.site_destination_cell(&captured).is_none());
+            let r = cell(seat, "C1");
+            let captured = game.capture_site_destination(r).unwrap().unwrap();
+            game.position.rubble[r.index()] =
+                Some(identity_hash(&json!({"new":"rubble"})).unwrap());
+            assert!(game.site_destination_cell(&captured).is_none());
+            game.position.sites.fill(None);
+            game.position.rubble.fill(None);
+            game.resume_empty_ability_choice(&mut OutcomeLog::Ignore)
+                .unwrap();
+            assert!(game.position.pending_ability_choice.is_none());
+            assert!(game.position.units.is_empty());
+        }
+    }
+
+    #[test]
+    fn all_layer_entry_and_c1_preflight_are_distinct_from_survival() {
+        for seat in [Seat::North, Seat::South] {
+            let mut game = fixture(seat);
+            for (at, site, region) in [
+                ("B2", "bar-land", Region::Underground),
+                ("D2", "bar-water", Region::Underwater),
+            ] {
+                put_site(&mut game, seat, at, site, true, false);
+                let location = Location {
+                    cell: cell(seat, at),
+                    region,
+                };
+                assert!(
+                    game.token_may_enter_location(seat, "syn:power2", location)
+                        .unwrap()
+                );
+                assert!(
+                    !game
+                        .token_may_enter_location(seat, "syn:power3", location)
+                        .unwrap()
+                );
+                assert!(matches!(
+                    game.create_token_unit(
+                        seat,
+                        "syn:power3",
+                        &source("ctor", seat, 0, None).instance_id,
+                        location,
+                        0,
+                        100
+                    ),
+                    Err(GameError::IllegalAction)
+                ));
+            }
+            let mut bonus = minion(&game, "syn:bonus", seat, "bonus", false);
+            bonus.location = cell(seat, "B2");
+            game.position.units.push(bonus);
+            assert!(matches!(
+                game.token_may_enter_cell(seat, "syn:power2", cell(seat, "B2")),
+                Err(GameError::UnsupportedMechanic(_))
+            ));
+            install(
+                &mut game,
+                vec![Effect::SummonToken {
+                    token: "syn:power2".into(),
+                    count: 1,
+                    destination: query(true),
+                }],
+            );
+            let f = frame(&game, seat, "north-spell-49");
+            game.run_effect_frame(f, &mut OutcomeLog::Ignore).unwrap();
+            loop {
+                let pending = game.position.pending_ability_choice.as_ref().unwrap();
+                let source = pending.frame.source.instance_id.clone();
+                let location = game
+                    .site_token_location_choices(&pending.frame)
+                    .unwrap()
+                    .into_iter()
+                    .find(|l| l.region == Region::Surface)
+                    .unwrap();
+                match game.apply_ability_location_choice_action(
+                    seat,
+                    &source,
+                    location,
+                    &mut OutcomeLog::Ignore,
+                ) {
+                    Ok(()) => {}
+                    Err(GameError::UnsupportedMechanic(_)) => break,
+                    other => panic!("unexpected {other:?}"),
+                }
+            }
+            assert_eq!(
+                game.position.units.len(),
+                1,
+                "no successful token prefix before C1"
+            );
+        }
+    }
+
+    #[test]
+    fn upstream_incoming_live_footprint_and_deferred_guards() {
+        for seat in [Seat::North, Seat::South] {
+            let mut game = fixture(seat);
+            let at = cell(seat, "B2");
+            let mut bonus = minion(&game, "syn:bonus", seat, "upstream-bonus", false);
+            bonus.location = at;
+            game.position.units.push(bonus);
+            let CardFacts::Site(bar) =
+                &game.rules.cards[usize::from(card_id(&game, "syn:paid-bar").0)].facts
+            else {
+                panic!()
+            };
+            let CardFacts::Site(clear) =
+                &game.rules.cards[usize::from(card_id(&game, "syn:paid-clear").0)].facts
+            else {
+                panic!()
+            };
+            assert!(matches!(
+                game.token_may_enter_played_site(seat, "syn:power2", at, bar),
+                Err(GameError::UnsupportedMechanic(_))
+            ));
+            assert!(
+                game.token_may_enter_played_site(seat, "syn:power2", at, clear)
+                    .unwrap()
+            );
+            put_site(&mut game, seat, "B2", "paid-bar", true, false);
+            let before = game.authoritative_state();
+            assert!(matches!(
+                game.magic_token_summon_cells(seat, "syn:power2"),
+                Err(GameError::UnsupportedMechanic(_))
+            ));
+            assert_eq!(before, game.authoritative_state());
+            let source = game.position.sites[at.index()]
+                .as_ref()
+                .unwrap()
+                .card
+                .instance_id
+                .clone();
+            game.position.pending_genesis_token = PendingField::Pending(PendingGenesisToken {
+                cell: at,
+                seat,
+                source_instance_id: source,
+            });
+            game.position.phase = Phase::Genesis;
+            let before = game.authoritative_state();
+            let mut actions = Vec::new();
+            assert!(matches!(
+                game.append_pending_genesis_token_actions(
+                    &mut actions,
+                    match &game.position.pending_genesis_token {
+                        PendingField::Pending(pending) => pending,
+                        _ => panic!(),
+                    }
+                ),
+                Err(GameError::UnsupportedMechanic(_))
+            ));
+            assert_eq!(before, game.authoritative_state());
+            game.position.players[seat_index(seat)].mana = 0;
+            actions.clear();
+            game.append_pending_genesis_token_actions(
+                &mut actions,
+                match &game.position.pending_genesis_token {
+                    PendingField::Pending(pending) => pending,
+                    _ => panic!(),
+                },
+            )
+            .unwrap();
+            assert_eq!(actions.len(), 1);
+        }
+    }
+    #[test]
+    fn parent_equipment_genesis_record_silent_and_captured_custody() {
+        for seat in [Seat::North, Seat::South] {
+            let mut game = fixture(seat);
+            put_site(&mut game, seat, "C2", "entry-stealth", true, false);
+            let mut f = frame(&game, seat, "syn:parent");
+            let owner = super::super::super::other_seat(seat);
+            f.source.owner = owner;
+            f.magic.as_mut().unwrap().owner = owner;
+            let magic_id = f.magic.as_ref().unwrap().instance_id.clone();
+            let before_spells = game.position.players[seat_index(seat)].spellbook.len();
+            game.run_effect_frame(f, &mut OutcomeLog::Ignore).unwrap();
+            let mut silent = game.clone();
+            let mut recorded_again = game.clone();
+            let mut all_events = Vec::new();
+            for _ in 0..100 {
+                if game.position.phase == Phase::Main {
+                    break;
+                }
+                let actions = game.legal_actions().unwrap();
+                assert_eq!(actions, silent.legal_actions().unwrap());
+                let action = actions
+                    .iter()
+                    .find(|a| {
+                        matches!(
+                            a.descriptor,
+                            ActionDescriptor::ChooseAbilityLocation {
+                                location: Location {
+                                    region: Region::Surface,
+                                    ..
+                                },
+                                ..
+                            }
+                        )
+                    })
+                    .or_else(|| {
+                        actions.iter().find(|a| {
+                            matches!(
+                                a.descriptor,
+                                ActionDescriptor::ChooseAbility { target: None, .. }
+                            )
+                        })
+                    })
+                    .unwrap_or_else(|| actions.first().expect("continuation action"));
+                let (events, random) = game.apply_action_recorded(action).unwrap();
+                let (other, other_random) = recorded_again.apply_action_recorded(action).unwrap();
+                silent.apply_action(action).unwrap();
+                assert_eq!(events, other);
+                assert_eq!(random, other_random);
+                assert_eq!(game.authoritative_state(), silent.authoritative_state());
+                assert_eq!(game.state_hash().unwrap(), silent.state_hash().unwrap());
+                all_events.extend(events);
+            }
+            assert_eq!(game.position.phase, Phase::Main);
+            assert_eq!(game.position.units.len(), 7);
+            assert_eq!(game.position.artifacts.len(), 7);
+            assert!(
+                game.position
+                    .units
+                    .iter()
+                    .find(|unit| unit.location == cell(seat, "C2"))
+                    .unwrap()
+                    .stealthed
+            );
+            assert_eq!(
+                before_spells - game.position.players[seat_index(seat)].spellbook.len(),
+                8,
+                "seven Genesis draws plus exactly one parent tail"
+            );
+            assert_eq!(
+                game.position.players[seat_index(owner)]
+                    .cemetery
+                    .iter()
+                    .filter(|c| c.instance_id == magic_id)
+                    .count(),
+                1
+            );
+            let last_entry = all_events
+                .iter()
+                .rposition(|(kind, _)| kind == "minion-summoned")
+                .unwrap();
+            let first_draw = all_events
+                .iter()
+                .position(|(kind, _)| kind == "spell-drawn")
+                .unwrap();
+            assert!(
+                last_entry < first_draw,
+                "whole cohort enters before Genesis"
+            );
+        }
+    }
+
+    #[test]
+    fn source_departure_is_explicit_and_started_choice_skips_replacement() {
+        for seat in [Seat::North, Seat::South] {
+            let mut game = fixture(seat);
+            install(
+                &mut game,
+                vec![Effect::SummonToken {
+                    token: "syn:plain-token".into(),
+                    count: 1,
+                    destination: query(true),
+                }],
+            );
+            let mut f = frame(&game, seat, "north-spell-49");
+            let actor = minion(&game, "syn:bonus", seat, "departed-actor", false);
+            f.source.actor = Some(RealmReference::from_card(&actor.card));
+            let before = game.authoritative_state();
+            assert!(matches!(
+                game.run_effect_frame(f, &mut OutcomeLog::Ignore),
+                Err(GameError::UnsupportedMechanic(_))
+            ));
+            assert_eq!(before, game.authoritative_state());
+            let f = frame(&game, seat, "north-spell-49");
+            game.run_effect_frame(f, &mut OutcomeLog::Ignore).unwrap();
+            let location = game
+                .site_token_location_choices(
+                    &game.position.pending_ability_choice.as_ref().unwrap().frame,
+                )
+                .unwrap()[0];
+            if let Some(site) = game.position.sites[location.cell.index()].as_mut() {
+                site.card.enter_realm().unwrap();
+            } else {
+                game.position.rubble[location.cell.index()] =
+                    Some(identity_hash(&json!({"replacement":true,"seat":seat})).unwrap());
+            }
+            game.resume_empty_ability_choice(&mut OutcomeLog::Ignore)
+                .unwrap();
+            choose_all(&mut game, &mut OutcomeLog::Ignore);
+            assert_eq!(
+                game.position.units.len(),
+                6,
+                "no retarget to replacement incarnation"
+            );
+        }
+    }
+
+    #[test]
+    fn upstream_legacy_incoming_payment_and_decline_are_atomic() {
+        use crate::action::GenesisTokenChoice;
+        for seat in [Seat::North, Seat::South] {
+            let mut game = fixture(seat);
+            game.position.players[seat_index(seat)].hand_spellbook =
+                vec![card(&game, "syn:legacy-bar-magic", seat, "legacy-hand")];
+            let cast=game.legal_actions().unwrap().into_iter().find(|a| matches!(&a.descriptor,ActionDescriptor::CastMagic {card_id,..} if card_id=="syn:legacy-bar-magic")).unwrap();
+            put_site(&mut game, seat, "B2", "paid-bar", true, false);
+            let mut bonus = minion(&game, "syn:bonus", seat, "legacy-bonus", false);
+            bonus.location = cell(seat, "B2");
+            game.position.units.push(bonus);
+            let before = game.authoritative_state();
+            let mut events = Vec::new();
+            assert!(matches!(
+                game.apply_cast_magic_action(
+                    &cast,
+                    &mut OutcomeLog::Record(&mut events),
+                    None,
+                    None
+                ),
+                Err(GameError::UnsupportedMechanic(_))
+            ));
+            assert_eq!(before, game.authoritative_state());
+            assert!(events.is_empty());
+            // Paid site issuance and validation use incoming facts even over void.
+            let mut game = fixture(seat);
+            let at = cell(seat, "C3");
+            let mut atlas_card = card(&game, "syn:paid-bar", seat, "incoming-hand");
+            atlas_card.source = CardSource::Atlas;
+            game.position.players[seat_index(seat)].hand_atlas = vec![atlas_card];
+            let mut actions = Vec::new();
+            game.append_play_site_actions(&mut actions, seat, None)
+                .unwrap();
+            let pay=actions.iter().find(|a|matches!(a.descriptor,ActionDescriptor::PlaySite {cell,genesis_token_choice:Some(GenesisTokenChoice::PayOneMana),..} if cell==at)).unwrap().clone();
+            let decline=actions.iter().find(|a|matches!(a.descriptor,ActionDescriptor::PlaySite {cell,genesis_token_choice:Some(GenesisTokenChoice::Decline),..} if cell==at)).unwrap().clone();
+            let mut bonus = minion(&game, "syn:bonus", seat, "incoming-bonus", false);
+            bonus.location = cell(seat, "B2");
+            game.position.units.push(bonus);
+            let before = game.authoritative_state();
+            actions.clear();
+            assert!(matches!(
+                game.append_play_site_actions(&mut actions, seat, None),
+                Err(GameError::UnsupportedMechanic(_))
+            ));
+            assert!(matches!(
+                game.apply_play_site_action(&pay, &mut OutcomeLog::Record(&mut events)),
+                Err(GameError::UnsupportedMechanic(_))
+            ));
+            assert_eq!(before, game.authoritative_state());
+            assert!(events.is_empty());
+            game.apply_play_site_action(&decline, &mut OutcomeLog::Ignore)
+                .unwrap();
+            assert_eq!(
+                game.position.units.len(),
+                1,
+                "decline exercises no token entry"
+            );
+            // Deferred revalidation preserves pending work, payment and events.
+            let site = game.position.sites[at.index()].as_ref().unwrap();
+            game.position.pending_genesis_token = PendingField::Pending(PendingGenesisToken {
+                cell: at,
+                seat,
+                source_instance_id: site.card.instance_id.clone(),
+            });
+            game.position.phase = Phase::Genesis;
+            game.position.decision_seat = seat;
+            let before = game.authoritative_state();
+            assert!(matches!(
+                game.apply_resolve_genesis_token(
+                    seat,
+                    GenesisTokenChoice::PayOneMana,
+                    &mut OutcomeLog::Record(&mut events)
+                ),
+                Err(GameError::UnsupportedMechanic(_))
+            ));
+            assert_eq!(before, game.authoritative_state());
+            assert!(events.is_empty());
+            game.apply_resolve_genesis_token(
+                seat,
+                GenesisTokenChoice::Decline,
+                &mut OutcomeLog::Ignore,
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn incoming_override_fate_and_neighboring_footprint_bar() {
+        for seat in [Seat::North, Seat::South] {
+            let mut game = fixture(seat);
+            let at = cell(seat, "B2");
+            let mut bonus = minion(&game, "syn:bonus", seat, "fate-bonus", false);
+            bonus.location = at;
+            game.position.units.push(bonus);
+            let aura = super::super::super::AuraPosition {
+                card: card(&game, "syn:fate-contrast", seat, "fate"),
+                cells: vec![at],
+                controller: seat,
+                turn_counters: 0,
+                visited_cells: std::collections::BTreeSet::new(),
+            };
+            game.position.auras.push(aura);
+            for (id, unsupported) in [("syn:paid-bar", false), ("syn:paid-bar-ordinary", true)] {
+                let CardFacts::Site(site) =
+                    &game.rules.cards[usize::from(card_id(&game, id).0)].facts
+                else {
+                    panic!()
+                };
+                let result = game.token_may_enter_played_site(seat, "syn:power2", at, site);
+                assert_eq!(
+                    matches!(result, Err(GameError::UnsupportedMechanic(_))),
+                    unsupported
+                );
+                if !unsupported {
+                    assert!(result.unwrap());
+                }
+            }
+            // Incoming clear facts override an existing unsuppressed live bar.
+            game.position.auras.clear();
+            put_site(&mut game, seat, "B2", "paid-bar", true, false);
+            let CardFacts::Site(clear) =
+                &game.rules.cards[usize::from(card_id(&game, "syn:paid-clear").0)].facts
+            else {
+                panic!()
+            };
+            assert!(
+                game.token_may_enter_played_site(seat, "syn:power2", at, clear)
+                    .unwrap()
+            );
+        }
+    }
+    #[test]
+    fn square_geometry_guards_before_every_neighbor_bar() {
+        for seat in [Seat::North, Seat::South] {
+            let mut game = fixture(seat);
+            // Mirror a footprint as a set, then retain the engine's canonical anchor.
+            let wanted = ["B2", "C2", "B3", "C3"].map(|at| cell(seat, at));
+            let area = Cell::SQUARE_AREAS
+                .into_iter()
+                .find(|area| wanted.iter().all(|cell| area.contains(cell)))
+                .unwrap();
+            for at in ["B2", "C2", "B3", "C3"] {
+                put_site(&mut game, seat, at, "land", true, false);
+            }
+            let anchor = area[0];
+            let bar_cell = area[3];
+            let bar_id = card_id(&game, "syn:bar-land");
+            game.position.sites[bar_cell.index()]
+                .as_mut()
+                .unwrap()
+                .card
+                .card_id = bar_id;
+            assert!(
+                game.token_may_enter_cell(seat, "syn:square-power2", anchor)
+                    .unwrap()
+            );
+            let mut bonus = minion(&game, "syn:bonus", seat, "square-bonus", false);
+            bonus.location = anchor;
+            game.position.units.push(bonus);
+            assert!(matches!(
+                game.token_may_enter_cell(seat, "syn:square-power2", anchor),
+                Err(GameError::UnsupportedMechanic(_))
+            ));
+            let CardFacts::Site(clear) =
+                &game.rules.cards[usize::from(card_id(&game, "syn:paid-clear").0)].facts
+            else {
+                panic!()
+            };
+            assert!(matches!(
+                game.token_may_enter_played_site(seat, "syn:square-power2", anchor, clear),
+                Err(GameError::UnsupportedMechanic(_))
+            ));
+            let other = area
+                .into_iter()
+                .find(|c| *c != anchor && *c != bar_cell)
+                .unwrap();
+            game.position.sites[other.index()] = None;
+            assert!(
+                !game
+                    .token_may_enter_cell(seat, "syn:square-power2", anchor)
+                    .unwrap(),
+                "impossible footprint rejects before power analysis"
+            );
+            assert!(
+                !game
+                    .token_may_enter_played_site(seat, "syn:square-power2", anchor, clear)
+                    .unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn every_ability_entry_and_mixed_legacy_identity_use_one_interpreter() {
+        for seat in [Seat::North, Seat::South] {
+            for entry in [
+                AbilityEntry::Magic,
+                AbilityEntry::Genesis,
+                AbilityEntry::Entry,
+                AbilityEntry::Activated,
+            ] {
+                let mut game = fixture(seat);
+                let id = card_id(&game, "syn:single-site");
+                let abilities =
+                    &mut Arc::get_mut(&mut game.rules).unwrap().cards[usize::from(id.0)].abilities;
+                let program = abilities.magic.clone();
+                match entry {
+                    AbilityEntry::Magic => {}
+                    AbilityEntry::Genesis => abilities.genesis = program,
+                    AbilityEntry::Entry => abilities.entry = program,
+                    AbilityEntry::Activated => abilities.activated = program,
+                }
+                let mut f = frame(&game, seat, "syn:single-site");
+                f.entry = entry;
+                game.run_effect_frame(f, &mut OutcomeLog::Ignore).unwrap();
+                choose_all(&mut game, &mut OutcomeLog::Ignore);
+                assert_eq!(game.position.units.len(), 1);
+            }
+            let mut game = fixture(seat);
+            for _ in 0..2 {
+                let mut f = frame(&game, seat, "syn:mixed-identity");
+                f.source.cells = vec![cell(seat, "C2")];
+                game.run_effect_frame(f, &mut OutcomeLog::Ignore).unwrap();
+                choose_all(&mut game, &mut OutcomeLog::Ignore);
+            }
+            assert_eq!(game.position.units.len(), 16);
+            let ids: std::collections::BTreeSet<_> = game
+                .position
+                .units
+                .iter()
+                .map(|u| &u.card.instance_id)
+                .collect();
+            assert_eq!(
+                ids.len(),
+                16,
+                "old/new operands, same-site members and repeated operations remain disjoint"
+            );
+        }
+    }
+    #[test]
+    fn multi_site_regional_deathrites_preserve_parent_tail() {
+        for seat in [Seat::North, Seat::South] {
+            let mut game = fixture(seat);
+            let f = frame(&game, seat, "syn:death-parent");
+            let before_atlas = game.position.players[seat_index(seat)].atlas.len();
+            let before_spells = game.position.players[seat_index(seat)].spellbook.len();
+            game.run_effect_frame(f, &mut OutcomeLog::Ignore).unwrap();
+            for _ in 0..100 {
+                if game.position.phase == Phase::Main {
+                    break;
+                }
+                let actions = game.legal_actions().unwrap();
+                let action = actions
+                    .iter()
+                    .find(|a| {
+                        matches!(
+                            a.descriptor,
+                            ActionDescriptor::ChooseAbilityLocation {
+                                location: Location {
+                                    region: Region::Underground | Region::Underwater,
+                                    ..
+                                },
+                                ..
+                            }
+                        )
+                    })
+                    .unwrap_or_else(|| actions.first().expect("regional deathrite action"));
+                game.apply_action(action).unwrap();
+            }
+            assert_eq!(game.position.phase, Phase::Main);
+            assert!(game.position.units.is_empty());
+            assert_eq!(
+                before_atlas - game.position.players[seat_index(seat)].atlas.len(),
+                7
+            );
+            assert_eq!(
+                before_spells - game.position.players[seat_index(seat)].spellbook.len(),
+                1
+            );
+        }
+    }
+    #[test]
+    fn corner_geometry_and_illegal_choice_do_not_wrap_or_mutate() {
+        for seat in [Seat::North, Seat::South] {
+            let mut game = fixture(seat);
+            game.position.sites.fill(None);
+            game.position.rubble.fill(None);
+            game.position.players[seat_index(seat)].avatar.location = cell(seat, "A1");
+            for at in ["A1", "A2", "B1"] {
+                put_site(&mut game, seat, at, "land", true, false);
+            }
+            game.position.rubble[cell(seat, "B2").index()] =
+                Some(identity_hash(&json!({"corner":seat})).unwrap());
+            let TokenDestination::EachSite(q) = query(true) else {
+                panic!()
+            };
+            assert_eq!(game.site_destination_cells(q, seat).len(), 4);
+            let f = frame(&game, seat, "syn:single-site");
+            game.run_effect_frame(f, &mut OutcomeLog::Ignore).unwrap();
+            let source = game
+                .position
+                .pending_ability_choice
+                .as_ref()
+                .unwrap()
+                .frame
+                .source
+                .instance_id
+                .clone();
+            let before = game.authoritative_state();
+            let mut events = Vec::new();
+            assert!(matches!(
+                game.apply_ability_location_choice_action(
+                    seat,
+                    &source,
+                    Location {
+                        cell: cell(seat, "B2"),
+                        region: Region::Surface
+                    },
+                    &mut OutcomeLog::Record(&mut events)
+                ),
+                Err(GameError::IllegalAction)
+            ));
+            assert_eq!(before, game.authoritative_state());
+            assert!(events.is_empty());
+        }
+    }
+    #[test]
+    #[ignore = "requires explicitly supplied source-guarded private candidate fixtures"]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "keeps native sourceful permission, custody, region and lifetime contrasts together"
+    )]
+    fn private_source_guarded_native_card_boundaries() {
+        use sha2::{Digest, Sha256};
+        use std::fmt::Write;
+        let input = std::env::var("SORCERY_SITE_TOKEN_INPUT").unwrap();
+        let packet: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(input).unwrap()).unwrap();
+        let mut fixtures = None;
+        for guard in packet["sourceGuards"].as_array().unwrap() {
+            let path = guard["path"].as_str().unwrap();
+            let bytes = std::fs::read(path).unwrap();
+            let mut digest = String::new();
+            for byte in Sha256::digest(&bytes) {
+                write!(digest, "{byte:02x}").unwrap();
+            }
+            assert_eq!(digest, guard["sha256"].as_str().unwrap());
+            if std::path::Path::new(path).file_name().unwrap() == "fixtures.json" {
+                fixtures = Some(serde_json::from_slice::<serde_json::Value>(&bytes).unwrap());
+            }
+        }
+        let fixtures = fixtures.unwrap();
+        let mut extra = fixtures["actualFacts"].clone();
+        for name in [
+            "syn:caster",
+            "syn:cross-caster",
+            "syn:fire-caster",
+            "syn:single-frog",
+            "syn:single-soldier",
+            "syn:gear-spell",
+        ] {
+            extra[name] = fixtures["syntheticFacts"][name].clone();
+        }
+        let mut results = Vec::new();
+        for seat in [Seat::North, Seat::South] {
+            let owner = super::super::super::other_seat(seat);
+            for (id, facts) in fixtures["actualFacts"]
+                .as_object()
+                .unwrap()
+                .iter()
+                .filter(|(_, facts)| facts["cardType"] == "magic")
+            {
+                for region in [
+                    Region::Surface,
+                    Region::Underground,
+                    Region::Underwater,
+                    Region::Void,
+                ] {
+                    let mut game = fixture_with_facts(seat, Some(&extra));
+                    let mut caster =
+                        minion(&game, "syn:cross-caster", seat, "private-caster", false);
+                    caster.card.owner = owner;
+                    caster.region = region;
+                    caster.location = cell(
+                        seat,
+                        match region {
+                            Region::Surface | Region::Underwater => "A4",
+                            Region::Underground => "B2",
+                            Region::Void => "D1",
+                        },
+                    );
+                    caster.summoning_sickness = false;
+                    let caster_id = caster.card.instance_id.clone();
+                    game.position.units.push(caster);
+                    let magic = card(&game, id, owner, "private-magic");
+                    let magic_id = magic.instance_id.clone();
+                    game.position.players[seat_index(seat)].hand_spellbook = vec![magic];
+                    let find_cast = |game: &Game| {
+                        game.legal_actions().unwrap().into_iter().find(|a|matches!(&a.descriptor,ActionDescriptor::CastMagic {card_id,caster_instance_id,..} if card_id==id && caster_instance_id==&caster_id))
+                    };
+                    let action = find_cast(&game)
+                        .expect("sourceful non-target cast issued in each legal caster region");
+                    game.position.players[seat_index(seat)].mana =
+                        u16::try_from(facts["manaCost"].as_u64().unwrap() - 1).unwrap();
+                    assert!(find_cast(&game).is_none());
+                    game.position.players[seat_index(seat)].mana = 12;
+                    let mut low_affinity = game.clone();
+                    for site in low_affinity.position.sites.iter_mut().flatten() {
+                        if site.controller == seat {
+                            site.controller = owner;
+                        }
+                    }
+                    assert!(find_cast(&low_affinity).is_none());
+                    let mut restricted = game.clone();
+                    restricted.position.units[0].card.card_id =
+                        card_id(&restricted, "syn:fire-caster");
+                    assert!(find_cast(&restricted).is_none());
+                    let before = game.authoritative_state();
+                    if facts["effectProgram"]["effects"][0]["count"] == 4 {
+                        assert!(matches!(
+                            game.apply_action_recorded(&action),
+                            Err(GameError::UnsupportedMechanic(_))
+                        ));
+                        assert_eq!(before, game.authoritative_state());
+                        results.push(json!({"seat":seat,"card":id,"region":region,"status":"BLOCKED_R3_AS_EXPECTED"}));
+                        continue;
+                    }
+                    let mut events = game.apply_action_recorded(&action).unwrap().0;
+                    // A started non-target Magic retains controller/owner after caster departure.
+                    game.position.units.clear();
+                    while game.position.phase == Phase::AbilityChoice {
+                        let actions = game.legal_actions().unwrap();
+                        let action = actions
+                            .iter()
+                            .find(|a| {
+                                matches!(
+                                    a.descriptor,
+                                    ActionDescriptor::ChooseAbilityLocation {
+                                        location: Location {
+                                            region: Region::Surface,
+                                            ..
+                                        },
+                                        ..
+                                    }
+                                )
+                            })
+                            .unwrap();
+                        events.extend(game.apply_action_recorded(action).unwrap().0);
+                    }
+                    assert_eq!(game.position.units.len(), 7);
+                    assert!(
+                        game.position
+                            .units
+                            .iter()
+                            .all(|u| u.card.owner == seat && u.controller == seat)
+                    );
+                    assert!(
+                        !game
+                            .position
+                            .units
+                            .iter()
+                            .any(|u| u.location == cell(seat, "A4"))
+                    );
+                    assert_eq!(game.position.players[seat_index(seat)].mana, 6);
+                    assert_eq!(
+                        game.position.players[seat_index(owner)]
+                            .cemetery
+                            .iter()
+                            .filter(|c| c.instance_id == magic_id)
+                            .count(),
+                        1
+                    );
+                    assert!(
+                        game.position.sites[cell(seat, "B3").index()]
+                            .as_ref()
+                            .unwrap()
+                            .warded
+                    );
+                    results.push(json!({"seat":seat,"card":id,"region":region,"status":"PASS_NATIVE_ONLY","stateHash":game.state_hash().unwrap(),"events":events}));
+                }
+            }
+            for (id, facts) in fixtures["actualFacts"]
+                .as_object()
+                .unwrap()
+                .iter()
+                .filter(|(_, facts)| facts["token"] == true)
+            {
+                let mut game = fixture_with_facts(seat, Some(&extra));
+                let location = Location {
+                    cell: cell(seat, "C2"),
+                    region: Region::Surface,
+                };
+                let token = game
+                    .create_token_unit(
+                        seat,
+                        id,
+                        &source("private-token", seat, 0, None).instance_id,
+                        location,
+                        0,
+                        100,
+                    )
+                    .unwrap();
+                assert!(
+                    token.summoning_sickness && !token.tapped && token.occupied_cells.is_none()
+                );
+                let token_id = token.card.instance_id.clone();
+                game.finish_token_entry(
+                    seat,
+                    token,
+                    &source("private-token", seat, 0, None).instance_id,
+                    0,
+                    &mut OutcomeLog::Ignore,
+                )
+                .unwrap();
+                assert_eq!(
+                    game.position.units.len(),
+                    1,
+                    "including an undamaged printed-zero token"
+                );
+                let target = UnitTarget::Minion {
+                    instance_id: token_id.clone(),
+                    seat,
+                };
+                assert!(!game.legal_actions().unwrap().iter().any(|a| matches!(&a.descriptor,
+                    ActionDescriptor::MoveAndAttack {unit_instance_id,..} if unit_instance_id==&token_id)));
+                game.position.players[seat_index(seat)].hand_spellbook =
+                    vec![card(&game, "syn:gear-spell", seat, "private-gear")];
+                let cast_gear = game
+                    .legal_actions()
+                    .unwrap()
+                    .into_iter()
+                    .find(|a| {
+                        matches!(&a.descriptor,
+                    ActionDescriptor::CastArtifact {bearer:Some(bearer),..} if bearer==&target)
+                    })
+                    .unwrap();
+                game.apply_action(&cast_gear).unwrap();
+                assert_eq!(
+                    game.position.artifacts.len(),
+                    1,
+                    "exact tokens can carry a normal artifact"
+                );
+                let mut rested = game.clone();
+                let end = rested
+                    .legal_actions()
+                    .unwrap()
+                    .into_iter()
+                    .find(|a| matches!(a.descriptor, ActionDescriptor::EndTurn))
+                    .unwrap();
+                rested.apply_action(&end).unwrap();
+                for _ in 0..5 {
+                    if rested.position.active_seat == seat && rested.position.phase == Phase::Main {
+                        break;
+                    }
+                    let actions = rested.legal_actions().unwrap();
+                    let action = actions
+                        .iter()
+                        .find(|a| matches!(a.descriptor, ActionDescriptor::Draw { .. }))
+                        .or_else(|| {
+                            actions
+                                .iter()
+                                .find(|a| matches!(a.descriptor, ActionDescriptor::EndTurn))
+                        })
+                        .unwrap();
+                    rested.apply_action(action).unwrap();
+                }
+                assert!(rested.legal_actions().unwrap().iter().any(|a|matches!(&a.descriptor,
+                    ActionDescriptor::MoveAndAttack {unit_instance_id,..} if unit_instance_id==&token_id)));
+                drop(rested);
+                let damage = install(
+                    &mut game,
+                    vec![Effect::Damage {
+                        recipients: UnitSet::Target,
+                        amount: 1,
+                    }],
+                );
+                let f = game
+                    .effect_frame(
+                        damage,
+                        AbilityEntry::Magic,
+                        source("damage", seat, 0, None),
+                        Some(&target),
+                        None,
+                        None,
+                    )
+                    .unwrap();
+                let mut events = Vec::new();
+                game.run_effect_frame(f, &mut OutcomeLog::Record(&mut events))
+                    .unwrap();
+                assert!(game.position.units.is_empty());
+                assert!(
+                    game.position
+                        .players
+                        .iter()
+                        .all(|p| !p.cemetery.iter().any(|c| c.instance_id == token_id))
+                );
+                assert!(
+                    events
+                        .iter()
+                        .any(|(kind, payload)| kind == "minion-banished"
+                            && payload["instanceId"] == json!(token_id))
+                );
+                results.push(json!({"seat":seat,"token":id,"printedCost":facts["manaCost"],"status":"PASS_NATIVE_LIFECYCLE_ONLY","events":events}));
+            }
+        }
+        let output = std::path::Path::new(packet["output"].as_str().unwrap())
+            .with_file_name("native-candidate-results.json");
+        std::fs::write(output, serde_json::to_vec_pretty(&results).unwrap()).unwrap();
+    }
+    #[test]
+    fn empty_group_finishes_parent_once_without_a_choice() {
+        for seat in [Seat::North, Seat::South] {
+            let mut game = fixture(seat);
+            game.position.sites.fill(None);
+            game.position.rubble.fill(None);
+            let before = game.position.players[seat_index(seat)].spellbook.len();
+            let f = frame(&game, seat, "syn:parent");
+            let magic = f.magic.as_ref().unwrap().instance_id.clone();
+            let mut events = Vec::new();
+            game.run_effect_frame(f, &mut OutcomeLog::Record(&mut events))
+                .unwrap();
+            assert!(game.position.pending_ability_choice.is_none());
+            assert!(game.position.units.is_empty());
+            assert_eq!(
+                before - game.position.players[seat_index(seat)].spellbook.len(),
+                1
+            );
+            assert_eq!(
+                game.position.players[seat_index(seat)]
+                    .cemetery
+                    .iter()
+                    .filter(|card| card.instance_id == magic)
+                    .count(),
+                1
+            );
+            assert!(!events.iter().any(|(kind, _)| kind == "minion-summoned"));
+        }
+    }
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one matrix keeps regional C1 controls and cohort atomicity together"
+    )]
+    fn regional_c1_quarantine_preserves_controls_and_whole_cohorts() {
+        let extra = json!({"syn:regional-bonus":{
+            "cardType":"minion","attack":1,"defense":2,"manaCost":0,
+            "thresholds":{"air":0,"earth":0,"fire":0,"water":0},
+            "submerge":true,"burrowing":true,"otherNearbyAlliesPowerBonus":1
+        }});
+        for seat in [Seat::North, Seat::South] {
+            for region in [Region::Surface, Region::Underwater, Region::Underground] {
+                for (same_region, bar, allied, silenced) in [
+                    (true, true, true, false),
+                    (false, true, true, false),
+                    (true, false, true, false),
+                    (true, true, false, false),
+                    (true, true, true, true),
+                ] {
+                    let mut game = fixture_with_facts(seat, Some(&extra));
+                    let at = if region == Region::Underwater {
+                        "D2"
+                    } else {
+                        "C2"
+                    };
+                    let site = match (region == Region::Underwater, bar) {
+                        (true, true) => "bar-water",
+                        (true, false) => "water",
+                        (false, true) => "bar-land",
+                        (false, false) => "land",
+                    };
+                    put_site(&mut game, seat, at, site, true, false);
+                    let controller = if allied {
+                        seat
+                    } else {
+                        super::super::super::other_seat(seat)
+                    };
+                    let mut provider = minion(
+                        &game,
+                        "syn:regional-bonus",
+                        controller,
+                        "regional-provider",
+                        false,
+                    );
+                    provider.region = if same_region {
+                        region
+                    } else if region == Region::Surface {
+                        Region::Underwater
+                    } else {
+                        Region::Surface
+                    };
+                    provider.location = cell(
+                        seat,
+                        if provider.region == Region::Underwater {
+                            "D2"
+                        } else {
+                            at
+                        },
+                    );
+                    if silenced {
+                        provider.temporary_modifiers.grant(
+                            crate::ability::TemporaryModifierKind::Silence,
+                            1,
+                            source("silence", seat, 0, None).instance_id,
+                        );
+                    }
+                    game.position.units.push(provider);
+                    let location = Location {
+                        cell: cell(seat, at),
+                        region,
+                    };
+                    let result = game.token_may_enter_location(seat, "syn:power2", location);
+                    let held = same_region && bar && allied && !silenced;
+                    assert_eq!(
+                        matches!(result, Err(GameError::UnsupportedMechanic(_))),
+                        held
+                    );
+                    if !held {
+                        assert!(result.unwrap());
+                    }
+                    let result = game.create_token_unit(
+                        seat,
+                        "syn:power2",
+                        &source("ctor", seat, 0, None).instance_id,
+                        location,
+                        0,
+                        100,
+                    );
+                    assert_eq!(
+                        matches!(result, Err(GameError::UnsupportedMechanic(_))),
+                        held
+                    );
+                    // Ordinary prospective entry keeps its existing Surface-only semantics.
+                    let facts = game.token_minion_facts("syn:power2").unwrap();
+                    let power =
+                        game.prospective_minion_entry_power(seat, facts, &[location.cell], None);
+                    let surface_bonus =
+                        game.position.units[0].region == Region::Surface && allied && !silenced;
+                    assert_eq!(power, if surface_bonus { 3 } else { 2 });
+                }
+                let mut game = fixture_with_facts(seat, Some(&extra));
+                game.position.sites.fill(None);
+                game.position.rubble.fill(None);
+                let water = region == Region::Underwater;
+                put_site(
+                    &mut game,
+                    seat,
+                    "C2",
+                    if water { "water" } else { "land" },
+                    true,
+                    false,
+                );
+                put_site(
+                    &mut game,
+                    seat,
+                    "D2",
+                    if water { "bar-water" } else { "bar-land" },
+                    true,
+                    false,
+                );
+                let mut provider =
+                    minion(&game, "syn:regional-bonus", seat, "cohort-provider", false);
+                provider.region = region;
+                provider.location = cell(seat, "D2");
+                game.position.units.push(provider);
+                install(
+                    &mut game,
+                    vec![Effect::SummonToken {
+                        token: "syn:power2".into(),
+                        count: 1,
+                        destination: query(true),
+                    }],
+                );
+                let f = frame(&game, seat, "north-spell-49");
+                game.run_effect_frame(f, &mut OutcomeLog::Ignore).unwrap();
+                let mut commits = 0;
+                loop {
+                    let actions = game.legal_actions().unwrap();
+                    let action=actions.iter().find(|a|matches!(a.descriptor,ActionDescriptor::ChooseAbilityLocation {location,..} if location.region==region)).unwrap();
+                    let before = game.authoritative_state();
+                    match game.apply_action_recorded(action) {
+                        Ok((events, _)) => {
+                            commits += 1;
+                            assert!(!events.iter().any(|(kind, _)| kind == "minion-summoned"));
+                        }
+                        Err(GameError::UnsupportedMechanic(reason)) => {
+                            assert_eq!(
+                                reason,
+                                "token entry power timing with ongoing bonuses is unresolved"
+                            );
+                            assert_eq!(before, game.authoritative_state());
+                            break;
+                        }
+                        other => panic!("unexpected regional cohort result {other:?}"),
+                    }
+                    assert_eq!(game.position.units.len(), 1);
+                }
+                assert_eq!(commits, 1);
+                assert_eq!(game.position.units.len(), 1);
+            }
+        }
+    }
+}

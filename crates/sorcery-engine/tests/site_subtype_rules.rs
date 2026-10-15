@@ -7,7 +7,7 @@ use sorcery_engine::checkpoint::{
     serialize_game_checkpoint,
 };
 use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
-use sorcery_engine::session::{Session, StepResult};
+use sorcery_engine::session::{Session, SessionError, StepResult};
 
 fn site() -> Value {
     json!({"cardType":"site","elements":["earth"]})
@@ -398,7 +398,57 @@ fn suppressed_printed_tower_changes_prospective_oversized_entry_at_another_site(
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one matrix preserves singleton/footprint geometry and explicit early C1 rejection"
+)]
 fn new_printed_tower_token_entry_checks_singleton_and_oversized_power_once() {
+    // Fallible setup preserves C1 from earlier action issuance instead of mistaking it for a missing pay option.
+    fn step(s: &mut Session, predicate: impl Fn(&Value) -> bool) -> Result<(), SessionError> {
+        let before = s.replay_value().unwrap();
+        let actions = match s.legal_actions() {
+            Ok(actions) => actions,
+            Err(error) => {
+                assert_eq!(before, s.replay_value().unwrap());
+                return Err(error);
+            }
+        };
+        let action = actions
+            .iter()
+            .find(|a| predicate(&a.descriptor))
+            .expect("issued subtype setup action");
+        assert!(matches!(
+            s.step(ActionRequest {
+                action_id: action.action_id.to_string(),
+                seat: action.seat,
+                state_version: action.state_version
+            })?,
+            StepResult::Accepted(_)
+        ));
+        Ok(())
+    }
+    fn next_turn(s: &mut Session, zone: &str) -> Result<(), SessionError> {
+        step(s, |d| d["kind"] == "end-turn")?;
+        step(s, |d| d["kind"] == "draw" && d["zone"] == zone)
+    }
+    fn draw_until(s: &mut Session, seat: Seat, zone: &str, id: &str) -> Result<(), SessionError> {
+        for _ in 0..32 {
+            if has(s, seat, zone, id) {
+                return Ok(());
+            }
+            next_turn(s, "spellbook")?;
+            next_turn(s, zone)?;
+        }
+        panic!("bounded draw did not find {id}")
+    }
+    fn play_declining(s: &mut Session, id: &str, at: &str) -> Result<(), SessionError> {
+        step(s, |d| {
+            d["kind"] == "play-site"
+                && d["cardId"] == id
+                && d["cell"] == at
+                && d["genesisTokenChoice"] != "pay-one-mana"
+        })
+    }
     for seat in [Seat::North, Seat::South] {
         for oversized in [false, true] {
             // 0: no Tower, 1: printed Tower, 2: legacy qualification.
@@ -446,45 +496,66 @@ fn new_printed_tower_token_entry_checks_singleton_and_oversized_power_once() {
                     json!({"plain":plain,"gate":gate,"token":token}),
                     "plain",
                 );
-                start_board(&mut s, seat);
-                if oversized {
-                    need(&mut s, seat, "atlas", "plain");
-                    play(&mut s, "plain", &cell(seat, "C3"));
-                    turn(&mut s, "spellbook");
-                    turn(&mut s, "atlas");
-                    need(&mut s, seat, "atlas", "plain");
-                    play(
-                        &mut s,
-                        "plain",
-                        if seat == Seat::North { "B4" } else { "B2" },
+                let outcome = (|| -> Result<(), SessionError> {
+                    play_declining(&mut s, "plain", &cell(seat, "C4"))?;
+                    next_turn(&mut s, "spellbook")?;
+                    play_declining(&mut s, "enemy-site", &cell(seat, "C1"))?;
+                    next_turn(&mut s, "atlas")?;
+                    if oversized {
+                        draw_until(&mut s, seat, "atlas", "plain")?;
+                        play_declining(&mut s, "plain", &cell(seat, "C3"))?;
+                        next_turn(&mut s, "spellbook")?;
+                        next_turn(&mut s, "atlas")?;
+                        draw_until(&mut s, seat, "atlas", "plain")?;
+                        play_declining(
+                            &mut s,
+                            "plain",
+                            if seat == Seat::North { "B4" } else { "B2" },
+                        )?;
+                        next_turn(&mut s, "spellbook")?;
+                        next_turn(&mut s, "atlas")?;
+                    }
+                    draw_until(&mut s, seat, "atlas", "gate")?;
+                    let dest = if oversized {
+                        if seat == Seat::North { "B3" } else { "B1" }.to_owned()
+                    } else {
+                        cell(seat, "C3")
+                    };
+                    let pay = |d: &Value| {
+                        d["kind"] == "play-site"
+                            && d["cardId"] == "gate"
+                            && d["cell"] == dest
+                            && d["genesisTokenChoice"] == "pay-one-mana"
+                    };
+                    assert_eq!(
+                        s.legal_actions()?.iter().any(|a| pay(&a.descriptor)),
+                        allowed,
+                        "seat={seat:?} oversized={oversized} incoming={incoming_tower} existing={existing_tower} threshold={threshold} off_blocker={off_anchor_blocker} dest={dest}"
                     );
-                    turn(&mut s, "spellbook");
-                    turn(&mut s, "atlas");
-                }
-                need(&mut s, seat, "atlas", "gate");
-                let dest = if oversized {
-                    if seat == Seat::North { "B3" } else { "B1" }.to_owned()
+                    if allowed {
+                        let before = s.transcript().len();
+                        step(&mut s, pay)?;
+                        assert!(
+                            s.transcript()[before]
+                                .events
+                                .iter()
+                                .any(|e| e.event_type == "minion-summoned")
+                        );
+                    } else {
+                        play_declining(&mut s, "gate", &dest)?;
+                    }
+                    checkpoint(&s);
+                    Ok(())
+                })();
+                if incoming_tower != 0 || existing_tower != 0 {
+                    assert!(
+                        matches!(outcome,Err(SessionError::Game(sorcery_engine::game::GameError::UnsupportedMechanic(ref reason)))
+                        if reason == "token entry power timing with ongoing bonuses is unresolved"),
+                        "Tower/bar timing is quarantined before filtering: {outcome:?}"
+                    );
                 } else {
-                    cell(seat, "C3")
-                };
-                let pay = |d: &Value| {
-                    d["kind"] == "play-site"
-                        && d["cardId"] == "gate"
-                        && d["cell"] == dest
-                        && d["genesisTokenChoice"] == "pay-one-mana"
-                };
-                assert_eq!(
-                    offers(&s, pay),
-                    allowed,
-                    "seat={seat:?} oversized={oversized} incoming={incoming_tower} existing={existing_tower} threshold={threshold} off_blocker={off_anchor_blocker} dest={dest}"
-                );
-                if allowed {
-                    let (_, r) = act(&mut s, pay);
-                    assert!(r.events.iter().any(|e| e.event_type == "minion-summoned"));
-                } else {
-                    play(&mut s, "gate", &dest);
+                    outcome.unwrap();
                 }
-                checkpoint(&s);
             }
         }
     }

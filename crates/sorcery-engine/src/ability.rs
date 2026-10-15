@@ -95,6 +95,14 @@ impl AbilityProgram {
                             "{path}.carried placement requires a unit destination"
                         ));
                     }
+                    if matches!(effect, Effect::ConjureToken { .. })
+                        && matches!(
+                            destination,
+                            TokenDestination::ChooseSite(_) | TokenDestination::EachSite(_)
+                        )
+                    {
+                        return Err(format!("{path}.site destinations require summon-token"));
+                    }
                     if token.is_empty() || token.len() > 256 {
                         return Err(format!("{path}.token must be a card reference"));
                     }
@@ -517,6 +525,30 @@ pub enum TokenDestination {
     Location,
     /// The ordinarily chosen location.
     ChosenLocation,
+    /// Choose one matching site during resolution, without targeting.
+    ChooseSite(SiteDestinationQuery),
+    /// Summon at every matching site as one entry group.
+    EachSite(SiteDestinationQuery),
+}
+
+/// The bounded geometry of a token site destination.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SiteDestinationArea {
+    /// Every site in the realm.
+    Realm,
+    /// Sites near the captured controller's Avatar, across regions.
+    NearControllerAvatar,
+}
+
+/// A non-targeting site predicate; both axes are required.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SiteDestinationQuery {
+    /// The site's geometry relative to the controller's Avatar.
+    pub area: SiteDestinationArea,
+    /// The site's current controller; Rubble matches only Any.
+    pub controller: ControllerRelation,
 }
 
 /// The kind and placement capability required of a referenced token definition.

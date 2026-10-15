@@ -23,6 +23,7 @@ pub(super) enum AbilityChoiceSpec {
     Unit(UnitChoiceSpec),
     Location(SpatialRelation),
     TokenLocation(RealmReference),
+    SiteTokenLocation,
     DrawCard,
 }
 
@@ -95,6 +96,7 @@ impl Game {
             AbilityChoiceSpec::Location(relation) => {
                 self.selected_locations(frame.source.region, &frame.source.cells, *relation)
             }
+            AbilityChoiceSpec::SiteTokenLocation => self.site_token_location_choices(frame)?,
             AbilityChoiceSpec::TokenLocation(reference) => {
                 if !self.realm_reference_exists(reference) {
                     return Ok(Vec::new());
@@ -127,9 +129,13 @@ impl Game {
             AbilityChoiceSpec::TokenLocation(_) => {
                 frame.token_location = Some(ResolvedTokenLocation { location: None });
             }
+            AbilityChoiceSpec::SiteTokenLocation => {}
             _ => return Err(GameError::IllegalAction),
         }
         if self.ability_location_choices(&frame, &spec)?.is_empty() {
+            if spec == AbilityChoiceSpec::SiteTokenLocation {
+                self.resume_site_token_placement(&mut frame, None)?;
+            }
             return self.run_effect_frame(frame, outcomes);
         }
         let controller = frame.source.controller;
@@ -173,6 +179,9 @@ impl Game {
             .expect("pending location choice");
         match pending.spec {
             AbilityChoiceSpec::Location(_) => pending.frame.chosen_location = Some(location),
+            AbilityChoiceSpec::SiteTokenLocation => {
+                self.resume_site_token_placement(&mut pending.frame, Some(location))?;
+            }
             AbilityChoiceSpec::TokenLocation(_) => {
                 pending.frame.token_location = Some(ResolvedTokenLocation {
                     location: Some(location),
@@ -222,7 +231,9 @@ impl Game {
                     self.push_ability_choice(actions, &pending.frame.source.instance_id, None);
                 }
             }
-            AbilityChoiceSpec::Location(_) | AbilityChoiceSpec::TokenLocation(_) => {
+            AbilityChoiceSpec::Location(_)
+            | AbilityChoiceSpec::TokenLocation(_)
+            | AbilityChoiceSpec::SiteTokenLocation => {
                 for location in self.ability_location_choices(&pending.frame, &pending.spec)? {
                     let descriptor = ActionDescriptor::ChooseAbilityLocation {
                         source_instance_id: pending.frame.source.instance_id.clone(),
@@ -376,7 +387,9 @@ impl Game {
             AbilityChoiceSpec::Unit(spec) => self
                 .ability_unit_choices(&pending.frame.source, *spec)
                 .is_empty(),
-            AbilityChoiceSpec::Location(_) | AbilityChoiceSpec::TokenLocation(_) => self
+            AbilityChoiceSpec::Location(_)
+            | AbilityChoiceSpec::TokenLocation(_)
+            | AbilityChoiceSpec::SiteTokenLocation => self
                 .ability_location_choices(&pending.frame, &pending.spec)?
                 .is_empty(),
             AbilityChoiceSpec::DrawCard => false,
@@ -390,6 +403,9 @@ impl Game {
             match pending.spec {
                 AbilityChoiceSpec::Unit(_) => self.select_effect_unit(&mut pending.frame, None)?,
                 AbilityChoiceSpec::Location(_) => pending.frame.chosen_location = None,
+                AbilityChoiceSpec::SiteTokenLocation => {
+                    self.resume_site_token_placement(&mut pending.frame, None)?;
+                }
                 AbilityChoiceSpec::TokenLocation(_) => {
                     pending.frame.token_location = Some(ResolvedTokenLocation { location: None });
                 }
@@ -420,6 +436,7 @@ impl Game {
                 AbilityChoiceSpec::DrawCard => "draw-card",
                 AbilityChoiceSpec::Location(_) => "location",
                 AbilityChoiceSpec::TokenLocation(_) => "token-location",
+                AbilityChoiceSpec::SiteTokenLocation => "site-token-location",
             },
             "locationReference": match &pending.spec { AbilityChoiceSpec::TokenLocation(reference) => Some(reference.value()), _ => None },
             "returnPhase": pending.return_phase.as_str(),

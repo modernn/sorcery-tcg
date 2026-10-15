@@ -7204,8 +7204,8 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "Genesis token placement uses the power the token would have on that site, not printed attack. A printed-1 token that would become 3 atop the Tower it is spawning on cannot be paid onto a threshold-3 Tower. The same token can still be paid onto a Tower without a bar.",
-      "implementationStatus": "rust-supported",
+      "plainLanguage": "When an active token destination power bar combines with relevant ongoing bonuses, entry returns UnsupportedMechanic while entry-power timing remains unresolved. No-bar Tower controls remain supported.",
+      "implementationStatus": "unsupported",
       "genericFactHints": [
         "preventsUnitsWithPowerAtLeastFromEntering",
         "gainsPowerRangedAndSpellcasterAtopTower",
@@ -48012,6 +48012,6 @@
       }
     }
   ],
-  "rustSupportedCount": 2075,
+  "rustSupportedCount": 2074,
   "typescriptSupportedCount": 0
 }
